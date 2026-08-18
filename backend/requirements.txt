@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn>=0.30
+PyMySQL>=1.1
+numpy>=1.26
+langgraph>=1.0
+langchain>=1.0
+langchain-openai>=1.0
+pytest>=8.0
+httpx>=0.27

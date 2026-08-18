@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# 运行时
+.backend.pid
+.frontend.pid
+backend/data/
+
+# 密钥
+.apikey

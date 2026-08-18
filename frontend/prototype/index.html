@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CHROMA — 松下 LUT 生成器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink: '#0a0a0c',
+        raise: '#101014',
+        panel: '#16161a',
+        panel2: '#1c1c22',
+        line: '#26262e',
+        linestrong: '#34343e',
+        text: '#e9e9ec',
+        muted: '#9a9aa5',
+        faint: '#62626d',
+        accent: '#e2a35a',
+        cool: '#6fb7c9',
+      },
+      fontFamily: {
+        display: ['Quicksand', 'sans-serif'],
+        sans: ['Nunito', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
+    },
+  },
+};
+</script>
+<style>
+  :root {
+    --ink: #0a0a0c;
+    --panel: #16161a;
+    --accent: #e2a35a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: #e9e9ec;
+    font-family: 'Nunito', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  /* 氛围底纹:径向光 + 噪点 */
+  .atmosphere {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(1100px 600px at 78% -10%, rgba(226,163,90,0.07), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(111,183,201,0.05), transparent 55%);
+  }
+  .grain {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  }
+  .app { position: relative; z-index: 2; }
+
+  /* 面板通用 */
+  .panel {
+    background: rgba(22,22,26,0.72);
+    border: 1px solid #26262e;
+    border-radius: 16px;
+    backdrop-filter: blur(8px);
+  }
+  .hairline { border-color: #26262e; }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #2a2a32; border-radius: 8px; border: 2px solid #0a0a0c; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* 加载入场 */
+  .reveal { opacity: 0; transform: translateY(14px); animation: rise .7s cubic-bezier(.16,1,.3,1) forwards; }
+  .reveal.d1 { animation-delay: .05s; }
+  .reveal.d2 { animation-delay: .12s; }
+  .reveal.d3 { animation-delay: .19s; }
+  .reveal.d4 { animation-delay: .26s; }
+  @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+  /* tab 下划线 */
+  .tab { position: relative; transition: color .2s; }
+  .tab.active { color: #e9e9ec; }
+  .tab.active::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  /* 参数滑杆 */
+  input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 4px;
+    background: linear-gradient(to right, var(--accent) var(--fill, 50%), #2a2a32 var(--fill, 50%));
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #e9e9ec; border: 2px solid var(--accent);
+    margin-top: -5.5px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.5);
+  }
+
+  /* 对比滑块 */
+  .compare-wrap { position: relative; overflow: hidden; cursor: ew-resize; }
+  .compare-after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--split, 50%)); }
+  .compare-handle {
+    position: absolute; top: 0; bottom: 0;
+    left: var(--split, 50%);
+    width: 2px; transform: translateX(-50%);
+    background: rgba(255,255,255,.85);
+  }
+  .compare-handle::before {
+    content: '◂ ▸';
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    background: rgba(10,10,12,.8); border: 1px solid #34343e;
+    color: #e9e9ec; font-size: 11px; letter-spacing: 1px;
+    padding: 8px 10px; border-radius: 999px; white-space: nowrap;
+  }
+
+  /* 消息气泡 */
+  .bubble-user { background: #23232a; border: 1px solid #30303a; }
+  .bubble-agent { background: rgba(226,163,90,0.06); border: 1px solid rgba(226,163,90,0.22); }
+
+  /* 徽章 */
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* 卡片 hover */
+  .lut-card { transition: transform .25s cubic-bezier(.16,1,.3,1), border-color .25s, box-shadow .25s; }
+  .lut-card:hover { transform: translateY(-4px); border-color: #34343e; box-shadow: 0 16px 40px -18px rgba(0,0,0,.7); }
+</style>
+</head>
+<body>
+<div class="atmosphere"></div>
+<div class="grain"></div>
+
+<div class="app flex flex-col min-h-screen">
+
+  <!-- ===== 顶部导航 ===== -->
+  <header class="sticky top-0 z-20 border-b border-line bg-ink/70 backdrop-blur-xl">
+    <div class="max-w-[1440px] mx-auto px-6 h-16 flex items-center gap-8">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg grid place-items-center" style="background:linear-gradient(135deg,#e2a35a,#b8782f);">
+          <span class="font-display font-bold text-ink text-xl leading-none">C</span>
+        </div>
+        <div class="leading-none">
+          <span class="font-display font-semibold text-xl tracking-wide">CHROMA</span>
+          <span class="ml-2 text-[11px] uppercase tracking-[0.2em] text-faint">LUT Studio</span>
+        </div>
+      </div>
+
+      <nav class="flex items-center gap-1 h-16">
+        <button class="tab active h-full px-4 text-sm font-medium text-muted" data-view="generate">生成</button>
+        <button class="tab h-full px-4 text-sm font-medium text-muted" data-view="library">我的 LUT</button>
+      </nav>
+
+      <div class="ml-auto flex items-center gap-4">
+        <div class="chip text-accent border border-accent/30 bg-accent/10">
+          <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+          适配 S5M2
+        </div>
+        <div class="w-9 h-9 rounded-full border border-line grid place-items-center text-sm font-semibold bg-panel">I</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== 视图一:生成 ===== -->
+  <main class="view active flex-1 w-full max-w-[1440px] mx-auto px-6 py-6" id="view-generate">
+    <div class="grid grid-cols-12 gap-6 h-[calc(100vh-7rem)]">
+
+      <!-- 左:会话 -->
+      <section class="col-span-5 panel flex flex-col overflow-hidden reveal">
+        <div class="px-5 py-4 border-b border-line flex items-center justify-between">
+          <div>
+            <h2 class="font-display font-semibold text-xl">创建 LUT</h2>
+            <p class="text-xs text-faint mt-0.5">描述你想要的风格,我会生成对应的 .cube 文件</p>
+          </div>
+          <select class="bg-panel2 border border-line rounded-lg text-sm px-3 py-2 text-text outline-none focus:border-accent/50">
+            <option>Standard 基准</option>
+            <option>Natural 基准</option>
+            <option>Vivid 基准</option>
+          </select>
+        </div>
+
+        <!-- 消息流 -->
+        <div class="flex-1 overflow-y-auto px-5 py-5 space-y-5" id="chat">
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full shrink-0 grid place-items-center text-[11px] font-semibold mt-0.5" style="background:linear-gradient(135deg,#e2a35a,#b8782f);color:#0a0a0c;">AI</div>
+            <div class="max-w-[85%]">
+              <div class="bubble-agent rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed">
+                你好,我是 LUT 生成助手。说说你想要的照片风格 —— 比如「日系清透胶片」「电影感青橙」「复古柯达」,我会帮你调出来。
+              </div>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="chip text-muted border border-line bg-panel cursor-pointer hover:text-text">日系清透</span>
+                <span class="chip text-muted border border-line bg-panel cursor-pointer hover:text-text">电影青橙</span>
+                <span class="chip text-muted border border-line bg-panel cursor-pointer hover:text-text">复古胶片</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <div class="max-w-[80%] bubble-user rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed">想要日系清透一点的,带点胶片颗粒感,肤色要好看。</div>
+          </div>
+
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full shrink-0 grid place-items-center text-[11px] font-semibold mt-0.5" style="background:linear-gradient(135deg,#e2a35a,#b8782f);color:#0a0a0c;">AI</div>
+            <div class="max-w-[88%]">
+              <div class="bubble-agent rounded-2xl rounded-tl-sm px-4 py-3">
+                <p class="text-sm leading-relaxed mb-3">已按「日系清透 + 胶片颗粒」生成了参数,右侧预览可查看效果:</p>
+                <div class="space-y-2 text-xs font-mono">
+                  <div class="flex items-center justify-between gap-3"><span class="text-faint">基准</span><span class="text-accent">STD · Standard</span></div>
+                  <div class="flex items-center justify-between gap-3"><span class="text-faint">色温</span><span>+520K</span></div>
+                  <div class="flex items-center justify-between gap-3"><span class="text-faint">对比度</span><span>-8%</span></div>
+                  <div class="flex items-center justify-between gap-3"><span class="text-faint">饱和度</span><span>-6%</span></div>
+                  <div class="flex items-center justify-between gap-3"><span class="text-faint">暗部 lift</span><span>+0.04 / 偏青</span></div>
+                  <div class="flex items-center justify-between gap-3"><span class="text-faint">颗粒</span><span>轻</span></div>
+                </div>
+              </div>
+              <div class="flex gap-2 mt-2">
+                <button class="text-xs px-3 py-1.5 rounded-lg bg-accent text-ink font-semibold hover:opacity-90">确认生成</button>
+                <button class="text-xs px-3 py-1.5 rounded-lg border border-line text-muted hover:text-text">再调调</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入 -->
+        <div class="px-5 py-4 border-t border-line">
+          <div class="flex items-end gap-2 bg-panel2 border border-line rounded-xl px-3 py-2 focus-within:border-accent/50">
+            <textarea rows="1" class="flex-1 bg-transparent outline-none resize-none text-sm placeholder:text-faint py-1" placeholder="描述你想要的风格…"></textarea>
+            <button class="w-8 h-8 rounded-lg grid place-items-center bg-accent text-ink hover:opacity-90 shrink-0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右:预览 -->
+      <section class="col-span-7 panel flex flex-col overflow-hidden reveal d2">
+        <div class="px-5 py-4 border-b border-line flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <h2 class="font-display font-semibold text-xl">预览</h2>
+            <span class="chip text-muted border border-line bg-panel">拖动中间手柄对比</span>
+          </div>
+          <button class="text-xs px-3 py-2 rounded-lg border border-line text-muted hover:text-text flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+            上传样张
+          </button>
+        </div>
+
+        <!-- 对比区 -->
+        <div class="flex-1 min-h-0 p-5">
+          <div class="compare-wrap h-full rounded-xl border border-line overflow-hidden" id="compare">
+            <!-- 原图(底) -->
+            <div class="absolute inset-0">
+              <svg class="w-full h-full" viewBox="0 0 800 560" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#3a4a63"/><stop offset=".45" stop-color="#8a7a6a"/><stop offset=".75" stop-color="#c89b72"/><stop offset="1" stop-color="#d9a878"/>
+                  </linearGradient>
+                  <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#c8996f"/><stop offset="1" stop-color="#4a3a3c"/>
+                  </linearGradient>
+                </defs>
+                <rect width="800" height="360" fill="url(#sky)"/>
+                <circle cx="600" cy="270" r="46" fill="#f4d7a4" opacity=".9"/>
+                <circle cx="600" cy="270" r="70" fill="#f4d7a4" opacity=".15"/>
+                <path d="M0 360 L120 240 L220 330 L340 210 L470 350 L600 250 L720 340 L800 300 L800 360 Z" fill="#2e2b31"/>
+                <rect y="360" width="800" height="200" fill="url(#sea)"/>
+                <rect y="360" width="800" height="60" fill="#8a6a55" opacity=".35"/>
+                <g fill="#5c4a44" opacity=".5">
+                  <rect x="90" y="380" width="60" height="3" rx="1.5"/>
+                  <rect x="180" y="420" width="120" height="3" rx="1.5"/>
+                  <rect x="520" y="395" width="90" height="3" rx="1.5"/>
+                  <rect x="620" y="450" width="70" height="3" rx="1.5"/>
+                </g>
+              </svg>
+            </div>
+            <!-- LUT 效果(顶,裁剪显示) -->
+            <div class="compare-after" id="compare-after">
+              <svg class="w-full h-full" viewBox="0 0 800 560" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <linearGradient id="sky2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#5a7a86"/><stop offset=".45" stop-color="#a8a09a"/><stop offset=".75" stop-color="#d9b894"/><stop offset="1" stop-color="#e6c098"/>
+                  </linearGradient>
+                  <linearGradient id="sea2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#d4a884"/><stop offset="1" stop-color="#5a4a4a"/>
+                  </linearGradient>
+                </defs>
+                <rect width="800" height="360" fill="url(#sky2)"/>
+                <circle cx="600" cy="270" r="46" fill="#f7e2bc"/>
+                <circle cx="600" cy="270" r="70" fill="#f7e2bc" opacity=".2"/>
+                <path d="M0 360 L120 240 L220 330 L340 210 L470 350 L600 250 L720 340 L800 300 L800 360 Z" fill="#3a363c"/>
+                <rect y="360" width="800" height="200" fill="url(#sea2)"/>
+                <rect y="360" width="800" height="60" fill="#b08a6a" opacity=".3"/>
+                <g fill="#7a6a5a" opacity=".55">
+                  <rect x="90" y="380" width="60" height="3" rx="1.5"/>
+                  <rect x="180" y="420" width="120" height="3" rx="1.5"/>
+                  <rect x="520" y="395" width="90" height="3" rx="1.5"/>
+                  <rect x="620" y="450" width="70" height="3" rx="1.5"/>
+                </g>
+              </svg>
+            </div>
+            <div class="compare-handle" id="handle"></div>
+            <div class="absolute top-3 left-3 chip text-ink bg-white/90 font-semibold">原图</div>
+            <div class="absolute top-3 right-3 chip text-ink" style="background:#e2a35a;font-weight:600;">CHROMA · 日系清透</div>
+          </div>
+        </div>
+
+        <!-- 参数滑杆 -->
+        <div class="px-5 py-4 border-t border-line grid grid-cols-2 gap-x-8 gap-y-4">
+          <div>
+            <div class="flex justify-between text-xs mb-2"><span class="text-muted">色温</span><span class="font-mono text-accent">+520K</span></div>
+            <input type="range" min="-100" max="100" value="62" class="w-full" data-label="色温" data-unit="K" data-scale="1000" data-offset="0" />
+          </div>
+          <div>
+            <div class="flex justify-between text-xs mb-2"><span class="text-muted">曝光</span><span class="font-mono text-accent">+0.3 EV</span></div>
+            <input type="range" min="-100" max="100" value="22" class="w-full" data-label="曝光" data-unit=" EV" data-scale="1.5" data-offset="0" />
+          </div>
+          <div>
+            <div class="flex justify-between text-xs mb-2"><span class="text-muted">对比度</span><span class="font-mono text-accent">-8%</span></div>
+            <input type="range" min="-100" max="100" value="42" class="w-full" data-label="对比度" data-unit="%" data-scale="100" data-offset="50" />
+          </div>
+          <div>
+            <div class="flex justify-between text-xs mb-2"><span class="text-muted">饱和度</span><span class="font-mono text-accent">-6%</span></div>
+            <input type="range" min="-100" max="100" value="44" class="w-full" data-label="饱和度" data-unit="%" data-scale="100" data-offset="50" />
+          </div>
+        </div>
+
+        <!-- 底部操作 -->
+        <div class="px-5 py-4 border-t border-line flex items-center gap-3">
+          <button class="px-5 py-2.5 rounded-xl bg-accent text-ink font-semibold text-sm hover:opacity-90 flex items-center gap-2">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
+            下载 .cube
+          </button>
+          <button class="px-5 py-2.5 rounded-xl border border-line text-muted text-sm hover:text-text">保存到我的 LUT</button>
+          <div class="ml-auto text-xs text-faint font-mono">33×33×33 · sRGB · 机内版</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== 视图二:我的 LUT ===== -->
+  <main class="view flex-1 w-full max-w-[1440px] mx-auto px-6 py-6" id="view-library">
+    <div class="flex items-end justify-between mb-6 reveal">
+      <div>
+        <h1 class="font-display font-semibold text-3xl">我的 LUT</h1>
+        <p class="text-sm text-faint mt-1">3 个已保存的 LUT · 点击下载导入 S5M2 或后期软件</p>
+      </div>
+      <button class="px-4 py-2.5 rounded-xl bg-accent text-ink font-semibold text-sm hover:opacity-90 flex items-center gap-2">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        新建 LUT
+      </button>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+      <!-- 卡片模板 -->
+      <div class="lut-card panel overflow-hidden reveal d1">
+        <div class="relative h-40">
+          <svg class="w-full h-full" viewBox="0 0 400 160" preserveAspectRatio="xMidYMid slice">
+            <defs><linearGradient id="c1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a7a86"/><stop offset=".6" stop-color="#d9b894"/><stop offset="1" stop-color="#5a4a4a"/></linearGradient></defs>
+            <rect width="400" height="160" fill="url(#c1)"/>
+            <path d="M0 110 L90 70 L160 100 L250 60 L340 100 L400 84 L400 110 Z" fill="#3a363c"/>
+            <circle cx="310" cy="60" r="22" fill="#f7e2bc"/>
+          </svg>
+          <div class="absolute top-2 left-2 chip text-ink bg-white/90 font-semibold text-[11px]">STD</div>
+        </div>
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="font-semibold text-sm">日系清透</h3>
+            <span class="text-[11px] text-faint font-mono">33³</span>
+          </div>
+          <p class="text-xs text-faint mb-3 line-clamp-1">清透高调 · 暖肤 · 轻颗粒</p>
+          <div class="flex items-center gap-2">
+            <button class="flex-1 py-2 rounded-lg bg-panel2 border border-line text-xs font-medium text-text hover:border-linestrong flex items-center justify-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>下载
+            </button>
+            <button class="w-9 h-9 rounded-lg bg-panel2 border border-line text-muted hover:text-text grid place-items-center" title="编辑">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </button>
+            <button class="w-9 h-9 rounded-lg bg-panel2 border border-line text-muted hover:text-red-400 grid place-items-center" title="删除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lut-card panel overflow-hidden reveal d2">
+        <div class="relative h-40">
+          <svg class="w-full h-full" viewBox="0 0 400 160" preserveAspectRatio="xMidYMid slice">
+            <defs><linearGradient id="c2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f3b4a"/><stop offset=".6" stop-color="#2c4a52"/><stop offset="1" stop-color="#12222a"/></linearGradient></defs>
+            <rect width="400" height="160" fill="url(#c2)"/>
+            <path d="M0 110 L90 60 L160 100 L250 50 L340 100 L400 78 L400 110 Z" fill="#0e1a20"/>
+            <circle cx="80" cy="50" r="16" fill="#5ab8c9" opacity=".8"/>
+          </svg>
+          <div class="absolute top-2 left-2 chip text-ink bg-white/90 font-semibold text-[11px]">NAT</div>
+        </div>
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="font-semibold text-sm">电影青橙</h3>
+            <span class="text-[11px] text-faint font-mono">33³</span>
+          </div>
+          <p class="text-xs text-faint mb-3 line-clamp-1">青阴影 · 暖高光 · 高对比</p>
+          <div class="flex items-center gap-2">
+            <button class="flex-1 py-2 rounded-lg bg-panel2 border border-line text-xs font-medium text-text hover:border-linestrong flex items-center justify-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>下载
+            </button>
+            <button class="w-9 h-9 rounded-lg bg-panel2 border border-line text-muted hover:text-text grid place-items-center" title="编辑"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+            <button class="w-9 h-9 rounded-lg bg-panel2 border border-line text-muted hover:text-red-400 grid place-items-center" title="删除"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lut-card panel overflow-hidden reveal d3">
+        <div class="relative h-40">
+          <svg class="w-full h-full" viewBox="0 0 400 160" preserveAspectRatio="xMidYMid slice">
+            <defs><linearGradient id="c3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3028"/><stop offset=".6" stop-color="#6b5440"/><stop offset="1" stop-color="#2a221c"/></linearGradient></defs>
+            <rect width="400" height="160" fill="url(#c3)"/>
+            <path d="M0 110 L110 70 L180 105 L260 62 L350 100 L400 80 L400 110 Z" fill="#201a15"/>
+            <circle cx="300" cy="58" r="20" fill="#e8b26a" opacity=".85"/>
+          </svg>
+          <div class="absolute top-2 left-2 chip text-ink bg-white/90 font-semibold text-[11px]">VIVD</div>
+        </div>
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="font-semibold text-sm">复古柯达</h3>
+            <span class="text-[11px] text-faint font-mono">33³</span>
+          </div>
+          <p class="text-xs text-faint mb-3 line-clamp-1">暖调 · 暗角 · 颗粒感</p>
+          <div class="flex items-center gap-2">
+            <button class="flex-1 py-2 rounded-lg bg-panel2 border border-line text-xs font-medium text-text hover:border-linestrong flex items-center justify-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>下载
+            </button>
+            <button class="w-9 h-9 rounded-lg bg-panel2 border border-line text-muted hover:text-text grid place-items-center" title="编辑"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+            <button class="w-9 h-9 rounded-lg bg-panel2 border border-line text-muted hover:text-red-400 grid place-items-center" title="删除"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 新建占位卡 -->
+      <button class="reveal d4 rounded-2xl border border-dashed border-line hover:border-linestrong transition-colors min-h-[240px] flex flex-col items-center justify-center gap-3 text-muted hover:text-text">
+        <div class="w-11 h-11 rounded-full border border-line grid place-items-center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <span class="text-sm font-medium">新建 LUT</span>
+      </button>
+    </div>
+  </main>
+</div>
+
+<script>
+  // tab 切换
+  const tabs = document.querySelectorAll('.tab');
+  const views = { generate: document.getElementById('view-generate'), library: document.getElementById('view-library') };
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    Object.values(views).forEach(v => v.classList.remove('active'));
+    views[t.dataset.view].classList.add('active');
+  }));
+
+  // 参数滑杆:实时更新数值标签 + 填充
+  document.querySelectorAll('input[type=range]').forEach(r => {
+    const set = () => {
+      const pct = (r.value - r.min) / (r.max - r.min) * 100;
+      r.style.setProperty('--fill', pct + '%');
+      const scale = parseFloat(r.dataset.scale || 1);
+      const offset = parseFloat(r.dataset.offset || 0);
+      const val = ((r.value - 50) / 50 * scale + offset);
+      const unit = r.dataset.unit || '';
+      const fmt = Math.abs(val) < 10 ? val.toFixed(1) : Math.round(val);
+      const label = r.closest('div').querySelector('.font-mono');
+      if (label) label.textContent = (val >= 0 ? '+' : '') + fmt + unit;
+    };
+    r.addEventListener('input', set);
+    set();
+  });
+
+  // 对比滑块
+  const wrap = document.getElementById('compare');
+  const after = document.getElementById('compare-after');
+  const handle = document.getElementById('handle');
+  let dragging = false;
+  function setSplit(x) {
+    const rect = wrap.getBoundingClientRect();
+    let pct = (x - rect.left) / rect.width * 100;
+    pct = Math.max(2, Math.min(98, pct));
+    after.style.setProperty('--split', pct + '%');
+    handle.style.setProperty('--split', pct + '%');
+  }
+  wrap.addEventListener('pointerdown', e => { dragging = true; wrap.setPointerCapture(e.pointerId); setSplit(e.clientX); });
+  wrap.addEventListener('pointermove', e => { if (dragging) setSplit(e.clientX); });
+  wrap.addEventListener('pointerup', () => dragging = false);
+</script>
+</body>
+</html>
