@@ -43,11 +43,11 @@ class ExtractResult(BaseModel):
         None, description="V-Log 基准的 tone mapping 强度,0 到 1,默认 1,仅 V-Log 基准生效"
     )
     lift: Optional[List[float]] = Field(
-        None, description="暗部 RGB 偏移,三个 -0.1 到 0.1 之间的小数,如 [0.03, 0.0, -0.02]"
+        None, min_length=3, max_length=3, description="暗部 RGB 偏移,三个 -0.1 到 0.1 之间的小数,如 [0.03, 0.0, -0.02]"
     )
     gamma: Optional[List[float]] = Field(
-        None, description="中间调 RGB 幂,三个 0.5 到 1.5 之间的小数,如 [0.9, 1.0, 1.0]"
+        None, min_length=3, max_length=3, description="中间调 RGB 幂,三个 0.5 到 1.5 之间的小数,如 [0.9, 1.0, 1.0]"
     )
     gain: Optional[List[float]] = Field(
-        None, description="亮部 RGB 增益,三个 0.5 到 1.5 之间的小数,如 [1.05, 1.0, 1.0]"
+        None, min_length=3, max_length=3, description="亮部 RGB 增益,三个 0.5 到 1.5 之间的小数,如 [1.05, 1.0, 1.0]"
     )
