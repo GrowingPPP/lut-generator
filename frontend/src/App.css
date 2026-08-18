@@ -628,3 +628,171 @@ input[type='range']::-webkit-slider-thumb {
   background: var(--accent);
   color: #0a0a0c;
 }
+
+/* 会话栏 */
+.session-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.session-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 6px 2px 12px;
+  font-size: 12px;
+  max-width: 170px;
+}
+
+.session-title {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-title:hover {
+  color: var(--text);
+}
+
+.session-del {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 50%;
+  font-family: inherit;
+}
+
+.session-del:hover {
+  color: #d98a8a;
+  background: rgba(217, 138, 138, 0.16);
+}
+
+.session-item.active {
+  color: #0a0a0c;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.session-item.active .session-title,
+.session-item.active .session-del {
+  color: #0a0a0c;
+}
+
+/* 登录/注册 */
+.auth-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  overflow: hidden;
+  background: var(--ink);
+}
+
+/* RGB 三色光晕:贴合 LUT 色彩变换主题,错位叠加 + 缓慢漂移 */
+.auth-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 45% at 16% 20%, rgba(226, 88, 66, 0.32), transparent 62%),
+    radial-gradient(ellipse 50% 42% at 84% 26%, rgba(72, 196, 134, 0.24), transparent 62%),
+    radial-gradient(ellipse 58% 52% at 48% 90%, rgba(84, 116, 238, 0.30), transparent 62%);
+  filter: blur(12px);
+  animation: authGlow 12s ease-in-out infinite alternate;
+}
+
+/* 色相环:色彩科学的意象,缓慢旋转 */
+.auth-wrap::after {
+  content: '';
+  position: absolute;
+  width: 620px;
+  height: 620px;
+  top: -220px;
+  right: -220px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, #e23a3a, #e2a35a, #8ad15a, #3ab8e2, #6a5ae2, #e23a8a, #e23a3a);
+  opacity: 0.10;
+  filter: blur(32px);
+  animation: authSpin 48s linear infinite;
+}
+
+@keyframes authGlow {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, -16px, 0); }
+}
+
+@keyframes authSpin {
+  to { transform: rotate(360deg); }
+}
+
+.auth-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 340px;
+  padding: 28px 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(22, 22, 26, 0.82);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.auth-brand {
+  justify-content: center;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 20px;
+  text-align: center;
+}
+
+.auth-card input {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+}
+
+.auth-card input:focus {
+  border-color: var(--accent);
+}
+
+.topbar-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}

@@ -9,65 +9,89 @@ from api.main import app
 def _clean_db():
     db.init_db()
     db.clear_all()
+    db.clear_users()
     yield
     db.clear_all()
+    db.clear_users()
+
+
+@pytest.fixture()
+def auth():
+    r = client.post("/api/auth/register", json={"username": "u1", "password": "*********"})
+    assert r.status_code == 200
+    return {"Authorization": f"Bearer {r.json()['token']}"}
 
 
 client = TestClient(app)
 
 
-def test_create_and_list():
+def test_create_and_list(auth):
     resp = client.post("/api/luts", json={
         "name": "日系清透",
         "description": "清透高调",
         "params": {"base_photo_style": "STD", "temp": 520.0, "contrast": -0.08},
-    })
+    }, headers=auth)
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "日系清透"
     assert data["params"]["temp"] == 520.0
 
-    resp = client.get("/api/luts")
+    resp = client.get("/api/luts", headers=auth)
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
 
-def test_download_camera_has_photo_style():
-    created = client.post("/api/luts", json={"name": "t", "params": {"base_photo_style": "STD"}}).json()
-    resp = client.get(f"/api/luts/{created['id']}/download?mode=camera")
+def test_download_camera_has_photo_style(auth):
+    created = client.post("/api/luts", json={"name": "t", "params": {"base_photo_style": "STD"}}, headers=auth).json()
+    resp = client.get(f"/api/luts/{created['id']}/download?mode=camera", headers=auth)
     assert resp.status_code == 200
     assert "#LUMIXPHOTOSTYLE STD" in resp.text
     assert "LUT_3D_SIZE 33" in resp.text
 
 
-def test_download_software_no_photo_style():
-    created = client.post("/api/luts", json={"name": "t", "params": {"base_photo_style": "STD"}}).json()
-    resp = client.get(f"/api/luts/{created['id']}/download?mode=software")
+def test_download_software_no_photo_style(auth):
+    created = client.post("/api/luts", json={"name": "t", "params": {"base_photo_style": "STD"}}, headers=auth).json()
+    resp = client.get(f"/api/luts/{created['id']}/download?mode=software", headers=auth)
     assert resp.status_code == 200
     assert "#LUMIXPHOTOSTYLE" not in resp.text
 
 
-def test_update_and_delete():
-    created = client.post("/api/luts", json={"name": "old", "params": {}}).json()
+def test_update_and_delete(auth):
+    created = client.post("/api/luts", json={"name": "old", "params": {}}, headers=auth).json()
     lut_id = created["id"]
-    resp = client.put(f"/api/luts/{lut_id}", json={"name": "new"})
+    resp = client.put(f"/api/luts/{lut_id}", json={"name": "new"}, headers=auth)
     assert resp.status_code == 200
     assert resp.json()["name"] == "new"
 
-    resp = client.delete(f"/api/luts/{lut_id}")
+    resp = client.delete(f"/api/luts/{lut_id}", headers=auth)
     assert resp.status_code == 204
-    assert client.get(f"/api/luts/{lut_id}").status_code == 404
+    assert client.get(f"/api/luts/{lut_id}", headers=auth).status_code == 404
 
 
-def test_rgb_length_validation():
-    # lift/gamma/gain 必须是三元组,长度 2 或 4 都应被 API 拒绝(422)
+def test_lut_requires_auth():
+    resp = client.get("/api/luts")
+    assert resp.status_code == 401
+
+
+def test_user_isolation():
+    r1 = client.post("/api/auth/register", json={"username": "a", "password": "*********"}).json()
+    r2 = client.post("/api/auth/register", json={"username": "b", "password": "*********"}).json()
+    h1 = {"Authorization": f"Bearer {r1['token']}"}
+    h2 = {"Authorization": f"Bearer {r2['token']}"}
+
+    client.post("/api/luts", json={"name": "only-a", "params": {}}, headers=h1)
+    assert len(client.get("/api/luts", headers=h1).json()) == 1
+    assert len(client.get("/api/luts", headers=h2).json()) == 0
+
+
+def test_rgb_length_validation(auth):
     for key in ("lift", "gamma", "gain"):
-        resp = client.post("/api/luts", json={"name": "t", "params": {key: [0.1, 0.2]}})
+        resp = client.post("/api/luts", json={"name": "t", "params": {key: [0.1, 0.2]}}, headers=auth)
         assert resp.status_code == 422, f"{key} 长度 2 未拒绝"
-        resp = client.post("/api/luts", json={"name": "t", "params": {key: [0.1, 0.2, 0.3, 0.4]}})
+        resp = client.post("/api/luts", json={"name": "t", "params": {key: [0.1, 0.2, 0.3, 0.4]}}, headers=auth)
         assert resp.status_code == 422, f"{key} 长度 4 未拒绝"
 
 
-def test_invalid_base_photo_style_422():
-    resp = client.post("/api/luts", json={"name": "t", "params": {"base_photo_style": "XYZ"}})
+def test_invalid_base_photo_style_422(auth):
+    resp = client.post("/api/luts", json={"name": "t", "params": {"base_photo_style": "XYZ"}}, headers=auth)
     assert resp.status_code == 422

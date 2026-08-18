@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { generateLUT, defaultParams, applyLUTToImageData } from './lib/lutEngine.js'
 import { LUTRenderer } from './lib/lutPreview.js'
-import { listLuts, createLut, updateLut, deleteLut, downloadUrl, chatSession } from './lib/api.js'
+import {
+  listLuts, createLut, updateLut, deleteLut, downloadLut, chatSession,
+  listSessions, createSession, deleteSession, listMessages,
+  login, register, setToken, clearToken, getUsername, isAuthed,
+} from './lib/api.js'
 
 let _testImage = null
 function makeTestImage() {
@@ -217,6 +221,8 @@ function GenerateView({ previewLut }) {
   const [name, setName] = useState('')
   const [savedId, setSavedId] = useState(null)
   const [status, setStatus] = useState('')
+  const [sessions, setSessions] = useState([])
+  const [sessionId, setSessionId] = useState(null)
   const originalRef = useRef(null)
   const gradedRef = useRef(null)
   const draggingRef = useRef(false)
@@ -224,11 +230,67 @@ function GenerateView({ previewLut }) {
   const { setSplit, upload } = usePreview(originalRef, gradedRef, params, displayMode)
 
   useEffect(() => {
+    listSessions().then(setSessions).catch(() => {})
+  }, [])
+
+  useEffect(() => {
     if (previewLut) {
       setParams(previewLut.params)
       setMessages((m) => [...m, { role: 'agent', text: `已载入「${previewLut.name}」,上传样张即可预览效果。` }])
     }
   }, [previewLut])
+
+  const newSession = async () => {
+    try {
+      const s = await createSession('新会话')
+      setSessions((prev) => [s, ...prev])
+      setSessionId(s.id)
+      setMessages([{ role: 'agent', text: '描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。' }])
+      setParams(defaultParams())
+      setSavedId(null)
+      setStatus('')
+    } catch (e) {
+      setStatus(`新建会话失败:${e.message}`)
+    }
+  }
+
+  const openSession = async (id) => {
+    try {
+      const msgs = await listMessages(id)
+      setSessionId(id)
+      setSavedId(null)
+      setStatus('')
+      setName('')
+      if (msgs.length === 0) {
+        setMessages([{ role: 'agent', text: '描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。' }])
+        setParams(defaultParams())
+      } else {
+        setMessages(msgs.map((m) => ({ role: m.role, text: m.content })))
+        const lastAgent = [...msgs].reverse().find((m) => m.role === 'agent' && m.params)
+        setParams(lastAgent ? lastAgent.params : defaultParams())
+      }
+    } catch (e) {
+      setStatus(`加载会话失败:${e.message}`)
+    }
+  }
+
+  const removeSession = async (id) => {
+    if (!window.confirm('删除该会话及其聊天记录?')) return
+    try {
+      await deleteSession(id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      if (id === sessionId) {
+        setSessionId(null)
+        setMessages([{ role: 'agent', text: '描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。' }])
+        setParams(defaultParams())
+        setSavedId(null)
+        setStatus('')
+        setName('')
+      }
+    } catch (e) {
+      setStatus(`删除会话失败:${e.message}`)
+    }
+  }
 
   const updateParam = (key, value) => setParams((p) => ({ ...p, [key]: value }))
 
@@ -255,9 +317,13 @@ function GenerateView({ previewLut }) {
     setInput('')
     setSending(true)
     try {
-      const resp = await chatSession(text, params, history)
+      const resp = await chatSession(text, params, history, sessionId)
       setMessages((m) => [...m, { role: 'agent', text: resp.reply }])
       if (resp.params) setParams(resp.params)
+      if (resp.session_id && resp.session_id !== sessionId) {
+        setSessionId(resp.session_id)
+        setSessions((prev) => (prev.some((s) => s.id === resp.session_id) ? prev : [{ id: resp.session_id, title: '新会话', created_at: '' }, ...prev]))
+      }
     } catch (e) {
       setMessages((m) => [...m, { role: 'agent', text: `生成失败:${e.message}` }])
     } finally {
@@ -284,6 +350,17 @@ function GenerateView({ previewLut }) {
   return (
     <div className="gen-layout">
       <section className="chat-panel">
+        <div className="session-bar">
+          <button className="btn" onClick={newSession}>＋ 新会话</button>
+          <div className="session-list">
+            {sessions.map((s) => (
+              <div key={s.id} className={s.id === sessionId ? 'session-item active' : 'session-item'}>
+                <span className="session-title" onClick={() => openSession(s.id)}>{s.title}</span>
+                <button className="session-del" onClick={() => removeSession(s.id)} title="删除会话">×</button>
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="chat-messages">
           {messages.map((m, i) => (
             <div key={i} className={m.role === 'user' ? 'msg msg-user' : 'msg msg-agent'}>
@@ -451,12 +528,8 @@ function GenerateView({ previewLut }) {
           </button>
           {savedId && (
             <>
-              <a className="btn" href={downloadUrl(savedId, 'camera')}>
-                下载机内版
-              </a>
-              <a className="btn" href={downloadUrl(savedId, 'software')}>
-                下载后期版
-              </a>
+              <button className="btn" onClick={() => downloadAndSave(savedId, 'camera')}>下载机内版</button>
+              <button className="btn" onClick={() => downloadAndSave(savedId, 'software')}>下载后期版</button>
             </>
           )}
           <span className="status">{status}</span>
@@ -541,12 +614,8 @@ function LibraryView({ onPreview }) {
                 <button className="btn-primary" onClick={() => onPreview(lut)}>
                   预览
                 </button>
-                <a className="btn" href={downloadUrl(lut.id, 'camera')}>
-                  机内版
-                </a>
-                <a className="btn" href={downloadUrl(lut.id, 'software')}>
-                  后期版
-                </a>
+                <button className="btn" onClick={() => downloadAndSave(lut.id, 'camera')}>机内版</button>
+                <button className="btn" onClick={() => downloadAndSave(lut.id, 'software')}>后期版</button>
                 <button className="btn" onClick={() => startEdit(lut)}>
                   编辑
                 </button>
@@ -565,13 +634,87 @@ function LibraryView({ onPreview }) {
   )
 }
 
+async function downloadAndSave(id, mode) {
+  try {
+    const { blob, name } = await downloadLut(id, mode)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    alert(`下载失败:${e.message}`)
+  }
+}
+
+function AuthView({ onAuthed }) {
+  const [mode, setMode] = useState('login')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    if (!username.trim() || !password) {
+      setError('请输入用户名和密码')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const resp = mode === 'login' ? await login(username.trim(), password) : await register(username.trim(), password)
+      setToken(resp.token, resp.username)
+      onAuthed(resp.username)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="brand auth-brand"><span className="logo">C</span>CHROMA</div>
+        <h1>{mode === 'login' ? '登录' : '注册'}</h1>
+        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        {error && <div className="error">{error}</div>}
+        <button className="btn-primary" onClick={submit} disabled={busy}>
+          {busy ? '处理中…' : mode === 'login' ? '登录' : '注册'}
+        </button>
+        <button className="btn" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>
+          {mode === 'login' ? '没有账号?去注册' : '已有账号?去登录'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [view, setView] = useState('generate')
   const [previewLut, setPreviewLut] = useState(null)
+  const [user, setUser] = useState(isAuthed() ? getUsername() : null)
+
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null)
+    window.addEventListener('chroma:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('chroma:unauthorized', onUnauthorized)
+  }, [])
 
   const openPreview = (lut) => {
     setPreviewLut({ ...lut, params: { ...lut.params } })
     setView('generate')
+  }
+
+  const logout = () => {
+    clearToken()
+    setUser(null)
+  }
+
+  if (!user) {
+    return <AuthView onAuthed={(u) => setUser(u)} />
   }
 
   return (
@@ -589,6 +732,10 @@ export default function App() {
             我的 LUT
           </button>
         </nav>
+        <div className="topbar-user">
+          <span>{user}</span>
+          <button className="btn" onClick={logout}>退出</button>
+        </div>
       </header>
       {view === 'generate' ? (
         <GenerateView previewLut={previewLut} />
