@@ -4,11 +4,11 @@ from dataclasses import asdict
 from typing import List, Literal, Optional
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from api import auth
+from api import auth, ratelimit
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
 
@@ -66,6 +66,10 @@ class ChatResponse(BaseModel):
 
 class SessionCreate(BaseModel):
     title: str = "新会话"
+
+
+class SessionUpdate(BaseModel):
+    title: str
 
 
 class SessionOut(BaseModel):
@@ -170,6 +174,11 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
         # 过滤默认值字段,只保留用户实际调整过的,避免默认值被当成已确认参数
         defaults = LutParamsModel().model_dump()
         initial = {k: v for k, v in full_params.items() if v != defaults.get(k)}
+    reply = None
+    params_out = None
+    error = None
+    done = False
+    cube_text = None
     try:
         llm = get_llm()
         result = run_agent(
@@ -177,7 +186,9 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
             body.message,
             params=initial,
         )
-        params_out = None
+        reply = result.get("reply", "")
+        done = result.get("done", False)
+        cube_text = result.get("cube_text")
         if result.get("params"):
             clamped = lut_params_from_dict(result["params"])
             d = asdict(clamped)
@@ -185,21 +196,24 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
                 d[k] = list(d[k])
             params_out = LutParamsModel(**d)
     except Exception as e:
-        return ChatResponse(reply=f"生成失败:{e}", error=str(e))
+        reply = f"生成失败:{e}"
+        error = str(e)
 
-    db.add_message(session_id, "user", body.message, None)
+    db.add_message(user["id"], session_id, "user", body.message, None)
     db.add_message(
+        user["id"],
         session_id,
         "agent",
-        result.get("reply", ""),
+        reply,
         params_out.model_dump_json() if params_out else None,
     )
 
     return ChatResponse(
-        reply=result.get("reply", ""),
+        reply=reply,
         params=params_out,
-        done=result.get("done", False),
-        cube_text=result.get("cube_text"),
+        done=done,
+        cube_text=cube_text,
+        error=error,
         session_id=session_id,
     )
 
@@ -222,13 +236,21 @@ def delete_session(session_id: int, user: dict = Depends(auth.get_current_user))
         raise HTTPException(status_code=404, detail="会话不存在")
 
 
+@app.put("/api/sessions/{session_id}", response_model=SessionOut)
+def update_session(session_id: int, body: SessionUpdate, user: dict = Depends(auth.get_current_user)):
+    if not db.get_session(session_id, user["id"]):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    rec = db.update_session(session_id, user["id"], body.title)
+    return SessionOut(id=rec["id"], title=rec["title"], created_at=rec["created_at"])
+
+
 @app.get("/api/sessions/{session_id}/messages", response_model=List[MessageOut])
 def list_messages(session_id: int, user: dict = Depends(auth.get_current_user)):
     session = db.get_session(session_id, user["id"])
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     out = []
-    for m in db.list_messages(session_id):
+    for m in db.list_messages(session_id, user["id"]):
         params = LutParamsModel(**json.loads(m["params_json"])) if m["params_json"] else None
         out.append(MessageOut(id=m["id"], role=m["role"], content=m["content"], params=params, created_at=m["created_at"]))
     return out
@@ -251,16 +273,44 @@ class AuthResponse(BaseModel):
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)
-def register(body: RegisterRequest):
+def register(body: RegisterRequest, request: Request, response: Response):
+    ip = request.client.host if request.client else "unknown"
+    if ratelimit.is_blocked(ip):
+        raise HTTPException(status_code=429, detail="尝试次数过多,请稍后再试")
     if db.get_user_by_username(body.username):
         raise HTTPException(status_code=409, detail="用户名已存在")
     user_id = db.create_user(body.username, auth.hash_password(body.password))
-    return AuthResponse(token=auth.create_token(user_id), user_id=user_id, username=body.username)
+    ratelimit.reset(ip)
+    token = auth.create_token(user_id, 0)
+    response.set_cookie(key="chroma_token", value=token, httponly=True, samesite="lax", max_age=86400, path="/")
+    return AuthResponse(token=token, user_id=user_id, username=body.username)
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
-def login(body: LoginRequest):
+def login(body: LoginRequest, request: Request, response: Response):
+    ip = request.client.host if request.client else "unknown"
+    if ratelimit.is_blocked(ip):
+        raise HTTPException(status_code=429, detail="尝试次数过多,请稍后再试")
     user = db.get_user_by_username(body.username)
-    if not user or not auth.verify_password(body.password, user["password_hash"]):
+    if not user:
+        ratelimit.record_failure(ip)
+        auth.verify_password(body.password, auth.DUMMY_HASH)  # 抹平时序防用户名枚举
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    return AuthResponse(token=auth.create_token(user["id"]), user_id=user["id"], username=user["username"])
+    if not auth.verify_password(body.password, user["password_hash"]):
+        ratelimit.record_failure(ip)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    ratelimit.reset(ip)
+    token = auth.create_token(user["id"], user.get("token_version", 0))
+    response.set_cookie(key="chroma_token", value=token, httponly=True, samesite="lax", max_age=86400, path="/")
+    return AuthResponse(token=token, user_id=user["id"], username=user["username"])
+
+
+@app.post("/api/auth/logout", status_code=204)
+def logout(response: Response, user: dict = Depends(auth.get_current_user)):
+    db.bump_token_version(user["id"])
+    response.delete_cookie(key="chroma_token", path="/")
+
+
+@app.get("/api/auth/me")
+def me(user: dict = Depends(auth.get_current_user)):
+    return {"user_id": user["id"], "username": user["username"]}

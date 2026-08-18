@@ -44,3 +44,12 @@ def test_login_wrong_password_401():
 def test_login_unknown_user_401():
     r = client.post("/api/auth/login", json={"username": "nobody", "password": "x"})
     assert r.status_code == 401
+
+
+def test_logout_invalidates_token():
+    r = client.post("/api/auth/register", json={"username": "dave", "password": "secret123"})
+    headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    assert client.get("/api/luts", headers=headers).status_code == 200
+
+    assert client.post("/api/auth/logout", headers=headers).status_code == 204
+    assert client.get("/api/luts", headers=headers).status_code == 401

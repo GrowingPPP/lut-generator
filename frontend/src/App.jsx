@@ -3,8 +3,8 @@ import { generateLUT, defaultParams, applyLUTToImageData } from './lib/lutEngine
 import { LUTRenderer } from './lib/lutPreview.js'
 import {
   listLuts, createLut, updateLut, deleteLut, downloadLut, chatSession,
-  listSessions, createSession, deleteSession, listMessages,
-  login, register, setToken, clearToken, getUsername, isAuthed,
+  listSessions, createSession, deleteSession, updateSession, listMessages,
+  login, register, logout as apiLogout, me,
 } from './lib/api.js'
 
 let _testImage = null
@@ -223,6 +223,8 @@ function GenerateView({ previewLut }) {
   const [status, setStatus] = useState('')
   const [sessions, setSessions] = useState([])
   const [sessionId, setSessionId] = useState(null)
+  const [editingSessionId, setEditingSessionId] = useState(null)
+  const [editingTitle, setEditingTitle] = useState('')
   const originalRef = useRef(null)
   const gradedRef = useRef(null)
   const draggingRef = useRef(false)
@@ -292,6 +294,22 @@ function GenerateView({ previewLut }) {
     }
   }
 
+  const startEditSession = (s) => {
+    setEditingSessionId(s.id)
+    setEditingTitle(s.title)
+  }
+
+  const saveEditSession = async (id) => {
+    const title = editingTitle.trim() || '新会话'
+    try {
+      await updateSession(id, title)
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
+      setEditingSessionId(null)
+    } catch (e) {
+      setStatus(`重命名失败:${e.message}`)
+    }
+  }
+
   const updateParam = (key, value) => setParams((p) => ({ ...p, [key]: value }))
 
   const updateChannel = (key, idx, value) =>
@@ -355,8 +373,21 @@ function GenerateView({ previewLut }) {
           <div className="session-list">
             {sessions.map((s) => (
               <div key={s.id} className={s.id === sessionId ? 'session-item active' : 'session-item'}>
-                <span className="session-title" onClick={() => openSession(s.id)}>{s.title}</span>
-                <button className="session-del" onClick={() => removeSession(s.id)} title="删除会话">×</button>
+                {editingSessionId === s.id ? (
+                  <input
+                    className="session-edit"
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onBlur={() => saveEditSession(s.id)}
+                    onKeyDown={(e) => e.key === 'Enter' && saveEditSession(s.id)}
+                    autoFocus
+                  />
+                ) : (
+                  <>
+                    <span className="session-title" onClick={() => openSession(s.id)} onDoubleClick={() => startEditSession(s)}>{s.title}</span>
+                    <button className="session-del" onClick={() => removeSession(s.id)} title="删除会话">×</button>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -664,7 +695,6 @@ function AuthView({ onAuthed }) {
     setError('')
     try {
       const resp = mode === 'login' ? await login(username.trim(), password) : await register(username.trim(), password)
-      setToken(resp.token, resp.username)
       onAuthed(resp.username)
     } catch (e) {
       setError(e.message)
@@ -695,7 +725,8 @@ function AuthView({ onAuthed }) {
 export default function App() {
   const [view, setView] = useState('generate')
   const [previewLut, setPreviewLut] = useState(null)
-  const [user, setUser] = useState(isAuthed() ? getUsername() : null)
+  const [user, setUser] = useState(null)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     const onUnauthorized = () => setUser(null)
@@ -703,15 +734,25 @@ export default function App() {
     return () => window.removeEventListener('chroma:unauthorized', onUnauthorized)
   }, [])
 
+  useEffect(() => {
+    me().then((u) => setUser(u.username)).catch(() => setUser(null)).finally(() => setChecking(false))
+  }, [])
+
   const openPreview = (lut) => {
     setPreviewLut({ ...lut, params: { ...lut.params } })
     setView('generate')
   }
 
-  const logout = () => {
-    clearToken()
+  const handleLogout = async () => {
+    try {
+      await apiLogout()
+    } catch {
+      // 忽略退出失败,本地仍清登录态
+    }
     setUser(null)
   }
+
+  if (checking) return null
 
   if (!user) {
     return <AuthView onAuthed={(u) => setUser(u)} />
@@ -734,7 +775,7 @@ export default function App() {
         </nav>
         <div className="topbar-user">
           <span>{user}</span>
-          <button className="btn" onClick={logout}>退出</button>
+          <button className="btn" onClick={handleLogout}>退出</button>
         </div>
       </header>
       {view === 'generate' ? (

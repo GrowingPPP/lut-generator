@@ -45,9 +45,10 @@ def test_session_requires_auth():
 
 
 def test_messages_list(auth):
+    user = db.get_user_by_username("u1")
     sid = client.post("/api/sessions", json={"title": "t"}, headers=auth).json()["id"]
-    db.add_message(sid, "user", "你好", None)
-    db.add_message(sid, "agent", "想要什么效果", '{"base_photo_style": "STD"}')
+    db.add_message(user["id"], sid, "user", "你好", None)
+    db.add_message(user["id"], sid, "agent", "想要什么效果", '{"base_photo_style": "STD"}')
 
     r = client.get(f"/api/sessions/{sid}/messages", headers=auth)
     assert r.status_code == 200
