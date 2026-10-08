@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CHROMA — AI 自动修图 · UI 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink: '#0a0a0c', raise: '#101014', panel: '#16161a', panel2: '#1c1c22',
+        line: '#26262e', linestrong: '#34343e', text: '#e9e9ec', muted: '#9a9aa5',
+        faint: '#62626d', accent: '#e2a35a', cool: '#6fb7c9',
+        warn: '#e0b64a',
+      },
+      fontFamily: {
+        display: ['Quicksand', 'sans-serif'],
+        sans: ['Nunito', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
+    },
+  },
+};
+</script>
+<style>
+  :root { --ink:#0a0a0c; --panel:#16161a; --line:#26262e; --accent:#e2a35a; --warn:#e0b64a; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ink); color: #e9e9ec;
+    font-family: 'Nunito', sans-serif; -webkit-font-smoothing: antialiased;
+  }
+  .atmosphere {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(1100px 600px at 78% -10%, rgba(226,163,90,0.07), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(111,183,201,0.05), transparent 55%);
+  }
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: .5; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  }
+  .app { position: relative; z-index: 2; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background:#2a2a32; border-radius:8px; border:2px solid #0a0a0c; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---------- 原型外壳(不属于产品 UI) ---------- */
+  .shell { border-bottom: 1px dashed #34343e; background: rgba(28,28,34,.55); }
+  .shell-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: #62626d;
+  }
+  .probe {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #e2a35a;
+    border: 1px dashed rgba(226,163,90,.35); border-radius: 6px; padding: 1px 5px;
+  }
+  .seg { border:1px solid #34343e; border-radius:10px; overflow:hidden; display:flex; }
+  .seg button {
+    padding: 7px 13px; font-size: 12.5px; color:#9a9aa5; background:transparent; border:0;
+    cursor:pointer; font-family:'Nunito',sans-serif; transition:.15s;
+  }
+  .seg button:hover { color:#e9e9ec; background:rgba(255,255,255,.03); }
+  .seg button[aria-pressed="true"] { background:#e2a35a; color:#0a0a0c; font-weight:700; }
+
+  /* ---------- 产品 UI ---------- */
+  .panel { background: rgba(22,22,26,.72); border:1px solid #26262e; border-radius:14px; }
+  .chip {
+    display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+    font-size:11.5px; line-height:1.5;
+  }
+  .btn {
+    padding:9px 16px; border-radius:10px; font-size:13px; font-weight:600; cursor:pointer;
+    border:1px solid #34343e; background:transparent; color:#e9e9ec; font-family:'Nunito',sans-serif;
+    transition:.15s;
+  }
+  .btn:hover { border-color:#4a4a56; background:rgba(255,255,255,.03); }
+  .btn-primary {
+    padding:9px 16px; border-radius:10px; font-size:13px; font-weight:700; cursor:pointer; border:0;
+    background:#e2a35a; color:#0a0a0c; font-family:'Nunito',sans-serif; transition:.15s;
+  }
+  .btn-primary:hover:not(:disabled) { opacity:.9; }
+  .btn-primary:disabled { opacity:.4; cursor:not-allowed; }
+
+  .auto-style-input {
+    flex:1; min-width:0; padding:9px 12px; border:1px solid #26262e; border-radius:10px;
+    background:#1c1c22; color:#e9e9ec; font-size:13px; font-family:'Nunito',sans-serif; outline:none;
+    transition:.15s;
+  }
+  .auto-style-input::placeholder { color:#62626d; }
+  .auto-style-input:focus { border-color:rgba(226,163,90,.6); }
+  .auto-style-input:disabled { opacity:.5; }
+
+  .auto-step { display:grid; grid-template-columns:16px 104px 1fr; align-items:baseline; gap:10px; font-size:13px; }
+  .auto-step-mark { text-align:center; }
+  .auto-step-detail { color:#9a9aa5; font-size:12px; }
+  .auto-step.running .auto-step-mark { color:#e2a35a; animation: spin 1.2s linear infinite; }
+  .auto-step.done .auto-step-mark { color:#e2a35a; }
+  .auto-step.pending .auto-step-mark,
+  .auto-step.pending .auto-step-title { color:#62626d; }
+  .auto-step.skipped .auto-step-mark { color:#62626d; }
+  .auto-step.skipped .auto-step-title { color:#62626d; text-decoration: line-through; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 窄屏:步骤细节换行,避免 104px 固定列把内容挤出容器 */
+  @media (max-width: 900px) {
+    .auto-step { grid-template-columns: 16px 1fr; row-gap: 2px; }
+    .auto-step-detail { grid-column: 2; }
+  }
+
+  .auto-warn {
+    display:flex; gap:8px; align-items:flex-start; padding:10px 12px; margin-bottom:12px;
+    border:1px solid var(--warn); border-radius:10px;
+    background: rgba(224,182,74,.08); color: var(--warn); font-size:13px;
+  }
+  .auto-summary { display:grid; grid-template-columns:64px 1fr; gap:8px 12px; font-size:13px; }
+  .auto-summary dt { color:#9a9aa5; }
+  .auto-summary dd { margin:0; display:flex; flex-wrap:wrap; gap:6px; }
+  .delta { font-variant-numeric: tabular-nums; }
+  .auto-details { font-size:13px; }
+  .auto-details summary { cursor:pointer; color:#9a9aa5; padding:6px 0; list-style:none; }
+  .auto-details summary::-webkit-details-marker { display:none; }
+  .auto-details summary::before { content:'▸ '; }
+  .auto-details[open] summary::before { content:'▾ '; }
+  .auto-details summary:hover { color:#e9e9ec; }
+  /* 参数分组折叠 —— 22 个控件平铺会让面板过长 */
+  .param-groups { display:grid; gap:10px; }
+  .param-group { border:1px solid #26262e; border-radius:14px; background:rgba(22,22,26,.72); overflow:hidden; }
+  .param-group + .param-group { margin-top:10px; }
+  .param-group-head {
+    display:flex; align-items:center; gap:8px; width:100%; padding:11px 20px;
+    background:none; border:0; color:#e9e9ec; font-family:'Nunito',sans-serif;
+    font-size:13px; font-weight:600; cursor:pointer; text-align:left;
+  }
+  .param-group-head:hover { background:rgba(255,255,255,.03); }
+  .param-group-arrow { color:#9a9aa5; font-size:11px; width:10px; }
+  .param-group-hint { margin-left:auto; font-size:11.5px; font-weight:400; color:var(--accent); }
+  /* 用 minmax(220px, 1fr):容器不够宽时自动降列,避免滑杆被挤成 0 宽(曾出现此缺陷) */
+  .controls-grid {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+    gap:16px 24px; padding:20px; border-top:1px solid #26262e;
+  }
+  .rgb-block { display:grid; gap:8px; }
+  .rgb-title { font-size:12px; color:#62626d; }
+
+  .auto-review { border-left:2px solid var(--accent); padding-left:12px; font-size:13px; }
+  .auto-review-label { display:block; color:#9a9aa5; font-size:12px; margin-bottom:4px; }
+
+  /* 滑动对比 */
+  .cmp { position:relative; overflow:hidden; border-radius:12px; cursor:ew-resize; user-select:none; touch-action:none; }
+  .cmp canvas { display:block; width:100%; height:auto; }
+  .cmp .after { position:absolute; inset:0; clip-path: inset(0 0 0 var(--split,50%)); }
+  .cmp-handle { position:absolute; top:0; bottom:0; left:var(--split,50%); width:2px; background:#e2a35a; pointer-events:none; }
+  .cmp-handle::after {
+    content:''; position:absolute; top:50%; left:50%; width:26px; height:26px; margin:-13px 0 0 -13px;
+    border-radius:999px; background:#e2a35a; box-shadow:0 2px 10px rgba(0,0,0,.5);
+  }
+  .cmp-tag {
+    position:absolute; top:10px; padding:3px 9px; border-radius:999px; font-size:11px;
+    background:rgba(10,10,12,.7); color:#9a9aa5; backdrop-filter:blur(4px);
+  }
+  /* 用分数列而非固定 px:固定 px 在窄容器里必然溢出 */
+  .slider-row { display:grid; grid-template-columns:minmax(0,52px) minmax(0,1fr) minmax(0,64px); align-items:center; gap:12px; font-size:13px; }
+  .slider-row > span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  input[type=range] { -webkit-appearance:none; appearance:none; width:100%; min-width:0; height:3px; background:#34343e; border-radius:2px; outline:none; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:14px; height:14px; border-radius:999px; background:#e2a35a; cursor:pointer;
+  }
+  .val { font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#9a9aa5; text-align:right;
+         font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fade-in { animation: fade .35s ease both; }
+  @keyframes fade { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+</style>
+</head>
+<body>
+<div class="atmosphere"></div>
+<div class="grain"></div>
+
+<div class="app flex flex-col min-h-screen">
+
+  <!-- ══════════════ 原型控制条(不属于产品 UI) ══════════════ -->
+  <div class="shell px-6 py-3">
+    <div class="max-w-[1600px] mx-auto flex flex-wrap items-center gap-x-6 gap-y-3">
+      <div>
+        <div class="shell-tag">Prototype</div>
+        <div class="text-sm font-semibold font-display">AI 自动修图 · UI 原型</div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <span class="shell-tag">状态</span>
+        <div class="seg" id="stateSeg">
+          <button data-state="idle" aria-pressed="true">① 初始</button>
+          <button data-state="running" aria-pressed="false">② 修图中</button>
+          <button data-state="done" aria-pressed="false">③ 完成</button>
+          <button data-state="degraded" aria-pressed="false">④ 未达标</button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <span class="shell-tag">变体</span>
+        <div class="seg" id="variantSeg">
+          <button data-variant="nostyle" aria-pressed="false">无风格</button>
+          <button data-variant="novision" aria-pressed="false">关视觉复核</button>
+          <button data-variant="rejected" aria-pressed="false">有被拒项</button>
+        </div>
+      </div>
+
+      <div class="ml-auto text-xs text-faint max-w-[420px] leading-relaxed">
+        对比图为 <span class="text-accent">真实 LUT 变换</span>(引擎与后端同数学),
+        右侧数值由渲染结果实时统计得出,非写死文案。
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 产品 UI 起点 ══════════════ -->
+  <header class="sticky top-0 z-20 border-b border-line bg-ink/70 backdrop-blur-xl">
+    <div class="max-w-[1600px] mx-auto px-6 h-14 flex items-center gap-8">
+      <div class="flex items-center gap-3">
+        <div class="w-7 h-7 rounded-lg grid place-items-center" style="background:linear-gradient(135deg,#e2a35a,#b8782f);">
+          <span class="font-display font-bold text-ink text-lg leading-none">C</span>
+        </div>
+        <span class="font-display font-semibold tracking-wide">CHROMA</span>
+      </div>
+      <nav class="flex items-center gap-1 h-14">
+        <button class="h-full px-4 text-sm font-medium text-text border-b-2 border-accent">生成</button>
+        <button class="h-full px-4 text-sm font-medium text-muted">我的 LUT</button>
+      </nav>
+      <div class="ml-auto flex items-center gap-3">
+        <span class="text-sm text-muted">e2e_user</span>
+        <button class="btn" style="padding:6px 12px;font-size:12px;">退出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-[1600px] mx-auto px-6 py-6">
+    <div class="grid grid-cols-12 gap-6">
+
+      <!-- 左栏:现有聊天面板(占位,示意上下文) -->
+      <section class="col-span-12 xl:col-span-4 panel flex flex-col overflow-hidden" style="height:calc(100vh - 9rem);">
+        <div class="px-5 py-4 border-b border-line">
+          <h2 class="font-display font-semibold text-lg">创建 LUT</h2>
+          <p class="text-xs text-faint mt-0.5">描述风格并确认,或直接用右侧 AI 自动修图</p>
+        </div>
+        <div class="flex-1 overflow-y-auto px-5 py-5 space-y-4 text-sm">
+          <div class="text-muted leading-relaxed">
+            描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。
+          </div>
+          <div class="flex justify-end">
+            <div class="max-w-[85%] rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm" style="background:rgba(226,163,90,.14);">
+              想要日系清透一点的
+            </div>
+          </div>
+          <div class="text-muted leading-relaxed">
+            我理解为:基准 NAT、对比度 -0.15、饱和度 -0.1。确认生成吗?
+          </div>
+        </div>
+        <div class="px-5 py-4 border-t border-line flex gap-2">
+          <input class="auto-style-input" placeholder="描述你想要的风格…" />
+          <button class="btn-primary whitespace-nowrap">发送</button>
+        </div>
+      </section>
+
+      <!-- 右栏:AI 自动修图 -->
+      <section class="col-span-12 xl:col-span-8 space-y-4">
+
+        <!-- 预览工具栏 -->
+        <div class="flex items-center gap-3">
+          <label class="text-xs text-muted flex items-center gap-2">
+            展示形式
+            <select class="bg-panel2 border border-line rounded-lg text-xs px-2.5 py-1.5 text-text outline-none">
+              <option>滑动对比</option><option>独立展示</option>
+            </select>
+          </label>
+          <button class="btn" style="padding:7px 14px;font-size:12.5px;">上传样张</button>
+          <span class="text-xs text-faint ml-auto">
+            当前样张:<span class="text-muted">sunset_portrait.jpg</span>
+          </span>
+        </div>
+
+        <!-- 对比预览 -->
+        <div class="panel p-3">
+          <div class="cmp" id="cmp">
+            <canvas id="cvBefore"></canvas>
+            <div class="after"><canvas id="cvAfter"></canvas></div>
+            <span class="cmp-tag" style="left:10px;">修图前</span>
+            <span class="cmp-tag" style="right:10px;">修图后</span>
+            <div class="cmp-handle"></div>
+          </div>
+        </div>
+
+        <!-- 判断:是否已上传真实照片 -->
+        <div x-probe="A" class="panel px-4 py-3 flex items-center gap-3">
+          <span class="probe">探测点 A</span>
+          <span class="text-xs text-muted flex-1">
+            按钮可用性取决于「是否已上传真实照片」。内置合成图状态下禁用,避免对测试图做无意义分析。
+          </span>
+          <label class="text-xs text-muted flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="chkRealPhoto" checked /> 已上传真实照片
+          </label>
+        </div>
+
+        <!-- 自动修图条 -->
+        <div class="panel px-4 py-3 flex items-center gap-3 flex-wrap">
+          <span class="text-accent text-base leading-none" aria-hidden="true">✦</span>
+          <input id="styleInput" class="auto-style-input" style="min-width:180px;"
+                 placeholder="风格(可选):日系清透一点" maxlength="200" value="日系清透一点" />
+          <button id="goBtn" class="btn-primary whitespace-nowrap">AI 自动修图</button>
+          <label class="flex items-center gap-2 text-xs text-muted whitespace-nowrap cursor-pointer"
+                 title="开启后会把照片与修图结果发送给模型做主观复检,更准但更慢。关闭后只根据客观数据调整。">
+            <input type="checkbox" id="chkVision" checked /> 视觉复核
+          </label>
+        </div>
+
+        <!-- 进度 -->
+        <ol id="progress" class="panel px-4 py-3.5 space-y-2 hidden" aria-live="polite"></ol>
+
+        <!-- 报告 -->
+        <section id="report" class="panel px-4 py-3.5 space-y-3 hidden"></section>
+
+        <!-- 参数面板 -->
+        <div class="param-groups" id="controls"></div>
+
+        <!-- 操作区 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <input class="auto-style-input" style="max-width:220px;" placeholder="LUT 名称" value="日系清透 v2" />
+          <button class="btn-primary">保存到我的 LUT</button>
+          <button class="btn">直接下载机内版</button>
+          <button class="btn">直接下载后期版</button>
+          <span class="text-xs text-faint ml-auto" id="statusLine"></span>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   1. LUT 引擎(与 backend/lut_engine 同数学,便于原型展示真实变换)
+   ═══════════════════════════════════════════════════════════════════════ */
+const LUMA = [0.2126, 0.7152, 0.0722];
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+
+function srgbEotf(c){ return c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); }
+function srgbOetf(l){ l = Math.max(0,l); return l <= 0.0031308 ? 12.92*l : 1.055*Math.pow(l,1/2.4)-0.055; }
+
+function kelvinToRgb(k){
+  const t = k/100; let r,g,b;
+  if (t <= 66){ r=255; g=99.4708025861*Math.log(t)-161.1195681661;
+    b = t<=19 ? 0 : 138.5177312231*Math.log(t-10)-305.0447927307; }
+  else if (t <= 88){ r=329.698727446*Math.pow(t-60,-0.1332047592);
+    g=288.1221695283*Math.log(t)-234.7305138614;
+    b=138.5177312231*Math.log(t-10)-305.0447927307; }
+  else { r=329.698727446*Math.pow(t-60,-0.1332047592);
+    g=288.1221695283*Math.log(t)-234.7305138614; b=255; }
+  const c = v => Math.max(0, Math.min(1, v/255));
+  return [c(r), c(g), c(b)];
+}
+function wbGain(tempOffset, tint){
+  const rgb = kelvinToRgb(6500-tempOffset), n = kelvinToRgb(6500);
+  const g = [rgb[0]/n[0], rgb[1]/n[1], rgb[2]/n[2]];
+  g[1] *= 1 + tint*0.0002;
+  return g;
+}
+function gamutClamp(r,g,b){
+  const y = LUMA[0]*r+LUMA[1]*g+LUMA[2]*b;
+  const mn = Math.min(r,g,b), mx = Math.max(r,g,b);
+  let s = 1;
+  if (mn < 0) s = Math.min(s, y/Math.max(y-mn,1e-6));
+  if (mx > 1) s = Math.min(s, (1-y)/Math.max(mx-y,1e-6));
+  s = Math.max(0, Math.min(1, s));
+  return [y+(r-y)*s, y+(g-y)*s, y+(b-y)*s];
+}
+// ---- 影调分区与分离色调(与 backend/lut_engine/transforms.py 同数学)----
+// 掩码必须平滑:33³ 网格 + 三线性插值在硬阈值拐点处会明显串色。
+const HIGHLIGHT_KNEE = 0.5, SHADOW_KNEE = 0.5;
+function smoothstep01(x){
+  const t = Math.max(0, Math.min(1, x));
+  return t*t*(3-2*t);
+}
+function rescaleLuma(r,g,b,y0,y1){
+  const sc = y1/Math.max(y0,1e-6);
+  return [r*sc, g*sc, b*sc];
+}
+function opHighlights(r,g,b,a){
+  if (a===0) return [r,g,b];
+  const y = LUMA[0]*r+LUMA[1]*g+LUMA[2]*b;
+  const w = smoothstep01((y-HIGHLIGHT_KNEE)/(1-HIGHLIGHT_KNEE));
+  return rescaleLuma(r,g,b,y, y + a*w*(1-y));
+}
+function opShadows(r,g,b,a){
+  if (a===0) return [r,g,b];
+  const y = LUMA[0]*r+LUMA[1]*g+LUMA[2]*b;
+  const w = smoothstep01((SHADOW_KNEE-y)/SHADOW_KNEE);
+  return rescaleLuma(r,g,b,y, y + a*w*y);
+}
+function opWhites(r,g,b,a){
+  if (a===0) return [r,g,b];
+  const w = v => { const c = clamp01(v); return 1-(1-c)*(1-c); };
+  return [r+a*w(r), g+a*w(g), b+a*w(b)];
+}
+function opBlacks(r,g,b,a){
+  if (a===0) return [r,g,b];
+  const w = v => { const c = clamp01(v); return (1-c)*(1-c); };
+  return [r+a*w(r), g+a*w(g), b+a*w(b)];
+}
+function opCurve(r,g,b,a){
+  if (a===0) return [r,g,b];
+  const f = v => v + a*(smoothstep01(v) - v);
+  return [f(r), f(g), f(b)];
+}
+function hueToRgbDir(deg){
+  const h = ((deg%360)+360)%360/60, i = Math.floor(h)%6, f = h-Math.floor(h);
+  return [[1,f,0],[1-f,1,0],[0,1,f],[0,1-f,1],[f,0,1],[1,0,1-f]][i];
+}
+function opSplitTone(r,g,b,shHue,shSat,hiHue,hiSat,balance){
+  if (shSat===0 && hiSat===0) return [r,g,b];
+  const y = clamp01(LUMA[0]*r+LUMA[1]*g+LUMA[2]*b);
+  const bl = clamp01(balance);
+  // balance 越大 → 高光染色覆盖越广(与 ACR 的 Balance 方向一致)
+  const shW = bl < 1 ? smoothstep01((1-bl-y)/Math.max(1-bl,1e-6)) : 0;
+  const hiW = bl > 0 ? smoothstep01((y-(1-bl))/Math.max(bl,1e-6)) : 1;
+  let tr=0, tg=0, tb=0;
+  if (shSat>0){ const c = hueToRgbDir(shHue);
+    tr += shW*(shSat*0.5)*(c[0]-0.5); tg += shW*(shSat*0.5)*(c[1]-0.5); tb += shW*(shSat*0.5)*(c[2]-0.5); }
+  if (hiSat>0){ const c = hueToRgbDir(hiHue);
+    tr += hiW*(hiSat*0.5)*(c[0]-0.5); tg += hiW*(hiSat*0.5)*(c[1]-0.5); tb += hiW*(hiSat*0.5)*(c[2]-0.5); }
+  return [r+tr, g+tg, b+tb];
+}
+function applyToneOps(r,g,b,p){
+  let o = opHighlights(r,g,b,p.highlights);
+  o = opShadows(o[0],o[1],o[2],p.shadows);
+  o = opWhites(o[0],o[1],o[2],p.whites);
+  o = opBlacks(o[0],o[1],o[2],p.blacks);
+  o = opCurve(o[0],o[1],o[2],p.curve);
+  return opSplitTone(o[0],o[1],o[2], p.split_shadow_hue, p.split_shadow_sat,
+                     p.split_highlight_hue, p.split_highlight_sat, p.split_balance);
+}
+
+function applyParams(r,g,b,p){
+  // 线性化
+  r = srgbEotf(r); g = srgbEotf(g); b = srgbEotf(b);
+  // 线性算子
+  const wb = wbGain(p.temp, p.tint);
+  const ex = Math.pow(2, p.exposure);
+  r = r*wb[0]*ex + p.lift[0]; g = g*wb[1]*ex + p.lift[1]; b = b*wb[2]*ex + p.lift[2];
+  r *= p.gain[0]; g *= p.gain[1]; b *= p.gain[2];
+  // 编码
+  r = srgbOetf(r); g = srgbOetf(g); b = srgbOetf(b);
+  // 编码算子
+  const k = 1 + p.contrast;
+  r = (r-0.462)*k+0.462; g = (g-0.462)*k+0.462; b = (b-0.462)*k+0.462;
+  r = Math.pow(Math.max(0,r), 1/p.gamma[0]);
+  g = Math.pow(Math.max(0,g), 1/p.gamma[1]);
+  b = Math.pow(Math.max(0,b), 1/p.gamma[2]);
+  const y = LUMA[0]*r+LUMA[1]*g+LUMA[2]*b, sa = 1+p.saturation;
+  r = y+(r-y)*sa; g = y+(g-y)*sa; b = y+(b-y)*sa;
+  if (p.hue !== 0){
+    const th = p.hue*Math.PI/180, c = Math.cos(th), s = Math.sin(th);
+    const m = [
+      [0.213+0.787*c-0.213*s, 0.715-0.715*c-0.715*s, 0.072-0.072*c+0.928*s],
+      [0.213-0.213*c+0.143*s, 0.715+0.285*c+0.140*s, 0.072-0.072*c-0.283*s],
+      [0.213-0.213*c-0.787*s, 0.715-0.715*c+0.715*s, 0.072+0.928*c+0.072*s]];
+    const gc = gamutClamp(m[0][0]*r+m[0][1]*g+m[0][2]*b,
+                          m[1][0]*r+m[1][1]*g+m[1][2]*b,
+                          m[2][0]*r+m[2][1]*g+m[2][2]*b);
+    r = gc[0]; g = gc[1]; b = gc[2];
+  }
+  if (p.vibrance !== 0){
+    const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+    const sat = mx > 0 ? (mx-mn)/Math.max(mx,1e-6) : 0;
+    const vs = 1 + p.vibrance*(1-sat);
+    const y2 = LUMA[0]*r+LUMA[1]*g+LUMA[2]*b;
+    r = y2+(r-y2)*vs; g = y2+(g-y2)*vs; b = y2+(b-y2)*vs;
+  }
+  const t = applyToneOps(r, g, b, p);
+  return [clamp01(t[0]), clamp01(t[1]), clamp01(t[2])];
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2. 合成样张:一张「欠曝 + 偏暖 + 低对比」的夕阳人像
+   ═══════════════════════════════════════════════════════════════════════ */
+function buildPhoto(w = 640, h = 420){
+  // 刻意做成「欠曝 + 低对比 + 偏冷」:三通道里 B 最高才叫偏冷。
+  // 预览不为好看做任何增益 —— 画面必须就是统计口径下的原图,否则「实测变化」是假的。
+  const img = new Float32Array(w*h*3);
+  const put = (i, r, g, b) => { img[i*3]=clamp01(r); img[i*3+1]=clamp01(g); img[i*3+2]=clamp01(b); };
+  for (let y = 0; y < h; y++){
+    for (let x = 0; x < w; x++){
+      const i = y*w+x, ty = y/h, tx = x/w;
+      let r, g, b;
+      if (ty < 0.58){                       // 天空:B 最高 → 偏冷
+        const u = ty/0.58;
+        r = 0.10 + 0.24*u; g = 0.13 + 0.20*u; b = 0.34 - 0.12*u;
+      } else {                              // 地面
+        r = 0.16; g = 0.16; b = 0.22;
+      }
+      // 人脸:暖色椭圆(B 略低于 R),用于展示肤色保护
+      const fx = (tx-0.62)/0.09, fy = (ty-0.50)/0.12, d = fx*fx + fy*fy;
+      if (d < 1){ const k = 1 - d*0.5; r = 0.56*k; g = 0.45*k; b = 0.39*k; }
+      // 深色衣物:展示暗部层次与对比度变化
+      if (ty > 0.64 && tx > 0.28 && tx < 0.76){ r = 0.09; g = 0.09; b = 0.12; }
+      // 夕阳高光:展示高光溢出保护
+      const sx = (tx-0.20)/0.045, sy = (ty-0.34)/0.045;
+      if (sx*sx + sy*sy < 1){ r = 0.95; g = 0.85; b = 0.62; }
+      put(i, r, g, b);
+    }
+  }
+  return { w, h, data: img };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3. 渲染 + 统计(右侧数值来自这里,不是写死文案)
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderPhoto(photo, params){
+  const out = new Float32Array(photo.data.length);
+  for (let i = 0; i < photo.w*photo.h; i++){
+    const [r,g,b] = applyParams(photo.data[i*3], photo.data[i*3+1], photo.data[i*3+2], params);
+    out[i*3]=r; out[i*3+1]=g; out[i*3+2]=b;
+  }
+  return { w: photo.w, h: photo.h, data: out };
+}
+function toCanvas(photo, canvas){
+  canvas.width = photo.w; canvas.height = photo.h;
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(photo.w, photo.h);
+  for (let i = 0; i < photo.w*photo.h; i++){
+    id.data[i*4]   = Math.round(photo.data[i*3]*255);
+    id.data[i*4+1] = Math.round(photo.data[i*3+1]*255);
+    id.data[i*4+2] = Math.round(photo.data[i*3+2]*255);
+    id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+function statsOf(photo){
+  const n = photo.w*photo.h, lum = new Float32Array(n);
+  let sr=0, sg=0, sb=0, sat=0, clip=0, dark=0;
+  for (let i = 0; i < n; i++){
+    const r = photo.data[i*3], g = photo.data[i*3+1], b = photo.data[i*3+2];
+    lum[i] = LUMA[0]*r + LUMA[1]*g + LUMA[2]*b;
+    sr += r; sg += g; sb += b;
+    const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+    sat += mx > 0 ? (mx-mn)/Math.max(mx,1e-6) : 0;
+    if (mx > 0.98) clip++;
+    if (mx < 0.02) dark++;
+  }
+  const sorted = Array.from(lum).sort((a,b)=>a-b);
+  const q = p => sorted[Math.min(n-1, Math.floor(p*n))];
+  const mean = [sr/n, sg/n, sb/n], gm = (mean[0]+mean[1]+mean[2])/3;
+  return {
+    p5:q(0.05), p50:q(0.50), p95:q(0.95),
+    rgbMean: mean,
+    grayDev: Math.hypot(mean[0]-gm, mean[1]-gm, mean[2]-gm),
+    sat: sat/n,
+    clipPct: clip/n*100,
+    darkPct: dark/n*100,
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4. 原型状态数据(对应设计文档的技术契约)
+   ═══════════════════════════════════════════════════════════════════════ */
+const DEFAULT_PARAMS = {
+  base_photo_style:'NAT', temp:0, tint:0, exposure:0, contrast:0, saturation:0,
+  hue:0, vibrance:0, tone_map:1,
+  // 影调分区与分离色调(与后端 22 参数集一致)
+  highlights:0, shadows:0, whites:0, blacks:0, curve:0,
+  split_shadow_hue:0, split_shadow_sat:0,
+  split_highlight_hue:0, split_highlight_sat:0, split_balance:0.5,
+  lift:[0,0,0], gamma:[1,1,1], gain:[1,1,1],
+};
+// 「修图后」参数 = 优化阶段结果 + 风格阶段叠加(照设计文档的增量语义)
+const OPTIMIZED = { exposure:0.42, contrast:0.26, temp:-380,
+                    highlights:-0.35, shadows:0.40, blacks:0.10,
+                    lift:[-0.03,-0.025,-0.015], gain:[1.04,1.02,1.0] };
+const STYLE_ADD = { contrast:0.06, temp:-80, saturation:-0.06, vibrance:0.12,
+                    curve:0.18, split_shadow_hue:215, split_shadow_sat:0.22,
+                    split_highlight_hue:38, split_highlight_sat:0.18 };
+
+// 诊断由真实统计推导 —— 不写死文案,避免「改了数字忘了改叙述」
+function buildIssues(st){
+  const out = [];
+  if (st.p50 < 0.32)
+    out.push(`中间调偏暗(lum_p50=${st.p50.toFixed(3)},建议 0.40~0.55)`);
+  if (st.p95 - st.p5 < 0.38)
+    out.push(`动态范围偏窄(p95−p5=${(st.p95-st.p5).toFixed(3)},建议 ≥0.38)`);
+  const d = st.rgbMean[2] - st.rgbMean[0];      // B − R > 0 即偏冷
+  if (Math.abs(d) > 0.03)
+    out.push(`${d > 0 ? '整体偏冷' : '整体偏暖'}(B−R=${d >= 0 ? '+' : ''}${d.toFixed(3)},灰世界偏差 ${st.grayDev.toFixed(3)})`);
+  if (st.clipPct > 1.5)
+    out.push(`高光溢出 ${st.clipPct.toFixed(2)}%,需要保护`);
+  return out;
+}
+let ISSUES = [];
+
+const STEPS = [
+  { key:'measure', title:'测量照片', detail:'' },   // 运行时按真实诊断填充
+  { key:'optimize', title:'修正影调与色彩',
+    detail:'曝光 +0.42 EV · 对比 +0.26 · 色温 −380K · 压高光 −0.35 · 提阴影 +0.40' },
+  { key:'style', title:'风格化',
+    detail:'S 曲线 +0.18 · 分离色调 青蓝阴影 + 暖橙高光' },
+  { key:'review', title:'视觉复核',
+    detail:'画面通透度提升,肤色保持自然' },
+];
+
+const REVIEW_TEXT = '修图后中间调明显抬起,暖偏得到纠正,肤色没有发灰或过饱和。深色衣物区域仍然保有层次,没有压死。若要更接近「日系」,可再轻微降低饱和并提亮高光。';
+const REJECTED = [
+  '单次曝光调整 1.6 EV 超过上限 1.0 EV,过于激进',
+  '饱满度提议会把饱和度推到基线 1.6 倍以上,画面会失真',
+];
+
+/* ═══════════════════════════════════════════════════════════════════════
+   5. 渲染交互
+   ═══════════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const photo = buildPhoto();
+const cvBefore = $('cvBefore'), cvAfter = $('cvAfter');
+
+function mergeParams(...deltas){
+  const p = { ...DEFAULT_PARAMS,
+    lift:[...DEFAULT_PARAMS.lift], gamma:[...DEFAULT_PARAMS.gamma], gain:[...DEFAULT_PARAMS.gain] };
+  for (const d of deltas){
+    if (!d) continue;
+    for (const [k,v] of Object.entries(d)){
+      if (Array.isArray(v)) p[k] = p[k].map((old,i)=> old + v[i]);
+      else if (typeof v === 'number' && typeof p[k] === 'number') p[k] = p[k] + v;
+      else p[k] = v;
+    }
+  }
+  p.lift = p.lift.map(x=>Math.max(-0.1,Math.min(0.1,x)));
+  p.gain = p.gain.map(x=>Math.max(0.5,Math.min(1.5,x)));
+  p.exposure = Math.max(-3,Math.min(3,p.exposure));
+  p.temp = Math.max(-3000,Math.min(3000,p.temp));
+  p.contrast = Math.max(-1,Math.min(1,p.contrast));
+  p.saturation = Math.max(-1,Math.min(1,p.saturation));
+  p.vibrance = Math.max(-1,Math.min(1,p.vibrance));
+  return p;
+}
+
+let reportBuilt = false;
+const state = { mode:'idle', variant:null, realPhoto:true, vision:true, styleIn:'日系清透一点', undo:null };
+let paramsBefore = mergeParams();
+let paramsAfter  = mergeParams(OPTIMIZED, STYLE_ADD);
+let liveStats = null;
+
+function paint(){
+  const graded = state.mode === 'idle' || state.mode === 'running';
+  const p = graded ? paramsBefore : paramsAfter;
+  toCanvas(photo, cvBefore);
+  toCanvas(renderPhoto(photo, p), cvAfter);
+  liveStats = { before: statsOf(photo), after: statsOf(renderPhoto(photo, p)) };
+  ISSUES = buildIssues(liveStats.before);       // 诊断永远基于真实统计
+  // 离开完成态时丢弃报告骨架,下次进入重建 —— 避免残留上一次的 details 展开状态
+  groupOpenRef.current = p;
+  if (!graded) return;
+  reportBuilt = false;
+  renderControls(p);
+}
+
+/* ---- 参数面板(22 个参数,5 组折叠 —— 与 App.jsx 的分组一致)---- */
+const PARAM_GROUPS = [
+  { id:'basic', label:'基础', open:true, items:[
+    { key:'temp', label:'色温', min:-3000, max:3000, step:10, unit:'K' },
+    { key:'tint', label:'色调', min:-500, max:500, step:5, unit:'' },
+    { key:'exposure', label:'曝光', min:-2, max:2, step:0.05, unit:' EV' },
+  ]},
+  { id:'tone', label:'影调', open:true, items:[
+    { key:'contrast', label:'对比度', min:-1, max:1, step:0.01, unit:'' },
+    { key:'highlights', label:'高光', min:-1, max:1, step:0.01, unit:'' },
+    { key:'shadows', label:'阴影', min:-1, max:1, step:0.01, unit:'' },
+    { key:'whites', label:'白场', min:-1, max:1, step:0.01, unit:'' },
+    { key:'blacks', label:'黑场', min:-1, max:1, step:0.01, unit:'' },
+    { key:'curve', label:'S 曲线', min:-1, max:1, step:0.01, unit:'' },
+  ]},
+  { id:'color', label:'色彩', open:false, items:[
+    { key:'saturation', label:'饱和度', min:-1, max:1, step:0.01, unit:'' },
+    { key:'vibrance', label:'自然饱和', min:-1, max:1, step:0.01, unit:'' },
+    { key:'hue', label:'色相', min:-180, max:180, step:1, unit:'°' },
+  ]},
+  { id:'split', label:'分离色调', open:false, items:[
+    { key:'split_shadow_hue', label:'阴影色相', min:0, max:360, step:1, unit:'°' },
+    { key:'split_shadow_sat', label:'阴影强度', min:0, max:1, step:0.01, unit:'' },
+    { key:'split_highlight_hue', label:'高光色相', min:0, max:360, step:1, unit:'°' },
+    { key:'split_highlight_sat', label:'高光强度', min:0, max:1, step:0.01, unit:'' },
+    { key:'split_balance', label:'平衡', min:0, max:1, step:0.01, unit:'' },
+  ]},
+  { id:'rgb', label:'分通道(RGB)', open:false, items:[] },
+];
+const RGB_GROUPS = [
+  { key:'lift', label:'暗部', min:-0.1, max:0.1, step:0.005, neutral:0 },
+  { key:'gamma', label:'中间调', min:0.5, max:1.5, step:0.005, neutral:1 },
+  { key:'gain', label:'亮部', min:0.5, max:1.5, step:0.005, neutral:1 },
+];
+const groupOpen = Object.fromEntries(PARAM_GROUPS.map(g => [g.id, g.open]));
+// 渲染时需要拿到「当前应显示的参数」——用 ref 存一份,避免点击处理器里的闭包过期
+const groupOpenRef = { current: null };
+
+function fmtVal(v, unit){
+  if (unit === ' EV') return v.toFixed(2) + unit;
+  if (unit === 'K') return Math.round(v) + unit;
+  if (unit === '°') return Math.round(v) + unit;
+  return Math.abs(v) < 1 && v !== 0 ? v.toFixed(2) : String(Math.round(v));
+}
+// 折叠时提示「N 项已调整」—— 参数藏起来后用户找不到自己调过什么
+function groupChanged(g, p){
+  const keys = g.id === 'rgb' ? RGB_GROUPS.map(r => r.key) : g.items.map(i => i.key);
+  return keys.filter(k => {
+    const v = p[k];
+    if (Array.isArray(v)){
+      const neutral = (k === 'gamma' || k === 'gain') ? 1 : 0;
+      return v.some(x => Math.abs(x - neutral) > 1e-9);
+    }
+    const def = DEFAULT_PARAMS[k];
+    return Math.abs(v - def) > 1e-9;
+  }).length;
+}
+
+function renderControls(p){
+  $('controls').innerHTML = PARAM_GROUPS.map(g => {
+    const open = groupOpen[g.id];
+    const n = groupChanged(g, p);
+    const body = !open ? '' : (g.id === 'rgb'
+      ? RGB_GROUPS.map(rg => `
+          <div class="rgb-block">
+            <div class="rgb-title">${rg.label}</div>
+            ${['R','G','B'].map((c, i) => `
+              <label class="slider-row">
+                <span class="text-muted">${c}</span>
+                <input type="range" min="${rg.min}" max="${rg.max}" step="${rg.step}"
+                       value="${p[rg.key][i]}" disabled />
+                <span class="val">${p[rg.key][i].toFixed(2)}</span>
+              </label>`).join('')}
+          </div>`).join('')
+      : g.items.map(it => `
+          <label class="slider-row">
+            <span class="text-muted">${it.label}</span>
+            <input type="range" min="${it.min}" max="${it.max}" step="${it.step}"
+                   value="${p[it.key]}" disabled />
+            <span class="val">${fmtVal(p[it.key], it.unit)}</span>
+          </label>`).join(''));
+    return `
+      <section class="param-group">
+        <button type="button" class="param-group-head" data-group="${g.id}"
+                aria-expanded="${open}">
+          <span class="param-group-arrow">${open ? '▾' : '▸'}</span>
+          <span class="param-group-label">${g.label}</span>
+          ${!open && n ? `<span class="param-group-hint">${n} 项已调整</span>` : ''}
+        </button>
+        ${open ? `<div class="controls-grid">${body}</div>` : ''}
+      </section>`;
+  }).join('');
+
+  // 分组头可点击(原型里允许手动折叠/展开,便于评审时查看全部参数)
+  $('controls').querySelectorAll('.param-group-head').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.group;
+      groupOpen[id] = !groupOpen[id];
+      renderControls(groupOpenRef.current);
+    });
+  });
+}
+/* ---- 进度 ---- */
+function renderProgress(){
+  const hasStyle  = state.variant !== 'nostyle';
+  const hasVision = state.variant !== 'novision' && state.vision;
+  const order = [
+    { ...STEPS[0], st: state.mode === 'running' ? 'done' : 'done' },
+    { ...STEPS[1], st: state.mode === 'running' ? 'running' : 'done' },
+    { ...STEPS[2], st: hasStyle ? 'pending' : 'skipped', detail: hasStyle ? '' : '未指定风格' },
+    { ...STEPS[3], st: hasVision ? 'pending' : 'skipped', detail: hasVision ? '' : '已关闭视觉复核' },
+  ];
+  order[0].detail = `检出 ${ISSUES.length} 项问题`;   // 与报告口径一致
+  $('progress').innerHTML = order.map(s => `
+    <li class="auto-step ${s.st}">
+      <span class="auto-step-mark">${s.st==='done'?'✓':s.st==='running'?'◐':s.st==='skipped'?'–':'·'}</span>
+      <span class="auto-step-title${s.st==='pending'?' text-faint':''}">${s.title}</span>
+      <span class="auto-step-detail">${s.detail || (s.st==='running' ? '正在理解「'+state.styleIn+'」…' : '')}</span>
+    </li>`).join('');
+}
+
+/* ---- 报告 ---- */
+function chips(deltas){
+  // 22 个参数的展示名与单位。缺一个就会把原始键名甩给用户。
+  const LBL = {
+    exposure:['曝光',' EV'], contrast:['对比度',''], temp:['色温','K'],
+    saturation:['饱和度',''], vibrance:['自然饱和',''], tint:['色调',''],
+    highlights:['高光',''], shadows:['阴影',''], whites:['白场',''], blacks:['黑场',''],
+    curve:['S 曲线',''], hue:['色相','°'],
+    split_shadow_hue:['阴影色相','°'], split_shadow_sat:['阴影强度',''],
+    split_highlight_hue:['高光色相','°'], split_highlight_sat:['高光强度',''],
+    split_balance:['平衡',''],
+  };
+  const out = [];
+  for (const [k, v] of Object.entries(deltas)){
+    if (Array.isArray(v)){
+      // 逐通道显示:先各自 toFixed 再拼,否则 + 会被当成独立元素拼出 ",,"
+      if (!v.some(x => Math.abs(x) > 1e-6)) continue;
+      const lab = k === 'lift' ? '暗部' : (k === 'gain' ? '亮部' : '中间调');
+      const body = v.map(x => (x >= 0 ? '+' : '') + x.toFixed(2)).join('/');
+      out.push(`${lab} ${body}`);
+      continue;
+    }
+    if (Math.abs(v) < 1e-9) continue;
+    const [lab, unit] = LBL[k] || [k, ''];
+    // 统一保留两位小数:这些增量本来就在 0.01 量级,取整会把 0.06 显示成 0
+    const num = unit === 'K' || unit === '°' ? Math.round(v) : v.toFixed(2);
+    let text = `${lab} ${v > 0 ? '+' : ''}${num}${unit}`;
+    // 色温正=暖 / 负=冷,补方向词 —— 否则用户得自己换算符号
+    if (k === 'temp') text += v > 0 ? '(偏暖)' : '(偏冷)';
+    out.push(text);
+  }
+  return out;
+}
+function renderReport(){
+  const degraded  = state.mode === 'degraded';
+  const hasStyle  = state.variant !== 'nostyle';
+  const hasReject = state.variant === 'rejected';
+  const hasVision = state.variant !== 'novision' && state.vision;
+  const b = liveStats.before, a = liveStats.after;
+  const sgn = (x, d = 3) => (x >= 0 ? '+' : '') + x.toFixed(d);
+
+  const summaryHtml = `
+      <dt>本次调整</dt>
+      <dd>${chips(OPTIMIZED).map(t => `<span class="chip delta" style="border:1px solid #34343e;">${t}</span>`).join('')}</dd>
+      ${hasStyle ? `<dt>风格理解</dt>
+      <dd>${chips(STYLE_ADD).map(t => `<span class="chip delta" style="border:1px solid rgba(226,163,90,.45);color:#e2a35a;">${t}</span>`).join('')}</dd>` : ''}
+      <dt>诊断</dt>
+      <dd class="text-muted text-xs leading-relaxed" style="display:block;">
+        ${ISSUES.map(t => `· ${t}`).join('<br>')}
+      </dd>
+      <dt>实测变化</dt>
+      <dd class="text-xs delta" style="color:#9a9aa5;">
+        中间调 ${b.p50.toFixed(3)} → ${a.p50.toFixed(3)}(${sgn(a.p50 - b.p50)}) ·
+        动态范围 ${(b.p95 - b.p5).toFixed(3)} → ${(a.p95 - a.p5).toFixed(3)} ·
+        高光溢出 ${b.clipPct.toFixed(2)}% → ${a.clipPct.toFixed(2)}%
+      </dd>`;
+
+  STEPS[0].detail = `检出 ${ISSUES.length} 项问题:${ISSUES.map(t => t.split('(')[0]).join('、')}`;
+  const stepsHtml = STEPS.filter(s => hasStyle || s.key !== 'style').map(s => `
+          <li class="flex gap-3">
+            <span class="text-accent shrink-0">✓</span>
+            <div><div>${s.title}</div><div class="text-muted text-xs mt-0.5">${s.detail}</div></div>
+          </li>`).join('');
+
+  const reviewHtml = hasVision
+    ? `<div class="auto-review mt-3">
+         <span class="auto-review-label">视觉复核</span>
+         <p class="leading-relaxed text-muted">${REVIEW_TEXT}</p>
+       </div>`
+    : `<div class="mt-3 text-xs text-faint">已关闭视觉复核,本次仅依据客观数据调整。</div>`;
+
+  // 骨架只建一次,之后靠 id 做局部更新 —— 保住 <details> 的展开状态
+  if (!reportBuilt){
+    $('report').innerHTML = `
+      <div class="auto-warn" id="rWarn" role="status">
+        <span aria-hidden="true">⚠</span>
+        <span>未能完全达标,已采用保守调整(仅修正曝光与白平衡)</span>
+      </div>
+      <dl class="auto-summary" id="rSummary"></dl>
+      <details class="auto-details mt-2" id="rSteps">
+        <summary id="rStepsSum">完整分析过程</summary>
+        <ol class="mt-2 space-y-2 pl-1" id="rStepsList"></ol>
+      </details>
+      <details class="auto-details" id="rReject">
+        <summary id="rRejectSum">被安全规则拦下</summary>
+        <ul class="mt-2 space-y-1 text-xs text-muted list-disc pl-5" id="rRejectList"></ul>
+      </details>
+      <div id="rReview"></div>
+      <div class="flex justify-end gap-2 mt-3">
+        <button class="btn" id="undoBtn">撤销</button>
+      </div>`;
+    reportBuilt = true;
+    $('undoBtn').addEventListener('click', () => {
+      state.mode = 'idle';
+      syncSegs(); paint(); syncAll();
+      $('statusLine').textContent = '已撤销到修图前';
+    });
+  }
+
+  $('rWarn').style.display = degraded ? '' : 'none';
+  $('rSummary').innerHTML = summaryHtml;
+  $('rStepsSum').textContent = `完整分析过程(${hasStyle ? 4 : 3} 步)`;
+  $('rStepsList').innerHTML = stepsHtml;
+  $('rReject').style.display = hasReject ? '' : 'none';
+  $('rRejectSum').textContent = `有 ${REJECTED.length} 项提议被安全规则拦下`;
+  $('rRejectList').innerHTML = REJECTED.map(r => `<li>${r}</li>`).join('');
+  $('rReview').innerHTML = reviewHtml;
+}
+
+/* ---- 状态同步 ---- */
+function syncSegs(){
+  document.querySelectorAll('#stateSeg button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.state === state.mode)));
+  document.querySelectorAll('#variantSeg button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.variant === state.variant)));
+}
+function syncAll(){
+  const running = state.mode === 'running';
+  const finished = state.mode === 'done' || state.mode === 'degraded';
+  const canRun = state.realPhoto && !running;
+
+  $('goBtn').textContent = running ? '修图中…' : 'AI 自动修图';
+  $('goBtn').disabled = !canRun;
+  $('goBtn').title = state.realPhoto ? '' : '请先上传样张';
+  $('styleInput').disabled = running;
+  $('chkVision').disabled = running;
+
+  $('progress').classList.toggle('hidden', !running);
+  $('report').classList.toggle('hidden', !finished);
+  if (running){ renderProgress(); }
+  if (finished){ renderReport(); }
+  renderControls(finished ? paramsAfter : paramsBefore);
+}
+
+/* ---- 事件 ---- */
+document.querySelectorAll('#stateSeg button').forEach(b => b.addEventListener('click', () => {
+  state.mode = b.dataset.state;
+  if (state.mode === 'done' || state.mode === 'degraded'){
+    $('styleInput').value = state.variant === 'nostyle' ? '' : '日系清透一点';
+    $('statusLine').textContent = state.mode === 'degraded'
+      ? '已采用保守调整' : '已应用自动修图,可继续微调';
+  } else {
+    $('statusLine').textContent = '';
+  }
+  syncSegs(); paint(); syncAll();
+}));
+document.querySelectorAll('#variantSeg button').forEach(b => b.addEventListener('click', () => {
+  state.variant = state.variant === b.dataset.variant ? null : b.dataset.variant;
+  $('styleInput').value = state.variant === 'nostyle' ? '' : '日系清透一点';
+  syncSegs(); paint(); syncAll();
+}));
+$('chkRealPhoto').addEventListener('change', e => { state.realPhoto = e.target.checked; syncAll(); });
+$('chkVision').addEventListener('change', e => { state.vision = e.target.checked; syncAll(); });
+$('styleInput').addEventListener('input', e => { state.styleIn = e.target.value; });
+$('styleInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('goBtn').disabled) $('goBtn').click(); });
+$('goBtn').addEventListener('click', () => {
+  state.mode = 'running'; syncSegs(); paint(); syncAll();
+  $('statusLine').textContent = '';
+  setTimeout(() => {
+    state.mode = 'done'; syncSegs(); paint(); syncAll();
+    $('statusLine').textContent = '已应用自动修图,可继续微调';
+  }, 1400);
+});
+
+/* ---- 滑动对比 ---- */
+(function initSplit(){
+  const cmp = $('cmp'); let dragging = false;
+  const set = x => {
+    const r = cmp.getBoundingClientRect();
+    const pct = Math.max(2, Math.min(98, (x - r.left)/r.width*100));
+    cmp.style.setProperty('--split', pct + '%');
+  };
+  cmp.addEventListener('pointerdown', e => { dragging = true; cmp.setPointerCapture(e.pointerId); set(e.clientX); });
+  cmp.addEventListener('pointermove', e => { if (dragging) set(e.clientX); });
+  cmp.addEventListener('pointerup',   () => { dragging = false; });
+  cmp.addEventListener('pointercancel', () => { dragging = false; });
+})();
+
+/* ---- 启动 ---- */
+syncSegs(); paint(); syncAll();
+</script>
+</body>
+</html>
