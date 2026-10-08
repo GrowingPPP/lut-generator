@@ -1,6 +1,7 @@
 """认证:密码哈希(bcrypt)、JWT 签发/校验、当前用户依赖。"""
 import os
 import secrets
+import stat
 import warnings
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,14 +13,75 @@ from fastapi import Cookie, Header, HTTPException
 
 from storage import db
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(_PROJECT_ROOT / ".env")
 
-_SECRET = os.environ.get("CHROMA_JWT_SECRET")
-if not _SECRET:
-    _SECRET = secrets.token_urlsafe(32)
-    warnings.warn("未配置 CHROMA_JWT_SECRET,已使用随机密钥(重启后需重新登录)", stacklevel=2)
 _ALGO = "HS256"
 _TOKEN_TTL = timedelta(hours=24)
+_MIN_SECRET_LEN = 32
+# 模板里给的占位值,误用等于没有密钥
+_PLACEHOLDER_SECRETS = {
+    "change-me-to-a-long-random-string",
+    "change-me",
+    "secret",
+    "changeme",
+}
+# 开发兜底密钥的落盘位置(不入库)。不落盘的话每次重启都换密钥,
+# 且多 worker 时每个进程各持一份,互相签发的 token 都验不过。
+_DEV_SECRET_FILE = _PROJECT_ROOT / ".jwt_secret"
+
+
+def _validate_secret(secret: str) -> str:
+    if secret in _PLACEHOLDER_SECRETS:
+        raise RuntimeError(
+            "CHROMA_JWT_SECRET 仍是 .env.example 里的占位值,请换成随机串:"
+            "\n  python3 -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+    if len(secret) < _MIN_SECRET_LEN:
+        raise RuntimeError(
+            f"CHROMA_JWT_SECRET 太短({len(secret)} 字符),至少需要 {_MIN_SECRET_LEN} 字符"
+        )
+    return secret
+
+
+def _load_dev_secret() -> str:
+    """未配置密钥时生成一份并落盘复用,保证重启/多 worker 之间登录态不失效。"""
+    try:
+        existing = _DEV_SECRET_FILE.read_text(encoding="utf-8").strip()
+        if len(existing) >= _MIN_SECRET_LEN:
+            return existing
+    except FileNotFoundError:
+        pass
+    secret = secrets.token_urlsafe(48)
+    try:
+        # 先以 0600 创建再写入,避免密钥在权限收紧前可被同机其他用户读到
+        fd = os.open(_DEV_SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(secret)
+        return secret
+    except FileExistsError:
+        # 并发启动时另一个 worker 已写入,用它的
+        return _DEV_SECRET_FILE.read_text(encoding="utf-8").strip()
+
+
+def _resolve_secret() -> str:
+    configured = os.environ.get("CHROMA_JWT_SECRET", "").strip()
+    if configured:
+        return _validate_secret(configured)
+    if os.environ.get("CHROMA_ENV", "").strip().lower() in ("production", "prod"):
+        raise RuntimeError(
+            "生产环境(CHROMA_ENV=production)必须显式配置 CHROMA_JWT_SECRET,"
+            "不能用随机兜底密钥"
+        )
+    warnings.warn(
+        f"未配置 CHROMA_JWT_SECRET,已生成开发用密钥并写入 {_DEV_SECRET_FILE.name}"
+        "(已加入 .gitignore)。生产环境请显式配置。",
+        stacklevel=2,
+    )
+    return _load_dev_secret()
+
+
+_SECRET = _resolve_secret()
 
 
 def _to_bcrypt_bytes(password: str) -> bytes:
