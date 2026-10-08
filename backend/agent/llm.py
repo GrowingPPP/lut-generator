@@ -1,17 +1,43 @@
-"""可插拔 LLM 抽象。模型/URL/key 从环境变量或项目根 .env 读取,详见 .env.example。"""
+"""可插拔 LLM 抽象。模型/URL/key 从环境变量或项目根 .env 读取,详见 .env.example。
+
+参数提取走 tool calling(而不是「要求模型输出 JSON 再正则解析」):工具入参由服务端按
+JSON Schema 约束,模型返回的是结构化 tool_call,不需要从自由文本里抠 JSON。schema 直接
+由 agent.schemas.ExtractResult 生成,模型可见的约束与 pydantic 校验共用一份定义,不会漂移。
+"""
 import json
 import os
-import re
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from pydantic import ValidationError
 
-from .schemas import ExtractResult
+from .schemas import ExtractResult, build_tool_schema
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-v4-pro"
+DEFAULT_MODEL = "deepseek-flash"
+
+# 预算说明:DeepSeek 的 thinking mode **默认开启**(reasoning_effort 默认 high),
+# 思考阶段与最终输出共享 max_tokens;两个模型都会返回 reasoning_content,且
+# usage.completion_tokens_details.reasoning_tokens 能占满整个预算 —— 给太小会拿到
+# 空 content + finish_reason='length'。
+#
+# 实测(deepseek-flash,本项目的抽取 prompt,max_tokens=2000):
+#   简单描述    completion≈130 / reasoning≈70   / 1.5s
+#   多参数描述  completion≈280 / reasoning≈165  / 1.6s
+#   长段口语    completion≈420 / reasoning≈260  / 2.3s
+# 抽取任务思考开销很小,2000 余量充足(需要复杂推理的问题才会吃光预算)。
+# 关掉思考可省约一半延迟与 token:extra_body={"thinking": {"type": "disabled"}},
+# 本项目不默认关闭,以保留抽取质量。
+DEFAULT_MAX_TOKENS = 2000
+
+# 超时与重试:必须显式设置。openai SDK 默认 read timeout 是 **600 秒**、
+# max_retries=2,最坏情况一次抽取会阻塞约 30 分钟(官方文档也把 30 分钟列为
+# 非流式请求的响应时间上限)——对用户界面里的请求是不可接受的。
+# 实测本项目抽取耗时 1~2.3s,30s 余量充足。
+# 重试只给 1 次:避免「超时 × 重试」相乘后把请求拖得更久。
+DEFAULT_TIMEOUT_SECONDS = 30.0
+DEFAULT_MAX_RETRIES = 1
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -26,81 +52,127 @@ def _load_api_key():
     return os.environ.get("OPENAI_API_KEY")
 
 
-def get_llm():
-    """构建 LLM。模型/URL/key 从环境变量或项目根 .env 读取:
+def _timeout_seconds() -> float:
+    raw = os.environ.get("CHROMA_LLM_TIMEOUT", "").strip()
+    if not raw:
+        return DEFAULT_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
 
-      CHROMA_LLM_MODEL      模型名(默认 deepseek-v4-pro)
+
+def get_llm() -> OpenAI:
+    """构建 LLM 客户端。模型/URL/key 从环境变量或项目根 .env 读取:
+
+      CHROMA_LLM_MODEL      模型名(默认 deepseek-flash)
       CHROMA_LLM_API_KEY    API key(缺省读 OPENAI_API_KEY)
       CHROMA_LLM_BASE_URL   base_url(默认 https://api.deepseek.com)
+      CHROMA_LLM_MAX_TOKENS 单次最大 token(默认 2000)
+      CHROMA_LLM_TIMEOUT    单次请求超时秒数(默认 30)
     """
-    model = os.environ.get("CHROMA_LLM_MODEL", DEFAULT_MODEL)
-    api_key = _load_api_key()
-    base_url = os.environ.get("CHROMA_LLM_BASE_URL", DEFAULT_BASE_URL)
-    return ChatOpenAI(model=model, api_key=api_key, base_url=base_url)
+    return OpenAI(
+        api_key=_load_api_key(),
+        base_url=os.environ.get("CHROMA_LLM_BASE_URL", DEFAULT_BASE_URL),
+        timeout=_timeout_seconds(),
+        max_retries=DEFAULT_MAX_RETRIES,
+    )
 
 
-def _parse_json(text: str) -> dict:
-    """从 LLM 输出中提取首个 JSON 对象,容忍 markdown 代码块与前后文字。"""
-    if not text:
-        return {}
-    text = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if fenced:
-        text = fenced.group(1)
-    else:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end <= start:
-            return {}
-        text = text[start : end + 1]
+def _model_name() -> str:
+    return os.environ.get("CHROMA_LLM_MODEL", DEFAULT_MODEL)
+
+
+def _max_tokens() -> int:
+    raw = os.environ.get("CHROMA_LLM_MAX_TOKENS", "").strip()
+    if not raw:
+        return DEFAULT_MAX_TOKENS
     try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        return {}
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_TOKENS
+    return value if value > 0 else DEFAULT_MAX_TOKENS
 
 
-def extract_result(llm, message: str, params: dict | None = None, history: list | None = None) -> dict:
+# ---- prompts ----
+
+SYSTEM_PROMPT = (
+    "你是 LUT 生成助手,负责把用户的自然语言翻译成调色参数。\n"
+    "规则:\n"
+    "1. 用户确认/同意生成(如「确认」「可以」「就这样」「生成吧」「好」「行」)时 "
+    'intent=confirm;否则用户在描述或调整风格,intent=describe。\n'
+    "2. intent=describe 时提取用户提到的调色参数;未提及的字段一律不要填。\n"
+    "3. 相对描述(如「再暖一点」「更暗」)基于当前参数在合理幅度内调整,"
+    "不要覆盖未提及的参数。\n"
+    "4. lift/gamma/gain 必须是三个数字组成的数组。\n"
+    "5. 只通过 submit_lut_params 工具返回结果,不要输出解释文字。"
+)
+
+
+class BudgetExhaustedError(RuntimeError):
+    """thinking 阶段耗尽 max_tokens,模型没来得及产出 tool_call。"""
+
+
+def _user_prompt(message: str, params: dict | None, history: list | None) -> str:
+    parts = []
+    if params:
+        parts.append(f"当前参数:{params}")
+    if history:
+        parts.append(f"对话历史:{history}")
+    parts.append(f"用户消息:{message}")
+    return "\n".join(parts)
+
+
+def extract_result(
+    client: OpenAI,
+    message: str,
+    params: dict | None = None,
+    history: list | None = None,
+) -> dict:
     """分析用户消息:判断意图 + 提取调色参数。返回非空字段的 dict(含 intent)。
 
-    deepseek-v4-pro 为 thinking 模型,不支持 function_calling,故用 JSON 输出 + 手动解析,
-    再用 ExtractResult 校验。params 为当前参数,history 为最近几轮对话。
-    """
-    parts = [
-        "你是 LUT 生成助手。分析用户消息,只输出一个 JSON 对象。\n"
-        "参数说明(数值字段必须落在下列范围):\n"
-        '- intent: "confirm"(确认/同意生成) 或 "describe"(描述/调整风格)\n'
-        "- base_photo_style: 基准照片风格,仅 STD/NAT/VIVD/VLOG\n"
-        "- temp: 色温偏移(Kelvin),-3000 到 3000,正数偏暖。如「暖一点」约 +300 到 +500\n"
-        "- tint: 色调偏移,-500 到 500,正数偏绿、负数偏洋红\n"
-        "- exposure: 曝光(EV),-3 到 3,正数提亮\n"
-        "- contrast: 对比度,-1 到 1,如「对比低一点」约 -0.15\n"
-        "- saturation: 饱和度,-1 到 1,如「饱和低一点」约 -0.1\n"
-        "- hue: 色相旋转(度),-180 到 180\n"
-        "- vibrance: 自然饱和,-1 到 1\n"
-        "- tone_map: V-Log 高光映射强度,0 到 1\n"
-        "- lift: 暗部 RGB 偏移,三个 -0.1 到 0.1 的小数\n"
-        "- gamma: 中间调 RGB 幂,三个 0.5 到 1.5 的小数\n"
-        "- gain: 亮部 RGB 增益,三个 0.5 到 1.5 的小数\n"
-        "规则:\n"
-        "1. 用户确认/同意生成(如「确认」「可以」「就这样」「生成吧」「好」「行」)时 "
-        'intent=confirm;否则用户在描述或调整风格,intent=describe。\n'
-        "2. intent=describe 时提取用户提到的调色参数;未提及的字段不要输出。\n"
-        "3. 相对描述(如「再暖一点」「更暗」)基于当前参数在合理幅度内调整,"
-        "不要覆盖未提及的参数。\n"
-        "4. lift/gamma/gain 必须是三个数字组成的数组。"
-    ]
-    if params:
-        parts.append(f"\n当前参数:{params}")
-    if history:
-        parts.append(f"\n对话历史:{history}")
-    parts.append("\n只输出 JSON 对象,不要解释。\n用户消息:" + message)
-    prompt = "".join(parts)
+    返回空 dict 表示本次没能拿到有效结果(模型未调用工具,或工具入参校验失败),
+    由调用方按「无参数」处理 —— 注意这会走 clarify 分支,用户需重发一次。
 
-    resp = llm.invoke(prompt)
-    text = resp.content if isinstance(resp.content, str) else str(resp.content)
-    data = _parse_json(text)
+    params 为当前参数,history 为最近几轮对话。
+    """
+    resp = client.chat.completions.create(
+        model=_model_name(),
+        max_tokens=_max_tokens(),
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": _user_prompt(message, params, history)},
+        ],
+        # 注意:不要传 tool_choice。服务端对 "required"/指定函数一律 400:
+        #   "Thinking mode does not support this tool_choice"
+        # 这句文案与具体模型无关(两个模型都这么报),是路由层写死的;
+        # "auto" 或省略都可以。是否调用工具由模型自行决定(单一工具 + 明确描述,实测稳定调用)。
+        tools=[build_tool_schema()],
+    )
+    choice = resp.choices[0] if resp.choices else None
+    if choice is None:
+        # 正常不会发生;服务端行为异常时不要让它变成 IndexError 冒到 API 层
+        return {}
+    tool_calls = getattr(choice.message, "tool_calls", None)
+    if not tool_calls:
+        # 预算被 thinking 吃光时 content 为空且 finish_reason='length',这里显式暴露出来,
+        # 避免和「用户确实没提参数」混为一谈而静默降级。
+        finish = getattr(choice, "finish_reason", None)
+        if finish == "length":
+            raise BudgetExhaustedError(
+                "模型在思考阶段用尽 token 预算,未能返回结果。"
+                f"请调大 CHROMA_LLM_MAX_TOKENS(当前 {_max_tokens()})后重试。"
+            )
+        return {}
+
     try:
-        return ExtractResult.model_validate(data).model_dump(exclude_none=True)
+        raw = json.loads(tool_calls[0].function.arguments)
+    except (json.JSONDecodeError, TypeError, AttributeError, IndexError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        return ExtractResult.model_validate(raw).model_dump(exclude_none=True)
     except ValidationError:
-        return {"intent": "describe"}
+        return {}
