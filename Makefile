@@ -11,7 +11,7 @@ MYSQL_DATABASE ?= chroma
 BACKEND_PID := .backend.pid
 FRONTEND_PID := .frontend.pid
 
-.PHONY: help install db-init backend frontend dev stop restart test test-parity clean
+.PHONY: help install db-init backend frontend dev stop restart test test-frontend test-parity check build clean
 
 help: ## 显示所有可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -64,9 +64,18 @@ restart: stop dev ## 重启前后端
 test: ## 运行后端测试
 	@cd $(BACKEND) && ../$(VENV)/bin/python -m pytest tests/ -q
 
-test-parity: ## 前后端引擎数学一致性校验
+test-parity: ## 前后端引擎数学一致性校验(含 .cube 序列化)
 	@cd $(BACKEND) && ../$(VENV)/bin/python scripts/gen_golden.py
 	@cd $(FRONTEND) && node scripts/check_parity.mjs
+	@cd $(FRONTEND) && node scripts/check_cube_parity.mjs
+
+test-frontend: ## 前端纯函数测试(Node 内置 test runner,零依赖)
+	@cd $(FRONTEND) && npm test
+
+check: test test-frontend test-parity ## 跑全部校验(后端 + 前端 + 一致性)
+
+build: ## 构建前端产物到 frontend/dist
+	@cd $(FRONTEND) && npm run build
 
 clean: ## 清理运行时文件
 	@rm -f $(BACKEND_PID) $(FRONTEND_PID)
