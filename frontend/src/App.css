@@ -253,7 +253,7 @@ body {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px 24px;
   padding: 20px;
   border: 1px solid var(--line);
@@ -807,4 +807,335 @@ input[type='range']::-webkit-slider-thumb {
   gap: 10px;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* ---- 参数分组(折叠)----
+   22 个控件平铺会让面板过长,故按算子语义分 5 组折叠。
+   .controls 仍是每组的滑杆栅格。 */
+
+/* 关键:.controls 原来写死 repeat(3, 1fr),在窄容器里每列会被压到 0 宽
+   (原型上实测复现:滑杆不可见、文字重叠)。改为按最小列宽自动降列。
+   220px 是「标签 52 + 滑杆 + 数值 64 + 两处 gap」仍可用的下限。 */
+.param-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.param-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+/* 组内的滑杆区:去掉自身边框(外壳已提供),只留一条分隔线。
+   :first-child 覆盖「基础」组 —— 它是 .param-groups 的直接子元素,没有折叠外壳。 */
+.param-group > .controls,
+.param-groups > .controls {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-top: 1px solid var(--line);
+}
+
+.param-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 20px;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.param-group-head:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.param-group-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.param-group-arrow {
+  color: var(--muted);
+  font-size: 11px;
+  width: 10px;
+}
+
+.param-group-label {
+  flex: 0 0 auto;
+}
+
+/* 折叠时提示「有几项被改过」——否则参数藏起来后用户找不到自己调过什么 */
+.param-group-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+/* ---- AI 自动修图 ----
+   规格见 docs/specs/ui-design.md。沿用既有令牌,仅新增 --warn(警告色)。 */
+:root {
+  --warn: #e0b64a;
+}
+
+.auto-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.auto-bar-icon {
+  color: var(--accent);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.auto-style-input {
+  flex: 1;
+  min-width: 180px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.auto-style-input::placeholder {
+  color: var(--faint, #62626d);
+}
+
+.auto-style-input:focus {
+  border-color: rgba(226, 163, 90, 0.6);
+}
+
+.auto-style-input:disabled {
+  opacity: 0.5;
+}
+
+.auto-go {
+  white-space: nowrap;
+}
+
+.auto-vision {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 进度:四步固定顺序 */
+.auto-progress {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 16px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.auto-step {
+  display: grid;
+  grid-template-columns: 16px 104px 1fr;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.auto-step-mark {
+  text-align: center;
+}
+
+.auto-step-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auto-step.done .auto-step-mark,
+.auto-step.running .auto-step-mark {
+  color: var(--accent);
+}
+
+.auto-step.running .auto-step-mark {
+  animation: auto-spin 1.2s linear infinite;
+}
+.auto-step.pending .auto-step-mark,
+.auto-step.pending .auto-step-title,
+.auto-step.skipped .auto-step-mark,
+.auto-step.skipped .auto-step-title {
+  color: var(--faint, #62626d);
+}
+.auto-step.skipped .auto-step-title {
+  text-decoration: line-through;
+}
+
+@keyframes auto-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .auto-step {
+    grid-template-columns: 16px 1fr;
+    row-gap: 2px;
+  }
+  .auto-step-detail { grid-column: 2; }
+}
+
+/* 报告 */
+.auto-report {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.auto-report:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.auto-headline {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auto-warn {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  background: rgba(224, 182, 74, 0.08);
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.auto-summary {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.auto-summary dt {
+  color: var(--muted);
+}
+
+.auto-summary dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.auto-evidence {
+  display: block !important;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.chip.delta {
+  border: 1px solid var(--linestrong);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.delta.chip-style {
+  border-color: rgba(226, 163, 90, 0.45);
+  color: var(--accent);
+}
+
+.auto-details {
+  font-size: 13px;
+}
+
+.auto-details summary {
+  padding: 6px 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.auto-details summary:hover {
+  color: var(--text);
+}
+
+.auto-steps {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-steps li {
+  display: flex;
+  gap: 10px;
+}
+
+.auto-ok { color: var(--accent); }
+.auto-no { color: var(--warn); }
+
+.auto-small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.auto-rejected ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.auto-review {
+  padding-left: 12px;
+  border-left: 2px solid var(--accent);
+  font-size: 13px;
+}
+
+.auto-review-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auto-review p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.auto-review-skipped {
+  font-size: 12px;
+}
+
+.auto-report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

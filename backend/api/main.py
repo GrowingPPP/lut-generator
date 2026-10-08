@@ -1,10 +1,11 @@
 """LUT 管理 API。"""
 import json
+import os
 from dataclasses import asdict
 from typing import List, Literal, Optional
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,18 @@ class LutParamsModel(BaseModel):
     hue: float = Field(0.0, ge=-180, le=180)
     vibrance: float = Field(0.0, ge=-1, le=1)
     tone_map: float = Field(1.0, ge=0, le=1)
+    # 影调分区(逐点,可烘进 33³ LUT)
+    highlights: float = Field(0.0, ge=-1, le=1)
+    shadows: float = Field(0.0, ge=-1, le=1)
+    whites: float = Field(0.0, ge=-1, le=1)
+    blacks: float = Field(0.0, ge=-1, le=1)
+    curve: float = Field(0.0, ge=-1, le=1)
+    # 分离色调
+    split_shadow_hue: float = Field(0.0, ge=0, le=360)
+    split_shadow_sat: float = Field(0.0, ge=0, le=1)
+    split_highlight_hue: float = Field(0.0, ge=0, le=360)
+    split_highlight_sat: float = Field(0.0, ge=0, le=1)
+    split_balance: float = Field(0.5, ge=0, le=1)
     lift: List[float] = Field([0.0, 0.0, 0.0], min_length=3, max_length=3)
     gamma: List[float] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
     gain: List[float] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
@@ -86,6 +99,14 @@ class MessageOut(BaseModel):
     created_at: str
 
 
+class GeneratedLutOut(BaseModel):
+    """会话中最近一次生成结果:参数 + cube 文本,用于重开会话后恢复与直接下载。"""
+
+    message_id: int
+    params: Optional[LutParamsModel] = None
+    cube_text: str
+
+
 def _record_to_out(rec: dict) -> LutOut:
     return LutOut(
         id=rec["id"],
@@ -98,6 +119,20 @@ def _record_to_out(rec: dict) -> LutOut:
 
 app = FastAPI(title="CHROMA LUT API")
 db.init_db()
+
+
+def _safe_stem(name: str) -> str:
+    """下载文件名主干:去掉路径分隔符与控制字符(含 CR/LF),避免变成路径或被用坏。"""
+    cleaned = "".join(ch for ch in name if ch.isprintable() and ch not in "/\\")
+    return cleaned.strip() or "lut"
+
+
+def _content_disposition(stem: str, mode: str) -> str:
+    """构造下载头:filename* 保真 UTF-8,filename 作为老客户端兜底(纯 ASCII)。"""
+    mode = "camera" if mode == "camera" else "software"  # 白名单,不信调用方
+    full = f"{stem}_{mode}.cube"
+    ascii_fallback = "".join(ch if ch.isascii() and ch.isprintable() and ch not in '\\"' else "_" for ch in full)
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(full)}"
 
 
 @app.post("/api/luts", response_model=LutOut)
@@ -139,7 +174,11 @@ def delete_lut(lut_id: int, user: dict = Depends(auth.get_current_user)):
 
 
 @app.get("/api/luts/{lut_id}/download")
-def download_lut(lut_id: int, mode: str = "camera", user: dict = Depends(auth.get_current_user)):
+def download_lut(
+    lut_id: int,
+    mode: Literal["camera", "software"] = "camera",
+    user: dict = Depends(auth.get_current_user),
+):
     """下载 .cube。mode=camera 注入松下机内头,mode=software 输出标准 .cube。"""
     rec = db.get_lut(lut_id, user["id"])
     if not rec:
@@ -148,19 +187,33 @@ def download_lut(lut_id: int, mode: str = "camera", user: dict = Depends(auth.ge
     lut = generate_lut(engine_params, size=33)
     photo_style = engine_params.base_photo_style if mode == "camera" else None
     text = lut_to_cube(lut, title=rec["name"], photo_style=photo_style)
-    safe_name = quote(rec["name"])
     return Response(
         content=text,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}_{mode}.cube"},
+        headers={"Content-Disposition": _content_disposition(_safe_stem(rec["name"]), mode)},
     )
+
+
+def _build_extract_fn(body: "ChatRequest", full_params: dict | None):
+    """构造「消息 → 结构化参数」的提取函数。
+
+    设置 CHROMA_FAKE_LLM=confirm 时用一个固定返回 confirm 的桩替代真实 LLM:
+    端到端跑通「生成 → 落库 → 重开会话恢复」链路,不消耗真实 API 配额。
+    """
+    if os.environ.get("CHROMA_FAKE_LLM", "").strip().lower() == "confirm":
+        return lambda msg: {"intent": "confirm"}
+
+    from agent.llm import get_llm, extract_result
+
+    client = get_llm()
+    return lambda msg: extract_result(client, msg, params=full_params, history=body.history)
 
 
 @app.post("/api/session/chat", response_model=ChatResponse)
 def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
     """会话生成:LLM 从描述提取参数,参数齐全则生成 LUT。"""
     from agent.graph import run_agent
-    from agent.llm import get_llm, extract_result
+    from agent.llm import BudgetExhaustedError
 
     session_id = body.session_id
     if session_id is None:
@@ -180,12 +233,7 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
     done = False
     cube_text = None
     try:
-        llm = get_llm()
-        result = run_agent(
-            lambda msg: extract_result(llm, msg, params=full_params, history=body.history),
-            body.message,
-            params=initial,
-        )
+        result = run_agent(_build_extract_fn(body, full_params), body.message, params=initial)
         reply = result.get("reply", "")
         done = result.get("done", False)
         cube_text = result.get("cube_text")
@@ -195,6 +243,9 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
             for k in ("lift", "gamma", "gain"):
                 d[k] = list(d[k])
             params_out = LutParamsModel(**d)
+    except BudgetExhaustedError as e:
+        reply = "这次没能解析出结果,请再说一次或换种说法。"
+        error = str(e)
     except Exception as e:
         reply = f"生成失败:{e}"
         error = str(e)
@@ -206,6 +257,7 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
         "agent",
         reply,
         params_out.model_dump_json() if params_out else None,
+        cube_text,
     )
 
     return ChatResponse(
@@ -256,6 +308,43 @@ def list_messages(session_id: int, user: dict = Depends(auth.get_current_user)):
     return out
 
 
+@app.get("/api/sessions/{session_id}/generated", response_model=GeneratedLutOut)
+def get_generated_lut(session_id: int, user: dict = Depends(auth.get_current_user)):
+    """该会话最近一次生成的 LUT(含 cube 文本)。重开会话时恢复参数、无需再让 LLM 重新生成。"""
+    if not db.get_session(session_id, user["id"]):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    rec = db.get_latest_generated_message(session_id, user["id"])
+    if not rec:
+        raise HTTPException(status_code=404, detail="该会话还没有生成过 LUT")
+    params = LutParamsModel(**json.loads(rec["params_json"])) if rec["params_json"] else None
+    return GeneratedLutOut(message_id=rec["id"], params=params, cube_text=rec["cube_text"])
+
+
+class AutoGradeStepOut(BaseModel):
+    stage: str
+    round: int
+    diagnosis: str = ""
+    proposed: dict = Field(default_factory=dict)
+    applied: bool = False
+    rejections: List[str] = Field(default_factory=list)
+
+
+class AutoGradeIssueOut(BaseModel):
+    code: str
+    severity: float
+    evidence: str
+
+
+class AutoGradeOut(BaseModel):
+    params: LutParamsModel
+    issues: List[AutoGradeIssueOut] = Field(default_factory=list)
+    steps: List[AutoGradeStepOut] = Field(default_factory=list)
+    style_params: Optional[dict] = None
+    review: Optional[str] = None
+    degraded: bool = False
+    usage: dict = Field(default_factory=dict)
+
+
 class RegisterRequest(BaseModel):
     username: str
     password: str = Field(min_length=8, max_length=72)
@@ -270,6 +359,107 @@ class AuthResponse(BaseModel):
     token: str
     user_id: int
     username: str
+
+
+MAX_AUTO_IMAGE_BYTES = 32 * 1024 * 1024      # 与模型 API 的单图上限对齐
+
+
+@app.post("/api/auto/grade", response_model=AutoGradeOut)
+async def auto_grade_endpoint(
+    file: UploadFile = File(...),
+    base_params: str = Form(...),
+    style: Optional[str] = Form(None),
+    use_vision: bool = Form(True),
+    max_rounds: int = Form(2),
+    user: dict = Depends(auth.get_current_user),
+):
+    """AI 自动修图。
+
+    `base_params` **必填且不接受默认值**:增量语义下「用默认值兜底」会把用户手调静默抹掉。
+    """
+    from photo import render as photo_render
+    from photo import stats as photo_stats
+    from agent.auto import auto_grade as run_auto_grade
+    from photo.types import PhotoError
+
+    # 1) 参数解析(base_params 非法直接 422)
+    try:
+        parsed = LutParamsModel(**json.loads(base_params))
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"base_params 非法:{exc}")
+
+    # 2) 读图与校验
+    raw = await file.read()
+    if len(raw) > MAX_AUTO_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="图片过大,请压缩到 32MB 以内")
+    try:
+        img = photo_stats.load_image(raw)
+    except PhotoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # 3) 编排
+    style_text = (style or "").strip()[:200] or None
+    client = None
+    style_extractor = None
+    if os.environ.get("CHROMA_FAKE_GRADE", "").strip():
+        pass                                   # 测试桩:完全不调用 LLM
+    else:
+        from agent.llm import extract_result, get_llm
+        client = get_llm()
+
+        def style_extractor(_client, text):     # noqa: ANN001
+            # 风格复用现有抽取路径 —— 不另立一套参数字典
+            return extract_result(_client, text)
+
+    try:
+        result = run_auto_grade(
+            img,
+            parsed.model_dump(),
+            style=style_text,
+            client=client,
+            use_vision=use_vision and client is not None,
+            max_rounds=max(1, min(3, int(max_rounds))),
+            style_extractor=style_extractor,
+        )
+    except Exception as exc:                    # LLM 失败 → 502,不把栈暴露给前端
+        raise HTTPException(status_code=502, detail="分析服务暂时不可用,请稍后重试") from exc
+
+    out = AutoGradeOut(
+        params=LutParamsModel(**{k: v for k, v in result.params.items()
+                                 if k in LutParamsModel.model_fields}),
+        issues=[AutoGradeIssueOut(code=i.code, severity=i.severity, evidence=i.evidence)
+                for i in result.issues],
+        steps=[AutoGradeStepOut(stage=st.stage, round=st.round, diagnosis=st.diagnosis,
+                                proposed=st.proposed, applied=st.applied,
+                                rejections=st.rejections)
+               for st in result.steps],
+        style_params=result.style_params,
+        review=result.review,
+        degraded=result.degraded,
+        usage=result.usage,
+    )
+    # 4) 落库(图片不落库,只存参数与说明)
+    _persist_auto_grade(user["id"], out)
+    return out
+
+
+def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> None:
+    """把自动修图结果记成一条 agent 消息,便于在会话里回溯。不写 cube_text —— 避免又一次 0.9MB 落库。"""
+    try:
+        sid = db.create_session(user_id, "自动修图")
+        lines = [f"AI 自动修图:{len(out.steps)} 步"]
+        for st in out.steps:
+            mark = "已应用" if st.applied else "被拦下"
+            lines.append(f"  [{st.stage}] {st.diagnosis}({mark})")
+        if out.degraded:
+            lines.append("  未能完全达标,已采用保守调整")
+        if out.review:
+            lines.append(f"  视觉复核:{out.review}")
+        db.add_message(user_id, sid, "agent", "\n".join(lines),
+                       out.params.model_dump_json(), None)
+    except Exception:
+        # 落库失败不能影响主流程
+        pass
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)

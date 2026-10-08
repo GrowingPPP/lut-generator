@@ -80,6 +80,7 @@ def init_db():
                     role VARCHAR(16) NOT NULL,
                     content TEXT NOT NULL,
                     params_json TEXT,
+                    cube_text MEDIUMTEXT,
                     created_at VARCHAR(64) NOT NULL,
                     INDEX idx_user (user_id),
                     INDEX idx_session (session_id)
@@ -95,6 +96,12 @@ def init_db():
             # messages 迁移:旧表补 user_id 列并从 sessions 补齐存量
             try:
                 cur.execute("ALTER TABLE messages ADD COLUMN user_id INT NOT NULL DEFAULT 0")
+            except pymysql.err.OperationalError as e:
+                if e.args[0] not in (1060,):
+                    raise
+            # messages 迁移:旧表补 cube_text 列(生成结果留档,单条约 0.9MB 故用 MEDIUMTEXT)
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN cube_text MEDIUMTEXT")
             except pymysql.err.OperationalError as e:
                 if e.args[0] not in (1060,):
                     raise
@@ -252,13 +259,21 @@ def update_session(session_id: int, user_id: int, title: str):
     return get_session(session_id, user_id)
 
 
-def add_message(user_id: int, session_id: int, role: str, content: str, params_json: str | None) -> int:
+def add_message(
+    user_id: int,
+    session_id: int,
+    role: str,
+    content: str,
+    params_json: str | None,
+    cube_text: str | None = None,
+) -> int:
     created_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO messages (user_id, session_id, role, content, params_json, created_at) VALUES (%s, %s, %s, %s, %s, %s)",
-                (user_id, session_id, role, content, params_json, created_at),
+                "INSERT INTO messages (user_id, session_id, role, content, params_json, cube_text, created_at)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (user_id, session_id, role, content, params_json, cube_text, created_at),
             )
             last_id = cur.lastrowid
         conn.commit()
@@ -266,13 +281,35 @@ def add_message(user_id: int, session_id: int, role: str, content: str, params_j
 
 
 def list_messages(session_id: int, user_id: int):
+    """列出会话消息。
+
+    默认不取 cube_text:单条约 0.9MB,历史里每轮生成都有一条,全量拉取会让
+    「打开会话」白等几 MB。需要下载 LUT 时用 get_latest_generated_message 单独取。
+    """
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM messages WHERE session_id = %s AND user_id = %s ORDER BY id ASC",
+                "SELECT id, user_id, session_id, role, content, params_json, created_at"
+                " FROM messages WHERE session_id = %s AND user_id = %s ORDER BY id ASC",
                 (session_id, user_id),
             )
             return cur.fetchall()
+
+
+def get_latest_generated_message(session_id: int, user_id: int):
+    """取该会话最近一条生成了 LUT 的消息(含 cube_text)。无则返回 None。
+
+    用 id 而非 created_at 排序:created_at 是字符串时间戳,同秒内不保证有序。
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, role, content, params_json, cube_text FROM messages"
+                " WHERE session_id = %s AND user_id = %s AND cube_text IS NOT NULL"
+                " ORDER BY id DESC LIMIT 1",
+                (session_id, user_id),
+            )
+            return cur.fetchone()
 
 
 def clear_sessions():

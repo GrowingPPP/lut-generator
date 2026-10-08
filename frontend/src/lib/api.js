@@ -55,6 +55,26 @@ export async function downloadLut(id, mode = 'camera') {
   return { blob, name }
 }
 
+// 触发浏览器保存文本内容为文件
+function safeFileName(name) {
+  // 去掉路径分隔符与控制字符,避免下载名被用作路径
+  const cleaned = String(name)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[/\\]/g, '_')
+    .trim()
+  return cleaned || 'lut.cube'
+}
+
+export function saveTextFile(text, name) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = safeFileName(name)
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // 会话
 export const listSessions = () => jsonFetch(`${BASE}/sessions`)
 export const createSession = (title) =>
@@ -63,6 +83,7 @@ export const deleteSession = (id) => jsonFetch(`${BASE}/sessions/${id}`, { metho
 export const updateSession = (id, title) =>
   jsonFetch(`${BASE}/sessions/${id}`, { method: 'PUT', body: JSON.stringify({ title }) })
 export const listMessages = (sessionId) => jsonFetch(`${BASE}/sessions/${sessionId}/messages`)
+export const getGeneratedLut = (sessionId) => jsonFetch(`${BASE}/sessions/${sessionId}/generated`)
 
 // 聊天
 export const chatSession = (message, params, history, sessionId) =>
@@ -70,3 +91,32 @@ export const chatSession = (message, params, history, sessionId) =>
     method: 'POST',
     body: JSON.stringify({ message, params, history, session_id: sessionId }),
   })
+
+// 自动修图。multipart 提交,base_params 必填(服务端拒绝默认值兜底)。
+export async function autoGrade({ file, params, style, useVision = true, maxRounds }) {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('base_params', JSON.stringify(params))
+  if (style && style.trim()) fd.append('style', style.trim())
+  fd.append('use_vision', String(useVision))
+  if (maxRounds) fd.append('max_rounds', String(maxRounds))
+  // 不要手写 Content-Type:让浏览器带上 multipart boundary
+  const res = await fetch(`${BASE}/auto/grade`, {
+    method: 'POST', body: fd, credentials: 'include',
+  })
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('chroma:unauthorized'))
+    throw new Error('登录已过期,请重新登录')
+  }
+  if (!res.ok) {
+    let detail = `修图失败: ${res.status}`
+    try {
+      const data = await res.json()
+      if (data.detail) detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+    } catch {
+      // 忽略非 JSON 错误体
+    }
+    throw new Error(detail)
+  }
+  return res.json()
+}
