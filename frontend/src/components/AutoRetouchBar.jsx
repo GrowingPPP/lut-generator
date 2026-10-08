@@ -80,15 +80,26 @@ export default function AutoRetouchBar({
       </div>
 
       {running && steps.length > 0 && (
-        <ol className="auto-progress" aria-live="polite">
-          {steps.map((s, i) => (
-            <li key={s.key} className={`auto-step ${i === 0 ? 'done' : i === 1 ? 'running' : 'pending'}`}>
-              <span className="auto-step-mark">{i === 0 ? '✓' : i === 1 ? '◐' : '·'}</span>
-              <span className="auto-step-title">{s.title}</span>
-              <span className="auto-step-detail">{s.detail || (i === 1 ? '正在分析…' : '')}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="auto-progress" aria-live="polite">
+          {/* 服务端是同步的,没有中间进度可报 —— 与其假装有进度(之前把第二步
+              一直标成「进行中」),不如坦白说「正在分析,还不知道到哪一步」。
+              四步清单仍有信息量:它告诉用户**将要**发生什么。 */}
+          <div className="auto-progress-head">
+            <span className="auto-spinner" aria-hidden="true">◐</span>
+            <span>正在分析照片…</span>
+          </div>
+          <ol className="auto-progress-plan">
+            {steps.map((s) => (
+              <li key={s.key} className={`auto-step ${s.state === 'skipped' ? 'skipped' : 'pending'}`}>
+                <span className="auto-step-mark">{s.state === 'skipped' ? '–' : '·'}</span>
+                <span className="auto-step-title">{s.title}</span>
+                <span className="auto-step-detail">
+                  {s.state === 'skipped' ? s.detail : ''}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
     </>
   )

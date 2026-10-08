@@ -48,6 +48,29 @@ export function buildAutoGradePayload({ params, style, useVision = true, maxRoun
   return payload
 }
 
+// 风格参数是增量,展示时需要一个全零基准才能算出「变化」
+export function styleDiff(styleParams) {
+  if (!styleParams) return []
+  const zeroBase = {}
+  for (const [k, v] of Object.entries(styleParams)) {
+    zeroBase[k] = Array.isArray(v) ? v.map(() => 0) : 0
+  }
+  return diffParams(zeroBase, styleParams)
+}
+
+// 视觉复核未执行的原因 → 给用户看的措辞。
+// 关键:**不能把「失败」说成「你关的」** —— 那会让用户以为是自己关的。
+export const REVIEW_SKIP_TEXT = {
+  disabled: '已关闭视觉复核,本次仅依据客观数据调整。',
+  failed: '视觉复核未能完成(模型或网络问题),本次仅依据客观数据调整。',
+  no_client: '服务未配置模型,本次未做视觉复核。',
+}
+
+export function reviewSkipText(reason) {
+  if (!reason) return ''
+  return REVIEW_SKIP_TEXT[reason] || `视觉复核未执行(${reason})。`
+}
+
 // 服务端返回的 steps → UI 的中文步骤列表(顺序固定为 4 步)
 export function summarizeSteps(steps, { hasStyle, hasVision }) {
   const out = []

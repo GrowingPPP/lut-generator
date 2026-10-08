@@ -1,4 +1,4 @@
-import { diffParams, gradeHeadline, rejectionList } from '../lib/autoGrade.js'
+import { diffParams, gradeHeadline, rejectionList, reviewSkipText, styleDiff } from '../lib/autoGrade.js'
 
 /**
  * 自动修图的修改说明面板。
@@ -14,9 +14,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
   if (!result) return null
 
   const changes = diffParams(beforeParams, result.params)
-  const styleChanges = result.style_params
-    ? diffParams({}, { ...emptyLike(result.style_params), ...result.style_params })
-    : []
+  const styleChanges = styleDiff(result.style_params)
   const rejected = rejectionList(result.steps)
 
   return (
@@ -93,7 +91,9 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
           <p>{result.review}</p>
         </div>
       ) : (
-        <div className="auto-review-skipped text-muted">已关闭视觉复核,本次仅依据客观数据调整。</div>
+        <div className="auto-review-skipped text-muted">
+          {reviewSkipText(result.review_skip_reason)}
+        </div>
       )}
 
       <div className="auto-report-actions">
@@ -101,13 +101,4 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
       </div>
     </section>
   )
-}
-
-/** 风格参数是增量,展示时需要一个全零基准才能算出「变化」。 */
-function emptyLike(delta) {
-  const out = {}
-  for (const [k, v] of Object.entries(delta)) {
-    out[k] = Array.isArray(v) ? v.map(() => 0) : 0
-  }
-  return out
 }

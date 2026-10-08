@@ -653,3 +653,36 @@ def test_vision_failure_after_llm_failure_still_returns():
     r = A.auto_grade(img, {}, client=object(), use_vision=True, proposer=_boom)
     assert r.params
     assert r.review is None
+
+
+# --------------------------------------------------------------------------
+# review_skip_reason:原因必须精确,不能把「没配置」说成「用户关闭」
+# --------------------------------------------------------------------------
+
+def test_review_skip_reason_no_client_takes_precedence():
+    """没配置模型时是 no_client,**不是** disabled ——
+    否则 UI 会显示「已关闭视觉复核」,让用户以为是自己关的。"""
+    img = make_fixture("low_contrast")
+    r = A.auto_grade(img, {}, client=None)          # use_vision 默认 True
+    assert r.review_skip_reason == "no_client"
+    assert r.review is None
+
+
+def test_review_skip_reason_disabled_when_user_turns_it_off():
+    img = make_fixture("low_contrast")
+    r = A.auto_grade(img, {}, client=object(), use_vision=False)
+    assert r.review_skip_reason == "disabled"
+
+
+def test_review_skip_reason_failed_on_model_error():
+    img = make_fixture("low_contrast")
+    r = A.auto_grade(img, {}, client=object(), use_vision=True)   # 桩对象没有 chat → 报错
+    assert r.review_skip_reason == "failed"
+
+
+def test_review_skip_reason_absent_when_review_succeeds():
+    img = make_fixture("low_contrast")
+    c = stub_client([{"exposure": 0.05}], review="画面更通透了")
+    r = A.auto_grade(img, {}, client=c, use_vision=True)
+    assert r.review == "画面更通透了"
+    assert r.review_skip_reason is None

@@ -9,10 +9,13 @@ import test from 'node:test'
 
 import {
   PARAM_LABELS,
+  REVIEW_SKIP_TEXT,
   buildAutoGradePayload,
   diffParams,
   gradeHeadline,
   rejectionList,
+  reviewSkipText,
+  styleDiff,
   summarizeSteps,
 } from '../src/lib/autoGrade.js'
 import { defaultParams } from '../src/lib/lutEngine.js'
@@ -144,4 +147,46 @@ test('gradeHeadline 区分降级/无调整/已调整', () => {
   assert.match(gradeHeadline({ degraded: false, steps: [] }), /无需明显调整/)
   assert.match(gradeHeadline({ degraded: false, steps: [{ applied: true }] }), /1 步/)
   assert.equal(gradeHeadline(null), '')
+})
+
+// ---- 阶段 G:下沉的展示逻辑 ----
+
+test('styleDiff 以全零为基准算风格增量', () => {
+  const out = styleDiff({ contrast: 0.1, temp: -150, lift: [-0.02, 0, 0.01] })
+  const keys = out.map((o) => o.key).sort()
+  assert.deepEqual(keys, ['contrast', 'lift', 'temp'])
+  const temp = out.find((o) => o.key === 'temp')
+  assert.match(temp.text, /-150/)
+  assert.match(temp.text, /偏冷/)
+  const lift = out.find((o) => o.key === 'lift')
+  assert.match(lift.text, /暗部 RGB/)
+})
+
+test('styleDiff 对 null / 空对象安全', () => {
+  assert.deepEqual(styleDiff(null), [])
+  assert.deepEqual(styleDiff(undefined), [])
+  assert.deepEqual(styleDiff({}), [])
+})
+
+test('styleDiff 不含零值字段', () => {
+  assert.deepEqual(styleDiff({ contrast: 0, temp: 0 }), [])
+})
+
+test('reviewSkipText 区分三种原因,失败不能说成「你关的」', () => {
+  assert.match(reviewSkipText('disabled'), /已关闭视觉复核/)
+  assert.match(reviewSkipText('failed'), /未能完成/)
+  assert.doesNotMatch(reviewSkipText('failed'), /已关闭/)
+  assert.match(reviewSkipText('no_client'), /未配置模型/)
+  assert.doesNotMatch(reviewSkipText('no_client'), /已关闭/)
+})
+
+test('reviewSkipText 对未知原因与空值安全', () => {
+  assert.equal(reviewSkipText(null), '')
+  assert.equal(reviewSkipText(''), '')
+  assert.match(reviewSkipText('something_new'), /something_new/)
+})
+
+test('REVIEW_SKIP_TEXT 覆盖后端会返回的全部原因', () => {
+  // 与 agent/auto.py 的 review_skip_reason 取值保持同步
+  assert.deepEqual(Object.keys(REVIEW_SKIP_TEXT).sort(), ['disabled', 'failed', 'no_client'])
 })

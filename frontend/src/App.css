@@ -1139,3 +1139,26 @@ input[type='range']::-webkit-slider-thumb {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* 不确定进度:服务端同步返回,没有中间进度可报,如实呈现 */
+.auto-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auto-spinner {
+  color: var(--accent);
+  animation: auto-spin 1.2s linear infinite;
+}
+
+.auto-progress-plan {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  opacity: 0.75;
+}

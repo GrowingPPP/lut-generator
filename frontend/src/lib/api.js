@@ -92,6 +92,17 @@ export const chatSession = (message, params, history, sessionId) =>
     body: JSON.stringify({ message, params, history, session_id: sessionId }),
   })
 
+// 取最近一次自动修图报告(刷新或重开会话后重建面板用)。没有记录时返回 null。
+export async function getAutoReport() {
+  const res = await fetch(`${BASE}/auto/report`, { credentials: 'include' })
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('chroma:unauthorized'))
+    return null
+  }
+  if (!res.ok) return null
+  return res.json()
+}
+
 // 自动修图。multipart 提交,base_params 必填(服务端拒绝默认值兜底)。
 export async function autoGrade({ file, params, style, useVision = true, maxRounds }) {
   const fd = new FormData()

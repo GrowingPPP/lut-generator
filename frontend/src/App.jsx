@@ -1,72 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { generateLUT, defaultParams, applyLUTToImageData } from './lib/lutEngine.js'
-import { LUTRenderer } from './lib/lutPreview.js'
+import { defaultParams } from './lib/lutEngine.js'
+import { makeThumb } from './lib/preview.js'
+import usePreview from './hooks/usePreview.js'
 import {
-  listLuts, createLut, updateLut, deleteLut, downloadLut, chatSession,
+  createLut, chatSession,
   listSessions, createSession, deleteSession, updateSession, listMessages,
-  getGeneratedLut, saveTextFile,
-  login, register, logout as apiLogout, me,
+  getGeneratedLut, getAutoReport, saveTextFile,
+  logout as apiLogout, me,
 } from './lib/api.js'
 import { paramsToCube } from './lib/lutEngine.js'
 import AutoRetouchBar from './components/AutoRetouchBar.jsx'
 import AutoRetouchReport from './components/AutoRetouchReport.jsx'
+import AuthView from './components/AuthView.jsx'
+import LibraryView from './components/LibraryView.jsx'
 
-let _testImage = null
-function makeTestImage() {
-  if (_testImage) return _testImage
-  const c = document.createElement('canvas')
-  c.width = 800
-  c.height = 560
-  const ctx = c.getContext('2d')
-  const sky = ctx.createLinearGradient(0, 0, 0, 360)
-  sky.addColorStop(0, '#3a4a63')
-  sky.addColorStop(0.45, '#8a7a6a')
-  sky.addColorStop(0.75, '#c89b72')
-  sky.addColorStop(1, '#d9a878')
-  ctx.fillStyle = sky
-  ctx.fillRect(0, 0, 800, 360)
-  ctx.fillStyle = '#f4d7a4'
-  ctx.beginPath()
-  ctx.arc(600, 270, 46, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#2e2b31'
-  ctx.beginPath()
-  ctx.moveTo(0, 360)
-  ctx.lineTo(120, 240)
-  ctx.lineTo(220, 330)
-  ctx.lineTo(340, 210)
-  ctx.lineTo(470, 350)
-  ctx.lineTo(600, 250)
-  ctx.lineTo(720, 340)
-  ctx.lineTo(800, 300)
-  ctx.lineTo(800, 360)
-  ctx.closePath()
-  ctx.fill()
-  const sea = ctx.createLinearGradient(0, 360, 0, 560)
-  sea.addColorStop(0, '#c8996f')
-  sea.addColorStop(1, '#4a3a3c')
-  ctx.fillStyle = sea
-  ctx.fillRect(0, 360, 800, 200)
-  _testImage = c
-  return c
-}
-
-function makeThumb(params) {
-  const w = 320
-  const h = 200
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const ctx = c.getContext('2d')
-  ctx.drawImage(makeTestImage(), 0, 0, w, h)
-  const imageData = ctx.getImageData(0, 0, w, h)
-  const { data, size } = generateLUT(params, 33)
-  const out = applyLUTToImageData(imageData, data, size)
-  ctx.putImageData(out, 0, 0)
-  return c.toDataURL('image/jpeg', 0.85)
-}
-
-// 参数分组。默认展开前两组 —— 与 backend/lut_engine/transforms.py 的算子链顺序对应。
 const PARAM_GROUPS = [
   {
     id: 'basic', label: '基础', defaultOpen: true,
@@ -167,95 +114,6 @@ const DISPLAY_MODES = [
   { value: 'split', label: '独立展示' },
 ]
 
-function usePreview(originalRef, gradedRef, params, displayMode) {
-  const rendererRef = useRef(null)
-  const imageRef = useRef(null)
-  const paramsRef = useRef(params)
-  paramsRef.current = params
-
-  const drawOriginal = useCallback(
-    (img) => {
-      const oc = originalRef.current
-      if (!oc) return
-      oc.width = img.width
-      oc.height = img.height
-      oc.getContext('2d').drawImage(img, 0, 0)
-    },
-    [originalRef],
-  )
-
-  // 初始化默认样张(仅一次)
-  useEffect(() => {
-    imageRef.current = makeTestImage()
-  }, [])
-
-  // 重建 renderer:挂载 + 展示形式切换(canvas 会重挂载)
-  useEffect(() => {
-    const img = imageRef.current
-    const canvas = gradedRef.current
-    if (!img || !canvas) return
-    const renderer = new LUTRenderer(canvas)
-    renderer.setImage(img)
-    renderer.setSplitMode(displayMode === 'slider')
-    const { data, size } = generateLUT(paramsRef.current, 33)
-    renderer.setLUT(data, size)
-    renderer.render()
-    rendererRef.current = renderer
-    drawOriginal(img)
-    return () => {
-      renderer.dispose()
-      rendererRef.current = null
-    }
-  }, [displayMode, gradedRef, drawOriginal])
-
-  // 参数变化 → 重新生成 LUT(rAF 合并,拖滑杆同一帧只烘一次)
-  useEffect(() => {
-    const renderer = rendererRef.current
-    if (!renderer) return
-    const id = requestAnimationFrame(() => {
-      const { data, size } = generateLUT(paramsRef.current, 33)
-      renderer.setLUT(data, size)
-      renderer.render()
-    })
-    return () => cancelAnimationFrame(id)
-  }, [params])
-
-  const setSplit = useCallback((x) => {
-    const renderer = rendererRef.current
-    if (!renderer) return
-    renderer.setSplit(x)
-    renderer.render()
-  }, [])
-
-  const upload = useCallback(
-    (file) =>
-      new Promise((resolve) => {
-        const url = URL.createObjectURL(file)
-        const img = new Image()
-        img.onload = () => {
-          imageRef.current = img
-          drawOriginal(img)
-          const renderer = rendererRef.current
-          renderer.setImage(img)
-          const { data, size } = generateLUT(paramsRef.current, 33)
-          renderer.setLUT(data, size)
-          renderer.render()
-          URL.revokeObjectURL(url)
-          resolve(true)
-        }
-        img.onerror = () => {
-          URL.revokeObjectURL(url)
-          resolve(false)
-        }
-        img.src = url
-      }),
-    [drawOriginal],
-  )
-
-  return { setSplit, upload }
-}
-
-// 折叠状态下显示「已改动几项」,避免参数被藏起来后用户找不到自己调过什么
 function groupSummary(g, params) {
   const keys = g.id === 'rgb' ? RGB_GROUPS.map((r) => r.key) : g.sliders.map((sl) => sl.key)
   const changed = keys.filter((k) => {
@@ -337,6 +195,13 @@ function GenerateView({ previewLut }) {
         setMessages(msgs.map((m) => ({ role: m.role, text: m.content })))
         const lastAgent = [...msgs].reverse().find((m) => m.role === 'agent' && m.params)
         setParams(lastAgent ? lastAgent.params : defaultParams())
+        // 自动修图报告:属于本会话才展示(否则在别的会话里会弹出上一份报告)
+        try {
+          const rep = await getAutoReport()
+          setGradeResult(rep && rep.session_id === id ? rep : null)
+        } catch {
+          setGradeResult(null)
+        }
         // 生成结果单独取:只有生成过 LUT 的会话才有,取回后可直接下载
         try {
           const gen = await getGeneratedLut(id)
@@ -602,6 +467,7 @@ function GenerateView({ previewLut }) {
           setStatus={setStatus}
           onBeforeRun={(snapshot) => setUndoSnapshot(snapshot)}
           onResult={(result) => {
+            // 记住报告属于哪个会话(后端把它写进固定的「自动修图」会话)
             setGradeResult(result)
             setParams(result.params)
             setCubeText(null)        // 参数变了,服务端那份 cube 文本已失效
@@ -730,158 +596,6 @@ function GenerateView({ previewLut }) {
           <span className="status">{status}</span>
         </div>
       </section>
-    </div>
-  )
-}
-
-function LibraryView({ onPreview }) {
-  const [luts, setLuts] = useState([])
-  const [error, setError] = useState('')
-  const [editingId, setEditingId] = useState(null)
-  const [editName, setEditName] = useState('')
-
-  const thumbs = useMemo(() => {
-    const map = {}
-    for (const lut of luts) {
-      map[lut.id] = makeThumb(lut.params)
-    }
-    return map
-  }, [luts])
-
-  const load = useCallback(async () => {
-    try {
-      setLuts(await listLuts())
-      setError('')
-    } catch (e) {
-      setError(`加载失败:${e.message}。请确认后端已启动(localhost:8000)。`)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  const remove = async (id) => {
-    await deleteLut(id)
-    load()
-  }
-
-  const startEdit = (lut) => {
-    setEditingId(lut.id)
-    setEditName(lut.name)
-  }
-
-  const saveEdit = async (id) => {
-    await updateLut(id, { name: editName.trim() || '未命名 LUT' })
-    setEditingId(null)
-    load()
-  }
-
-  return (
-    <div className="content">
-      <div className="lib-head">
-        <h1>我的 LUT</h1>
-        <span className="count">{luts.length} 个</span>
-      </div>
-      {error && <div className="error">{error}</div>}
-      <div className="lib-grid">
-        {luts.map((lut) => (
-          <div key={lut.id} className="lut-card">
-            <div className="card-thumb" style={{ backgroundImage: `url(${thumbs[lut.id]})` }}>
-              <span className="card-badge">{lut.params.base_photo_style}</span>
-            </div>
-            <div className="card-body">
-              {editingId === lut.id ? (
-                <div className="edit-row">
-                  <input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                  <button className="btn" onClick={() => saveEdit(lut.id)}>
-                    保存
-                  </button>
-                  <button className="btn" onClick={() => setEditingId(null)}>
-                    取消
-                  </button>
-                </div>
-              ) : (
-                <h3>{lut.name}</h3>
-              )}
-              <p className="card-desc">{lut.description || '—'}</p>
-              <div className="card-actions">
-                <button className="btn-primary" onClick={() => onPreview(lut)}>
-                  预览
-                </button>
-                <button className="btn" onClick={() => downloadAndSave(lut.id, 'camera')}>机内版</button>
-                <button className="btn" onClick={() => downloadAndSave(lut.id, 'software')}>后期版</button>
-                <button className="btn" onClick={() => startEdit(lut)}>
-                  编辑
-                </button>
-                <button className="btn-danger" onClick={() => remove(lut.id)}>
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-        {luts.length === 0 && !error && (
-          <div className="empty">还没有 LUT,去「生成」页创建一个。</div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-async function downloadAndSave(id, mode) {
-  try {
-    const { blob, name } = await downloadLut(id, mode)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    alert(`下载失败:${e.message}`)
-  }
-}
-
-function AuthView({ onAuthed }) {
-  const [mode, setMode] = useState('login')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const submit = async () => {
-    if (!username.trim() || !password) {
-      setError('请输入用户名和密码')
-      return
-    }
-    setBusy(true)
-    setError('')
-    try {
-      const resp = mode === 'login' ? await login(username.trim(), password) : await register(username.trim(), password)
-      onAuthed(resp.username)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="auth-wrap">
-      <div className="auth-card">
-        <div className="brand auth-brand"><span className="logo">C</span>CHROMA</div>
-        <h1>{mode === 'login' ? '登录' : '注册'}</h1>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名" />
-        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        {error && <div className="error">{error}</div>}
-        <button className="btn-primary" onClick={submit} disabled={busy}>
-          {busy ? '处理中…' : mode === 'login' ? '登录' : '注册'}
-        </button>
-        <button className="btn" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>
-          {mode === 'login' ? '没有账号?去注册' : '已有账号?去登录'}
-        </button>
-      </div>
     </div>
   )
 }
