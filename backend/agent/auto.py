@@ -345,11 +345,21 @@ VISION_REVIEW_PROMPT = (
 
 def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
                   style: Optional[str] = None,
-                  model: Optional[str] = None, max_tokens: int = 1200) -> Tuple[Optional[str], Dict[str, Any]]:
+                  model: Optional[str] = None, max_tokens: int = 1200
+                  ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
     """把原图与渲染图拼成一张发给模型做主观复检。
 
-    复检是**增强能力**:它失败不能导致整个自动修图失败,所以这里吞掉异常并返回 None。
+    返回 (意见, usage, 跳过原因)。跳过原因三选一:
+      None      复检正常执行(可能仍返回空意见)
+      "failed"  调用失败(模型/网络)
+      "no_client" 未配置客户端
+
+    复检是**增强能力**:它失败不能导致整个自动修图失败,所以这里吞掉异常。
+    但**必须把失败原因传出去** —— 否则前端只能显示「已关闭视觉复核」,
+    用户会以为是自己关的。
     """
+    if client is None:
+        return None, {}, "no_client"
     try:
         panel = R.side_by_side(before, after)
         url = R.to_data_url(panel)
@@ -369,9 +379,9 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
         )
         usage = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
         content = resp.choices[0].message.content if resp.choices else None
-        return (content.strip() or None if isinstance(content, str) else None), usage
+        return (content.strip() or None if isinstance(content, str) else None), usage, None
     except Exception:
-        return None, {}
+        return None, {}, "failed"
 
 
 # --------------------------------------------------------------------------
@@ -498,9 +508,17 @@ def auto_grade(
 
     # ---------- 视觉复检 ----------
     review: Optional[str] = None
-    if use_vision and client is not None:
+    review_skip_reason: Optional[str] = None
+    # 原因语义必须精确,顺序也有讲究:
+    #   no_client 是「没配置模型」,disabled 是「用户主动关闭」—— 两者不能混,
+    #   否则用户会以为是自己关的。所以先判 no_client,再判 use_vision。
+    if client is None:
+        review_skip_reason = "no_client"
+    elif not use_vision:
+        review_skip_reason = "disabled"
+    else:
         after_img = R.render_lut(R.lut_from_params(params), img)
-        review, usage = vision_review(client, img, after_img, style=style)
+        review, usage, review_skip_reason = vision_review(client, img, after_img, style=style)
         _accumulate_usage(usage_total, usage)
 
     return AutoGradeResult(
@@ -509,6 +527,7 @@ def auto_grade(
         issues=issues,
         style_params=style_params,
         review=review,
+        review_skip_reason=review_skip_reason,
         degraded=degraded,
         usage=usage_total,
     )

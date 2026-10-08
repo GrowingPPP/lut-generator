@@ -66,6 +66,7 @@ def init_db():
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     title VARCHAR(255) NOT NULL,
+                    is_auto TINYINT NOT NULL DEFAULT 0,
                     created_at VARCHAR(64) NOT NULL,
                     INDEX idx_user (user_id)
                 ) CHARACTER SET utf8mb4
@@ -81,6 +82,7 @@ def init_db():
                     content TEXT NOT NULL,
                     params_json TEXT,
                     cube_text MEDIUMTEXT,
+                    payload_json MEDIUMTEXT,
                     created_at VARCHAR(64) NOT NULL,
                     INDEX idx_user (user_id),
                     INDEX idx_session (session_id)
@@ -102,6 +104,20 @@ def init_db():
             # messages 迁移:旧表补 cube_text 列(生成结果留档,单条约 0.9MB 故用 MEDIUMTEXT)
             try:
                 cur.execute("ALTER TABLE messages ADD COLUMN cube_text MEDIUMTEXT")
+            except pymysql.err.OperationalError as e:
+                if e.args[0] not in (1060,):
+                    raise
+            # sessions 迁移:标记「自动修图」会话。
+            # 用显式标记而不是按标题查:标题是展示文案,用户改了就失效。
+            try:
+                cur.execute("ALTER TABLE sessions ADD COLUMN is_auto TINYINT NOT NULL DEFAULT 0")
+            except pymysql.err.OperationalError as e:
+                if e.args[0] not in (1060,):
+                    raise
+            # messages 迁移:结构化结果留档(自动修图的完整 AutoGradeOut,供刷新后重建报告)。
+            # 不复用 content —— 那是给人看的可读摘要,混入 JSON 会污染会话展示。
+            try:
+                cur.execute("ALTER TABLE messages ADD COLUMN payload_json MEDIUMTEXT")
             except pymysql.err.OperationalError as e:
                 if e.args[0] not in (1060,):
                     raise
@@ -210,17 +226,49 @@ def bump_token_version(user_id: int):
         conn.commit()
 
 
-def create_session(user_id: int, title: str) -> int:
+def create_session(user_id: int, title: str, is_auto: bool = False) -> int:
     created_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO sessions (user_id, title, created_at) VALUES (%s, %s, %s)",
-                (user_id, title, created_at),
+                "INSERT INTO sessions (user_id, title, is_auto, created_at) VALUES (%s, %s, %s, %s)",
+                (user_id, title, 1 if is_auto else 0, created_at),
             )
             last_id = cur.lastrowid
         conn.commit()
         return last_id
+
+
+def get_or_create_auto_session(user_id: int, title: str = "自动修图") -> int:
+    """取该用户的自动修图会话,不存在则创建。
+
+    自动修图结果全部落进这**一个**会话 —— 否则每次点一下都会新建一个同名会话,
+    把用户真正的创作会话挤出列表。按 is_auto 标记查而不是按标题查:
+    标题是展示文案,用户改了就失效。
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM sessions WHERE user_id = %s AND is_auto = 1 ORDER BY id ASC LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if row:
+            return row["id"]
+    return create_session(user_id, title, is_auto=True)
+
+
+def get_latest_payload_message(session_id: int, user_id: int):
+    """取该会话最近一条带结构化 payload 的消息(用于刷新后重建报告)。"""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, role, content, params_json, payload_json, created_at FROM messages"
+                " WHERE session_id = %s AND user_id = %s AND payload_json IS NOT NULL"
+                " ORDER BY id DESC LIMIT 1",
+                (session_id, user_id),
+            )
+            return cur.fetchone()
 
 
 def list_sessions(user_id: int):
@@ -266,14 +314,16 @@ def add_message(
     content: str,
     params_json: str | None,
     cube_text: str | None = None,
+    payload_json: str | None = None,
 ) -> int:
     created_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO messages (user_id, session_id, role, content, params_json, cube_text, created_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (user_id, session_id, role, content, params_json, cube_text, created_at),
+                "INSERT INTO messages"
+                " (user_id, session_id, role, content, params_json, cube_text, payload_json, created_at)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (user_id, session_id, role, content, params_json, cube_text, payload_json, created_at),
             )
             last_id = cur.lastrowid
         conn.commit()

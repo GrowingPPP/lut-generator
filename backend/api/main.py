@@ -1,5 +1,6 @@
 """LUT 管理 API。"""
 import json
+import logging
 import os
 from dataclasses import asdict
 from typing import List, Literal, Optional
@@ -7,11 +8,14 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import BaseModel, Field
 
 from api import auth, ratelimit
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
+
+logger = logging.getLogger("chroma.api")
 
 
 class LutParamsModel(BaseModel):
@@ -341,8 +345,16 @@ class AutoGradeOut(BaseModel):
     steps: List[AutoGradeStepOut] = Field(default_factory=list)
     style_params: Optional[dict] = None
     review: Optional[str] = None
+    # 视觉复核未执行的原因:disabled(用户关闭)/ failed(调用失败)/ no_client(未配置模型)
+    review_skip_reason: Optional[str] = None
     degraded: bool = False
     usage: dict = Field(default_factory=dict)
+
+
+class AutoGradeReportOut(AutoGradeOut):
+    """报告查询的响应:比生成时的输出多一个 session_id,
+    前端据此判断「这份报告是不是属于我正打开的会话」。"""
+    session_id: int
 
 
 class RegisterRequest(BaseModel):
@@ -366,6 +378,7 @@ MAX_AUTO_IMAGE_BYTES = 32 * 1024 * 1024      # 与模型 API 的单图上限对�
 
 @app.post("/api/auto/grade", response_model=AutoGradeOut)
 async def auto_grade_endpoint(
+    request: Request,
     file: UploadFile = File(...),
     base_params: str = Form(...),
     style: Optional[str] = Form(None),
@@ -380,7 +393,17 @@ async def auto_grade_endpoint(
     from photo import render as photo_render
     from photo import stats as photo_stats
     from agent.auto import auto_grade as run_auto_grade
-    from photo.types import PhotoError
+    from agent.llm import BudgetExhaustedError
+    from photo.types import ImageTooLargeError, PhotoError
+
+    # 0) 配额:这是最贵的接口,每次都会打 LLM
+    if ratelimit.auto_quota_exceeded(user["id"]):
+        retry = ratelimit.auto_retry_after(user["id"])
+        raise HTTPException(
+            status_code=429,
+            detail=f"自动修图次数已达上限,请在 {max(1, retry // 60)} 分钟后重试",
+            headers={"Retry-After": str(retry)},
+        )
 
     # 1) 参数解析(base_params 非法直接 422)
     try:
@@ -389,13 +412,22 @@ async def auto_grade_endpoint(
         raise HTTPException(status_code=422, detail=f"base_params 非法:{exc}")
 
     # 2) 读图与校验
+    # 先用 Content-Length 预判,能省掉把 32MB 读进内存再拒绝的开销。
+    # 拿不到该头(分块传输)时退化为读后判断 —— 不能只依赖它。
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_AUTO_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="图片过大,请压缩到 32MB 以内")
+
     raw = await file.read()
     if len(raw) > MAX_AUTO_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="图片过大,请压缩到 32MB 以内")
     try:
         img = photo_stats.load_image(raw)
+    except ImageTooLargeError as exc:
+        # 像素数超限也是「太大」,应是 413 而不是 400
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except PhotoError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # 3) 编排
     style_text = (style or "").strip()[:200] or None
@@ -421,7 +453,25 @@ async def auto_grade_endpoint(
             max_rounds=max(1, min(3, int(max_rounds))),
             style_extractor=style_extractor,
         )
-    except Exception as exc:                    # LLM 失败 → 502,不把栈暴露给前端
+    except BudgetExhaustedError as exc:
+        # 可操作提示:这不是「服务挂了」,而是预算配置需要调整
+        logger.warning("auto/grade 预算耗尽: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="模型思考预算不足,未能完成分析。请联系管理员调大 CHROMA_LLM_MAX_TOKENS",
+        ) from exc
+    except (APITimeoutError, APIConnectionError) as exc:
+        logger.warning("auto/grade 上游不可达: %s", exc)
+        raise HTTPException(status_code=504, detail="分析服务响应超时,请重试") from exc
+    except APIStatusError as exc:
+        # 保留上游状态码便于排查;不回传上游报文,避免泄露内部细节
+        logger.warning("auto/grade 上游返回错误: status=%s", getattr(exc, "status_code", "?"))
+        raise HTTPException(
+            status_code=502,
+            detail=f"分析服务返回错误(上游状态码 {getattr(exc, 'status_code', '未知')})",
+        ) from exc
+    except Exception as exc:
+        logger.exception("auto/grade 未预期失败")
         raise HTTPException(status_code=502, detail="分析服务暂时不可用,请稍后重试") from exc
 
     out = AutoGradeOut(
@@ -435,18 +485,27 @@ async def auto_grade_endpoint(
                for st in result.steps],
         style_params=result.style_params,
         review=result.review,
+        review_skip_reason=result.review_skip_reason,
         degraded=result.degraded,
         usage=result.usage,
     )
-    # 4) 落库(图片不落库,只存参数与说明)
+    # 4) 落库(图片不落库,只存参数与说明摘要)
+    ratelimit.record_auto_call(user["id"])
     _persist_auto_grade(user["id"], out)
     return out
 
 
-def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> None:
-    """把自动修图结果记成一条 agent 消息,便于在会话里回溯。不写 cube_text —— 避免又一次 0.9MB 落库。"""
+def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> Optional[int]:
+    """把自动修图结果写进该用户的**唯一**自动修图会话,返回 session_id。
+
+    两个设计点:
+    - 复用单一会话:否则每点一次就多一个同名会话,把用户的创作会话挤出列表。
+    - 结构化结果存 payload_json(完整 AutoGradeOut),刷新后据此重建报告;
+      content 仍写人类可读摘要,两者并存、互不污染。
+    不写 cube_text —— 避免又一次 0.9MB 落库。
+    """
     try:
-        sid = db.create_session(user_id, "自动修图")
+        sid = db.get_or_create_auto_session(user_id)
         lines = [f"AI 自动修图:{len(out.steps)} 步"]
         for st in out.steps:
             mark = "已应用" if st.applied else "被拦下"
@@ -455,11 +514,34 @@ def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> None:
             lines.append("  未能完全达标,已采用保守调整")
         if out.review:
             lines.append(f"  视觉复核:{out.review}")
+        elif out.review_skip_reason:
+            lines.append(f"  视觉复核未执行({out.review_skip_reason})")
         db.add_message(user_id, sid, "agent", "\n".join(lines),
-                       out.params.model_dump_json(), None)
+                       out.params.model_dump_json(), None, out.model_dump_json())
+        return sid
     except Exception:
         # 落库失败不能影响主流程
-        pass
+        return None
+
+
+@app.get("/api/auto/report", response_model=Optional[AutoGradeReportOut])
+def get_auto_report(user: dict = Depends(auth.get_current_user)):
+    """取该用户最近一次自动修图结果,供前端刷新后重建报告。
+
+    返回带 session_id:前端据此判断该不该在当前打开的会话里展示 ——
+    否则在别的会话里也会弹出上一份报告。
+
+    没有记录时返回 null(而不是 404)—— 「还没修过图」是正常状态,不是错误。
+    """
+    sid = db.get_or_create_auto_session(user["id"])
+    rec = db.get_latest_payload_message(sid, user["id"])
+    if not rec or not rec["payload_json"]:
+        return None
+    try:
+        return AutoGradeReportOut(session_id=sid, **json.loads(rec["payload_json"]))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        # 历史数据格式不符(例如旧版本写入的)不应报错,当作没有
+        return None
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)
