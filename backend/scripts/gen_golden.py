@@ -33,6 +33,22 @@ CASES = [
     {"name": "vlog_default", "params": {"base_photo_style": "VLOG"}},
     {"name": "vlog_tone03", "params": {"base_photo_style": "VLOG", "tone_map": 0.3}},
     {"name": "vlog_tone0_exposure", "params": {"base_photo_style": "VLOG", "tone_map": 0.0, "exposure": 0.5}},
+    # ---- 影调分区与分离色调(逐点新算子)----
+    {"name": "highlights_shadows", "params": {"highlights": -0.7, "shadows": 0.7}},
+    {"name": "whites_blacks", "params": {"whites": 0.15, "blacks": 0.15}},
+    {"name": "curve_s", "params": {"curve": 0.6}},
+    {"name": "curve_neg", "params": {"curve": -0.5}},
+    {"name": "split_tone", "params": {"split_shadow_hue": 220.0, "split_shadow_sat": 0.7,
+                                      "split_highlight_hue": 40.0, "split_highlight_sat": 0.6,
+                                      "split_balance": 0.45}},
+    {"name": "split_balance_extreme", "params": {"split_shadow_sat": 0.8, "split_highlight_sat": 0.8,
+                                                 "split_balance": 0.1}},
+    {"name": "tone_full_stack", "params": {"highlights": -0.5, "shadows": 0.6, "whites": 0.1,
+                                           "blacks": 0.12, "curve": 0.4, "contrast": 0.2,
+                                           "split_shadow_hue": 210.0, "split_shadow_sat": 0.5,
+                                           "split_highlight_hue": 35.0, "split_highlight_sat": 0.45}},
+    {"name": "tone_extreme", "params": {"highlights": -1.0, "shadows": 1.0, "whites": 0.3,
+                                        "blacks": 0.3, "curve": 1.0}},
 ]
 
 
