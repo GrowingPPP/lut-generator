@@ -1,0 +1,774 @@
+/* 落地页样式。
+   仅使用 App.css 已声明的令牌与既有组件类(.btn/.btn-primary/.brand/.logo),
+   不新增颜色、不新增字体族、不覆盖全局元素选择器。
+   定位:登录门之前的独立整页,自带导航与页脚,不复用 .app 外壳。 */
+
+.landing {
+  --landing-gutter: 24px;
+  --landing-wrap: 1160px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.landing-accent {
+  color: var(--accent);
+}
+
+/* ---------- 导航 ---------- */
+
+.landing-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 64px;
+  padding: 0 var(--landing-gutter);
+  background: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+.landing-nav-links {
+  display: flex;
+  gap: 28px;
+  margin-left: auto;
+  font-size: 14px;
+}
+
+.landing-nav-links a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.landing-nav-links a:hover {
+  color: var(--text);
+}
+
+/* ---------- 布局基元 ---------- */
+
+.landing-main {
+  flex: 1;
+}
+
+.landing-wrap {
+  max-width: var(--landing-wrap);
+  margin: 0 auto;
+  padding: 0 var(--landing-gutter);
+}
+
+.landing-wrap-narrow {
+  max-width: 960px;
+}
+
+.landing-section {
+  max-width: var(--landing-wrap);
+  margin: 0 auto;
+  padding: 96px var(--landing-gutter);
+}
+
+.landing-section-tight {
+  max-width: var(--landing-wrap);
+  margin: 0 auto;
+  padding: 64px var(--landing-gutter);
+  border-top: 1px solid var(--line);
+}
+
+.landing-band {
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 80px 0;
+}
+
+.landing-h2-center {
+  margin: 0 0 56px;
+  text-align: center;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.landing-head {
+  margin-bottom: 48px;
+  text-align: center;
+}
+
+.landing-head h2 {
+  margin: 0 0 14px;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.landing-sub {
+  margin: 0 auto;
+  max-width: 620px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.landing-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.landing-grid-steps {
+  gap: 40px;
+}
+
+/* ---------- Hero ---------- */
+
+.landing-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 56px;
+  max-width: var(--landing-wrap);
+  margin: 0 auto;
+  padding: 88px var(--landing-gutter) 96px;
+}
+
+.landing-hero-copy h1 {
+  margin: 0 0 24px;
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1.18;
+}
+
+.landing-lede {
+  margin: 0 0 32px;
+  max-width: 480px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.landing-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+
+/* 落地页比生成页更需要点击面积,单独放大主按钮,不改 .btn 本体 */
+.landing-btn-lg {
+  padding: 14px 28px;
+  font-size: 15px;
+}
+
+.landing-textlink {
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.15s ease;
+}
+
+.landing-textlink:hover {
+  color: var(--text);
+}
+
+/* ---------- 前后对比 ---------- */
+
+.landing-ba {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  touch-action: none;
+}
+
+.landing-ba-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
+/* 揭示调色图层:分界线右侧可见 */
+.landing-ba-graded {
+  clip-path: polygon(
+    var(--ba-at, 50%) 0,
+    100% 0,
+    100% 100%,
+    var(--ba-at, 50%) 100%
+  );
+}
+
+.landing-ba-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--ba-at, 50%);
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.landing-ba-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  background: var(--accent);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1;
+  /* 旋钮只是视觉装饰:必须放行指针事件,否则会挡住下层透明 range 的拖拽 */
+  pointer-events: none;
+}
+
+/* 透明 range 覆盖全图:既提供指针拖拽,也获得键盘与无障碍支持 */
+.landing-ba-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.landing-ba-tag {
+  position: absolute;
+  bottom: 14px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(10, 10, 12, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.landing-ba-tag-before {
+  left: 14px;
+  color: var(--muted);
+}
+
+.landing-ba-tag-after {
+  right: 14px;
+  color: var(--accent);
+}
+
+/* ---------- 卡片 / 图标字形 ---------- */
+
+.landing-mark,
+.landing-mark-sm {
+  display: block;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.landing-mark {
+  margin-bottom: 20px;
+  font-size: 20px;
+}
+
+.landing-mark-sm {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.landing-card {
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.landing-card h3 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.landing-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/* ---------- 三步 ---------- */
+
+.landing-step {
+  position: relative;
+}
+
+.landing-step-no {
+  display: block;
+  margin-bottom: -14px;
+  color: var(--accent);
+  font-size: 44px;
+  font-weight: 700;
+  opacity: 0.22;
+  line-height: 1;
+}
+
+.landing-step h3 {
+  position: relative;
+  margin: 0 0 14px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.landing-step p {
+  position: relative;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/* ---------- 功能分区 ---------- */
+
+.landing-feature {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 56px;
+}
+
+.landing-feature + .landing-feature {
+  margin-top: 96px;
+}
+
+.landing-feature-copy h3 {
+  margin: 0 0 16px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.landing-feature-copy p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.landing-feature-mock {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 280px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+/* 对话示意 */
+.landing-bubble {
+  margin: 0;
+  max-width: 86%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.landing-bubble-user {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.landing-bubble-bot {
+  align-self: flex-end;
+  background: var(--linestrong);
+  color: var(--text);
+}
+
+/* 实时预览示意:直接复用 BeforeAfter,不再叠一层底图(叠图会互相冲淡) */
+.landing-feature-photo {
+  padding: 0;
+  overflow: hidden;
+}
+
+.landing-feature-photo .landing-ba {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* AI 诊断报告示意 */
+.landing-report {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+  height: 100%;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.landing-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.landing-badge {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(226, 163, 90, 0.12);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.landing-report-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 2;
+}
+
+.landing-report-list em {
+  color: var(--text);
+  font-style: normal;
+}
+
+.landing-report-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.landing-quiet {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.landing-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel2);
+  font-size: 12px;
+}
+
+/* 参数面板示意 */
+.landing-params {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landing-params-group {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.landing-params-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.landing-params-row {
+  margin-top: 16px;
+}
+
+.landing-params-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.landing-params-label em {
+  color: var(--accent);
+  font-style: normal;
+}
+
+.landing-params-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--ink);
+  overflow: hidden;
+}
+
+.landing-params-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.landing-params-track .landing-params-track-alt {
+  background: var(--line);
+}
+
+.landing-params-collapsed {
+  opacity: 0.5;
+}
+
+/* ---------- 机内烧录 ---------- */
+
+.landing-lumix {
+  padding: 48px 40px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--ink);
+  text-align: center;
+}
+
+.landing-lumix-mark {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 24px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--accent);
+  font-size: 22px;
+}
+
+.landing-lumix h2 {
+  margin: 0 0 20px;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.landing-lumix .landing-sub {
+  margin-bottom: 40px;
+}
+
+.landing-downloads {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.landing-download {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 240px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+/* ---------- FAQ ---------- */
+
+.landing-faq {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 96px var(--landing-gutter);
+}
+
+.landing-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.landing-item + .landing-item {
+  margin-top: 14px;
+}
+
+.landing-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px;
+  cursor: pointer;
+  font-weight: 700;
+  outline: none;
+}
+
+.landing-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-item p {
+  margin: 0;
+  padding: 0 22px 22px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.landing-faq-mark {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+
+.landing-item[open] .landing-faq-mark {
+  transform: rotate(45deg);
+}
+
+/* ---------- 结尾 CTA ---------- */
+
+.landing-cta {
+  padding: 112px var(--landing-gutter);
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--ink), var(--panel));
+  text-align: center;
+}
+
+.landing-cta h2 {
+  margin: 0 0 16px;
+  font-size: 34px;
+  font-weight: 700;
+}
+
+.landing-cta .landing-sub {
+  margin-bottom: 40px;
+}
+
+/* ---------- 页脚 ---------- */
+
+.landing-footer {
+  padding: 48px var(--landing-gutter);
+  border-top: 1px solid var(--line);
+  background: var(--ink);
+}
+
+.landing-footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: var(--landing-wrap);
+  margin: 0 auto;
+}
+
+.landing-footer-brand {
+  margin-bottom: 6px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.landing-footer p {
+  margin: 0;
+}
+
+.landing-footer-links {
+  display: flex;
+  gap: 24px;
+  font-size: 14px;
+}
+
+.landing-footer-links a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.landing-footer-links a:hover {
+  color: var(--text);
+}
+
+.landing-copyright {
+  max-width: var(--landing-wrap);
+  margin: 28px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* ---------- 窄屏:与产品同一断点 ---------- */
+
+@media (max-width: 900px) {
+  .landing-nav {
+    gap: 16px;
+  }
+
+  .landing-nav-links {
+    display: none;
+  }
+
+  .landing-hero {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 56px var(--landing-gutter) 64px;
+  }
+
+  .landing-hero-copy h1 {
+    font-size: 36px;
+  }
+
+  .landing-grid-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-grid-steps {
+    gap: 32px;
+  }
+
+  .landing-feature {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .landing-feature + .landing-feature {
+    margin-top: 64px;
+  }
+
+  .landing-section,
+  .landing-faq {
+    padding-top: 64px;
+    padding-bottom: 64px;
+  }
+
+  .landing-band {
+    padding: 56px 0;
+  }
+
+  .landing-cta {
+    padding: 72px var(--landing-gutter);
+  }
+
+  .landing-cta h2 {
+    font-size: 26px;
+  }
+
+  .landing-lumix {
+    padding: 32px 20px;
+  }
+
+  .landing-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

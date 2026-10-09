@@ -13,6 +13,8 @@ import AutoRetouchBar from './components/AutoRetouchBar.jsx'
 import AutoRetouchReport from './components/AutoRetouchReport.jsx'
 import AuthView from './components/AuthView.jsx'
 import LibraryView from './components/LibraryView.jsx'
+import LandingView from './LandingView.jsx'
+import './Landing.css'
 
 const PARAM_GROUPS = [
   {
@@ -601,7 +603,8 @@ function GenerateView({ previewLut }) {
 }
 
 export default function App() {
-  const [view, setView] = useState('generate')
+  // 落地页是入口:未登录访客先看到它,点 CTA 才进入生成的登录门。
+  const [view, setView] = useState('landing')
   const [previewLut, setPreviewLut] = useState(null)
   const [user, setUser] = useState(null)
   const [checking, setChecking] = useState(true)
@@ -632,6 +635,10 @@ export default function App() {
 
   if (checking) return null
 
+  if (view === 'landing') {
+    return <LandingView onEnter={() => setView('generate')} />
+  }
+
   if (!user) {
     return <AuthView onAuthed={(u) => setUser(u)} />
   }
@@ -650,6 +657,7 @@ export default function App() {
           <button className={view === 'library' ? 'active' : ''} onClick={() => setView('library')}>
             我的 LUT
           </button>
+          <button onClick={() => setView('landing')}>首页</button>
         </nav>
         <div className="topbar-user">
           <span>{user}</span>

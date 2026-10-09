@@ -20,3 +20,10 @@ backend/data/
 .apikey
 .env
 .jwt_secret
+
+# Superdesign 工具产物
+# init/ 六件套是可再生的代码库分析结果(内含 App.jsx/App.css 全文副本),
+# 源码一改就会静默过期 —— 由 superdesign 按需重新生成,不入库。
+# design-system.md 与简报是手写源文档,照常纳管。
+.superdesign/init/
+.superdesign/resume.json
