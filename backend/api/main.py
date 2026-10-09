@@ -9,9 +9,10 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from openai import APIConnectionError, APIStatusError, APITimeoutError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api import auth, ratelimit
+from agent.schemas import RGBOffsetValue, RGBScaleValue
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
 
@@ -19,6 +20,8 @@ logger = logging.getLogger("chroma.api")
 
 
 class LutParamsModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
     base_photo_style: Literal["STD", "NAT", "VIVD", "VLOG"] = "STD"
     temp: float = Field(0.0, ge=-3000, le=3000)
     tint: float = Field(0.0, ge=-500, le=500)
@@ -48,9 +51,9 @@ class LutParamsModel(BaseModel):
     selective_hue_width: float = Field(45.0, ge=1, le=180)
     selective_hue_shift: float = Field(0.0, ge=-180, le=180)
     selective_saturation: float = Field(0.0, ge=-1, le=1)
-    lift: List[float] = Field([0.0, 0.0, 0.0], min_length=3, max_length=3)
-    gamma: List[float] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
-    gain: List[float] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
+    lift: List[RGBOffsetValue] = Field([0.0, 0.0, 0.0], min_length=3, max_length=3)
+    gamma: List[RGBScaleValue] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
+    gain: List[RGBScaleValue] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
 
 
 class LutCreate(BaseModel):
@@ -470,9 +473,9 @@ def auto_grade_endpoint(
         from agent.llm import extract_result, get_llm
         client = get_llm()
 
-        def style_extractor(_client, text):     # noqa: ANN001
+        def style_extractor(_client, text, current_params):     # noqa: ANN001
             # 风格复用现有抽取路径 —— 不另立一套参数字典
-            return extract_result(_client, text)
+            return extract_result(_client, text, params=current_params)
 
     try:
         result = run_auto_grade(

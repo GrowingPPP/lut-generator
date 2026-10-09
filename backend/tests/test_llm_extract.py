@@ -94,6 +94,43 @@ def test_bad_intent_returns_empty():
     assert extract_result(client, "随便") == {}
 
 
+@pytest.mark.parametrize("params", [
+    {"temp": 3001},
+    {"exposure": 3.01},
+    {"tone_map": 1.01},
+    {"highlights": -1.01},
+    {"split_balance": 1.01},
+    {"lift": [0, 0.101, 0]},
+    {"gamma": [1, 0.49, 1]},
+    {"gain": [1, 1, 1.51]},
+])
+def test_out_of_range_targets_return_empty(params):
+    payload = {"intent": "describe", **params}
+    client = _client(tool_calls=[_tool_call(json.dumps(payload))])
+    assert extract_result(client, "调整风格") == {}
+
+
+@pytest.mark.parametrize("field", ["exposure", "gain"])
+@pytest.mark.parametrize("value", [True, "1", float("nan"), float("inf"), -float("inf")])
+def test_non_numeric_or_non_finite_targets_return_empty(field, value):
+    payload = {"intent": "describe", field: [value, 1, 1] if field == "gain" else value}
+    client = _client(tool_calls=[_tool_call(json.dumps(payload))])
+    assert extract_result(client, "调整风格") == {}
+
+
+def test_valid_numeric_targets_at_bounds_are_preserved():
+    payload = {"intent": "describe", "temp": 3000, "exposure": -3,
+               "lift": [-0.1, 0, 0.1], "gamma": [0.5, 1, 1.5], "gain": [1.5, 1, 0.5]}
+    client = _client(tool_calls=[_tool_call(json.dumps(payload))])
+    assert extract_result(client, "调整风格") == payload
+
+
+@pytest.mark.parametrize("name", ["propose_correction", "invented_tool"])
+def test_wrong_tool_name_returns_empty(name):
+    client = _client(tool_calls=[_tool_call('{"intent": "describe", "temp": 300}', name=name)])
+    assert extract_result(client, "暖一点") == {}
+
+
 def test_params_and_history_reach_prompt():
     client = _client(tool_calls=[_tool_call('{"intent": "describe", "temp": 900}')])
     extract_result(client, "再暖一点", params={"temp": 400}, history=["用户:暖一点", "助手:好的"])

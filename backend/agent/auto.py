@@ -295,7 +295,11 @@ CORRECTION_SYSTEM_PROMPT = (
     "2. 增量幅度要克制:单轮曝光不超过 ±1 EV,对比度/饱和度不超过 ±0.5。\n"
     "3. 相对调整基于「当前参数」,不要覆盖未被提及的参数。\n"
     "4. 如果给了「上一轮被拒原因」,不要重复同样的提议。\n"
-    "5. 只通过 propose_correction 工具返回结果,不要输出解释文字。"
+    "5. 只能使用 propose_correction 的 schema 中已有字段及合法范围,不能扩展创意参数;"
+    "不要输出 LUT 不支持的调整,例如清晰度、降噪、锐化、颗粒、暗角或空间局部蒙版。\n"
+    "6. RGB 参数也返回逐通道增量,中性增量为 0,不是绝对目标值 1。\n"
+    "7. diagnosis 仅诊断影调与色彩,不要声称执行了 LUT 不支持的操作。\n"
+    "8. 只通过 propose_correction 工具返回结果,不要输出解释文字。"
 )
 
 
@@ -344,6 +348,8 @@ def propose_correction(
     if not calls:
         return {}, "", usage
     try:
+        if calls[0].function.name != CORRECTION_TOOL_NAME:
+            return {}, "", usage
         raw = json.loads(calls[0].function.arguments)
     except (json.JSONDecodeError, TypeError, AttributeError, IndexError):
         return {}, "", usage
@@ -367,7 +373,10 @@ def _default_model() -> str:
 
 VISION_REVIEW_PROMPT = (
     "这组图:左边是原图,右边是套用 LUT 后的结果。"
-    "请判断修图是否改善了画面,还有什么问题?用 2-4 句话说明,"
+    "请仅评价影调与色彩是否改善,还有什么问题?用 2-4 句话说明。"
+    "建议只限现有 LUT 调整项:曝光、冷暖与绿洋红、对比与影调分区、"
+    "饱和度与色相、按色相选色、RGB 三通道与分离色调。"
+    "禁止建议或声称执行锐化、降噪、颗粒、磨皮、清晰度、暗角或空间局部调整。"
     "**不要给出参数数值** —— 只做主观评价。"
 )
 
@@ -425,7 +434,7 @@ def auto_grade(
     *,
     use_vision: bool = True,
     max_rounds: int = MAX_OPTIMIZE_ROUNDS,
-    style_extractor: Optional[Callable[[Any, str], Dict[str, Any]]] = None,
+    style_extractor: Optional[Callable[[Any, str, Dict[str, Any]], Dict[str, Any]]] = None,
     proposer: Optional[Callable[..., Tuple[Dict[str, Any], str, Dict[str, Any]]]] = None,
 ) -> AutoGradeResult:
     """跑完整的自动修图。
@@ -434,6 +443,7 @@ def auto_grade(
     base_params: 增量基准(前端传当前参数)
     style: 自然语言风格描述,None = 只优化
     client: LLM 客户端;为 None 时跳过所有 LLM 步骤(只用保守解)
+    style_extractor: 接收客户端、风格描述及优化后的当前参数,返回绝对目标参数。
     proposer: 可注入的提议函数(签名同 propose_correction),用于测试直接构造增量。
 
     注意「两道闸门」的区别,测试时要分清:
@@ -507,7 +517,7 @@ def auto_grade(
     style_rejections: List[str] = []
     if style and client is not None and style_extractor is not None:
         try:
-            extracted = style_extractor(client, style) or {}
+            extracted = style_extractor(client, style, dict(params)) or {}
         except Exception:
             extracted = {}
         extracted.pop("intent", None)

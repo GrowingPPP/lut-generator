@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import ValidationError
 
-from .schemas import ExtractResult, build_tool_schema
+from .schemas import TOOL_NAME, ExtractResult, build_tool_schema
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
@@ -102,11 +102,14 @@ SYSTEM_PROMPT = (
     "规则:\n"
     "1. 用户确认/同意生成(如「确认」「可以」「就这样」「生成吧」「好」「行」)时 "
     'intent=confirm;否则用户在描述或调整风格,intent=describe。\n'
-    "2. intent=describe 时提取用户提到的调色参数;未提及的字段一律不要填。\n"
+    "2. intent=describe 时只提取用户提到的调色参数,返回调整后的绝对目标值,不是增量;"
+    "未提及的字段一律不要填。\n"
     "3. 相对描述(如「再暖一点」「更暗」)基于当前参数在合理幅度内调整,"
     "不要覆盖未提及的参数。\n"
     "4. lift/gamma/gain 必须是三个数字组成的数组。\n"
-    "5. 只通过 submit_lut_params 工具返回结果,不要输出解释文字。"
+    "5. 只能使用 submit_lut_params 的 schema 中已有字段及合法范围;"
+    "不要输出 LUT 不支持的调整,例如清晰度、降噪、锐化、颗粒、暗角或空间局部蒙版。\n"
+    "6. 只通过 submit_lut_params 工具返回结果,不要输出解释文字。"
 )
 
 
@@ -167,6 +170,8 @@ def extract_result(
         return {}
 
     try:
+        if tool_calls[0].function.name != TOOL_NAME:
+            return {}
         raw = json.loads(tool_calls[0].function.arguments)
     except (json.JSONDecodeError, TypeError, AttributeError, IndexError):
         return {}

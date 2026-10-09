@@ -452,46 +452,25 @@ def converged(stats: PhotoStats) -> bool:
     return len(diagnose(stats)) == 0
 ```
 
-### 7.5 两个新工具 schema
+### 7.5 AI 与手调的参数契约
 
-追加到 `agent/schemas.py`,复用现有 `build_tool_schema()` 的转换逻辑:
+AI 工具、API、LUT 引擎和手调控件使用相同的 30 个参数字段及绝对值范围。RGB 偏移、中间调、RGB 增益各用三元素数组表达。工具 schema 由 Pydantic 模型生成，未知字段、非法工具名、越界值及非有限数被拒绝；布尔值和字符串不能代替数值。曝光绝对值范围统一为 `[-3, 3] EV`。
 
-```python
-CORRECTION_TOOL_NAME = "propose_correction"
+| 调用 | 允许调整的参数 | 输出语义 |
+|---|---|---|
+| 基础校正 `propose_correction` | `exposure`、`contrast`、`temp`、`tint`、`saturation`、`vibrance`、`highlights`、`shadows`、`whites`、`blacks`、`curve`、`lift`、`gamma`、`gain`，共 14 个现有字段 | 相对当前参数的增量；RGB 逐通道相加，无调整的增量为 0 |
+| 风格提取 `submit_lut_params` | 完整 30 字段；自动修图中 `base_photo_style` 与 `tone_map` 只读，实际最多调整其余 28 字段 | 绝对目标值；未涉及的字段省略，系统再计算「目标减当前值」 |
+| 视觉复核 | 无可应用的参数输出 | 文字评价，不参与参数合并 |
 
-class CorrectionProposal(BaseModel):
-    """优化阶段的增量提议。范围取比 LutParams 更窄的「单轮合理区间」,
-    单轮激进改动会被 §7.2 的 R5 拒绝,与其让模型白跑一轮不如在 schema 里就收窄。"""
-    model_config = ConfigDict(extra="forbid")
-    diagnosis: str = Field(..., description="一句话诊断:这张照片的主要问题")
-    exposure: Optional[float] = Field(None, ge=-1, le=1, description="曝光增量,EV")
-    contrast: Optional[float] = Field(None, ge=-0.5, le=0.5, description="对比度增量")
-    temp: Optional[float] = Field(None, ge=-800, le=800, description="色温偏移增量,K,正=暖")
-    tint: Optional[float] = Field(None, ge=-200, le=200, description="色调偏移增量,正=绿")
-    saturation: Optional[float] = Field(None, ge=-0.5, le=0.5, description="饱和度增量")
-    vibrance: Optional[float] = Field(None, ge=-0.5, le=0.5, description="自然饱和增量")
-    lift: Optional[List[float]] = Field(None, min_length=3, max_length=3, description="暗部三通道增量")
-    gamma: Optional[List[float]] = Field(None, min_length=3, max_length=3, description="中间调三通道增量")
-    gain: Optional[List[float]] = Field(None, min_length=3, max_length=3, description="亮部三通道增量")
-```
+校正仅使用基础影调和色彩子集；创意色相、分离色调等由风格阶段处理。`base_photo_style` 决定输入信号，`tone_map` 决定显示转换，两者在自动修图中保留用户当前值，模型不能猜测或覆盖。
 
-**刻意不包含 `base_photo_style`。** 它决定 LUT 的**输入侧**(照片线走 sRGB、V-Log 走视频线),换它等于换整条变换链路,而不是「调一点色」:
+完整提取工具的数值范围与手调一致。校正工具的单轮增量范围更窄：曝光 `±1 EV`，冷暖 `±800`，绿/洋红 `±200`，对比度、饱和度、自然饱和、白部、黑部与 S 曲线 `±0.5`，高光和阴影 `±1`；RGB 偏移每通道 `±0.1`，中间调和 RGB 增益每通道 `±0.5`。叠加后的绝对值还需通过引擎范围与图像效果检查。RGB 偏移和增益影响全部亮度，只是在暗部或亮部更明显，不是区域蒙版。
 
-- 用户上传的是相机直出 JPEG,其基准由**相机当时的照片风格**决定,模型无法从像素可靠推断用户当时用了哪个风格,猜错会让整张图颜色系统性偏掉
-- 它属于「用户需要在拍摄端决定」的事,不是修图能修的
+两种调色提示词明确要求仅使用工具 schema 中已有的调整项，不得新增锐化、颗粒、降噪或空间蒙版等单个 3D LUT 无法表达的参数。基础校正接收当前参数、统计、问题与上一轮拒绝原因；风格阶段接收**校正后的当前参数**，确保「再暖一点」等相对描述能被转换为正确的绝对目标值。视觉复核只评价影调和色彩，建议限于已有调整项，不输出参数数值，也不宣称执行系统不支持的操作；其自然语言评价不会进入参数合并。
 
-因此 `base_photo_style` 在自动修图里**只读不改**(来自 `base_params`,原样透传)。
+例如当前曝光为 `0.5 EV` 时，校正工具返回 `exposure: 0.2` 表示叠加至 `0.7 EV`；风格工具返回 `exposure: 0.7` 表示目标为 `0.7 EV`，不能再把 `0.7` 作为增量相加。`gamma` 与 `gain` 的中性绝对值为 `[1, 1, 1]`，中性增量为 `[0, 0, 0]`。
 
-风格阶段**复用现有 `ExtractResult`**(架构设计 §3.3),不新增参数字典 —— 那里 `base_photo_style` 是允许的,因为用户可能明确说「按 V-Log 处理」。
-
-风格阶段**复用现有 `ExtractResult`**(§3.3 of 架构文档),不新增参数字典。
-
-`propose_correction` 的系统提示要点:
-
-- 明确「你要给的是**增量**,不是绝对值」
-- 明确「只改你判断有问题的地方,没问题就少给字段」
-- **把 `issues` 与 `stats` 一起给它**:issues 告诉它「修什么」,stats 给它判断幅度
-- 把上一轮被拒的原因(`rejections`)给它,避免重复同样的提议
+参数契约检查逐项对照 AI schema、API、引擎限幅与界面控件。新增、删除或修改参数范围时，对照不一致会导致校验失败。
 
 ---
 

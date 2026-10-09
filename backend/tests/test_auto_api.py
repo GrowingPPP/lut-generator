@@ -1,11 +1,12 @@
 """自动修图 API 测试。
 
-全部走 CHROMA_FAKE_GRADE 桩,不打真实 LLM、不消耗配额。
+使用 CHROMA_FAKE_GRADE 或桩客户端,不打真实 LLM、不消耗配额。
 重点覆盖:base_params 必填(不许默认值兜底)、体积/格式校验、降级标记、落库。
 """
 from api.auth import create_token
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,6 +120,25 @@ def test_out_of_range_base_params_is_422(auth):
     assert r.status_code == 422
 
 
+@pytest.mark.parametrize("params", [
+    {"clarity": 0.2},
+    {"temp": True},
+    {"exposure": "0.2"},
+    {"exposure": float("nan")},
+    {"exposure": float("inf")},
+    {"exposure": -float("inf")},
+    {"lift": [-0.101, 0, 0]},
+    {"gamma": [1, 0.49, 1]},
+    {"gain": [1, 1, 1.51]},
+    {"gain": [True, 1, 1]},
+    {"gain": ["1", 1, 1]},
+    {"gain": [float("nan"), 1, 1]},
+    {"gain": [float("inf"), 1, 1]},
+])
+def test_invalid_base_param_values_are_422(auth, params):
+    assert _post(auth, params={**DEFAULT_PARAMS, **params}).status_code == 422
+
+
 def test_base_params_are_preserved_in_output(auth):
     """增量语义:用户手调必须原样保留在产出里。"""
     params = dict(DEFAULT_PARAMS, temp=520, saturation=-0.2)
@@ -157,6 +177,36 @@ def test_content_type_is_ignored_over_actual_content(auth):
 def test_style_is_optional(auth):
     assert _post(auth, style="").status_code == 200
     assert _post(auth).json()["style_params"] is None
+
+
+def test_style_extraction_prompt_uses_optimized_params(auth, monkeypatch):
+    from agent import auto, llm
+    from agent.schemas import CORRECTION_TOOL_NAME
+
+    monkeypatch.delenv("CHROMA_FAKE_GRADE")
+    call = SimpleNamespace(function=SimpleNamespace(
+        name=CORRECTION_TOOL_NAME,
+        arguments=json.dumps({"diagnosis": "略偏暗", "exposure": 0.2}),
+    ))
+    response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[call]))],
+                               usage=None)
+    llm_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: response)))
+    monkeypatch.setattr(llm, "get_llm", lambda: llm_client)
+    monkeypatch.setattr(auto, "check_hard_rules", lambda *args, **kwargs: (True, []))
+    captured = {}
+
+    def extract_result(client, message, params=None, history=None):
+        assert client is llm_client
+        assert message == "曝光再增加 0.1 EV"
+        captured.update(params)
+        return {"intent": "describe", "exposure": params["exposure"] + 0.1}
+
+    monkeypatch.setattr(llm, "extract_result", extract_result)
+    result = _post(auth, params={**DEFAULT_PARAMS, "exposure": 0.1},
+                   style="曝光再增加 0.1 EV", use_vision=False, max_rounds=1)
+    assert result.status_code == 200, result.text
+    assert captured["exposure"] == pytest.approx(0.3)
+    assert result.json()["params"]["exposure"] == pytest.approx(0.4)
 
 
 def test_vision_flag_accepted(auth):

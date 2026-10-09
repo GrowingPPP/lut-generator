@@ -22,7 +22,7 @@ const PARAM_GROUPS = [
     sliders: [
       { key: 'temp', label: '冷暖偏移', min: -3000, max: 3000, step: 10, unit: '' },
       { key: 'tint', label: '绿/洋红', min: -500, max: 500, step: 5, unit: '' },
-      { key: 'exposure', label: '曝光', min: -2, max: 2, step: 0.05, unit: ' EV' },
+      { key: 'exposure', label: '曝光', min: -3, max: 3, step: 0.05, unit: ' EV' },
     ],
   },
   {

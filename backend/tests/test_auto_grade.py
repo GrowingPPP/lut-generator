@@ -504,6 +504,53 @@ def test_invalid_arguments_are_handled():
         f"坏 tool_call 不应产生修正:{[(st.applied, st.proposed) for st in r.steps]}"
 
 
+@pytest.mark.parametrize("proposal", [
+    {"temp": 800.01},
+    {"temp": True},
+    {"temp": "100"},
+    {"temp": float("nan")},
+    {"temp": float("inf")},
+    {"lift": [0.101, 0, 0]},
+    {"gamma": [0, -0.501, 0]},
+    {"gain": [0, 0, 0.501]},
+    {"gain": [True, 0, 0]},
+    {"gain": ["0.1", 0, 0]},
+    {"gain": [float("nan"), 0, 0]},
+    {"gain": [float("inf"), 0, 0]},
+    {"look_strength": 0.5},
+    {"base_photo_style": "VLOG"},
+    {"clarity": 0.2},
+])
+def test_invalid_correction_is_rejected_before_application(proposal):
+    stats = S.analyze(make_fixture("neutral"))
+    delta, diagnosis, _ = A.propose_correction(stub_client([proposal]), stats, [], A.clamp_params({}))
+    assert delta == {}
+    assert diagnosis == ""
+
+
+def test_correction_rgb_values_are_deltas_with_zero_neutral():
+    proposal = {"lift": [-0.1, 0, 0.1], "gamma": [-0.5, 0, 0.5], "gain": [0, 0, 0]}
+    stats = S.analyze(make_fixture("neutral"))
+    delta, _, _ = A.propose_correction(stub_client([proposal]), stats, [], A.clamp_params({}))
+    assert delta == proposal
+    candidate = A.merge_params(A.clamp_params({}), delta)
+    assert candidate["gamma"] == [0.5, 1, 1.5]
+    assert candidate["gain"] == [1, 1, 1]
+
+
+@pytest.mark.parametrize("name", ["submit_lut_params", "invented_tool"])
+def test_correction_wrong_tool_name_returns_no_proposal(name):
+    call = _tool_call('{"diagnosis": "偏暗", "exposure": 0.2}', name=name)
+    response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[call]))],
+                               usage=None)
+    client = stub_client([])
+    client.chat.completions.create = lambda **kwargs: response
+    stats = S.analyze(make_fixture("neutral"))
+    delta, diagnosis, _ = A.propose_correction(client, stats, [], A.clamp_params({}))
+    assert delta == {}
+    assert diagnosis == ""
+
+
 def test_exhausted_rounds_falls_back_and_marks_degraded():
     """所有提议都被拒 + 保守解也无法收敛 → 必须如实标记 degraded。"""
     # 高光严重溢出:曝光与白平衡都恢复不了已丢失的高光细节 → 必然留在未收敛状态。
@@ -588,7 +635,7 @@ def test_vision_failure_does_not_fail_request():
 # --------------------------------------------------------------------------
 
 def _style_extractor(delta, raises=False):
-    def _fn(client, style):
+    def _fn(client, style, current_params):
         if raises:
             raise RuntimeError("style boom")
         return {"intent": "describe", **delta}
@@ -600,6 +647,27 @@ def test_style_params_reported_separately():
     r = A.auto_grade(img, {}, "电影青橙", client=stub_client([], review=None),
                      use_vision=False, style_extractor=_style_extractor({"contrast": 0.1}))
     assert r.style_params == {"contrast": 0.1}
+
+
+def test_relative_style_receives_optimized_current_params(monkeypatch):
+    monkeypatch.setattr(A, "check_hard_rules", lambda *args, **kwargs: (True, []))
+    captured = {}
+
+    def extract_style(client, text, current_params):
+        captured.update(current_params)
+        assert text == "曝光再增加 0.1 EV"
+        return {"intent": "describe", "exposure": current_params["exposure"] + 0.1}
+
+    result = A.auto_grade(
+        make_fixture("under_exposed"), {"exposure": 0.1, "base_photo_style": "NAT"},
+        "曝光再增加 0.1 EV", client=object(), use_vision=False, max_rounds=1,
+        proposer=proposer_seq([{"exposure": 0.2}]), style_extractor=extract_style,
+    )
+    assert captured["exposure"] == pytest.approx(0.3)
+    assert captured["base_photo_style"] == "NAT"
+    assert set(captured) == set(LutParams.__dataclass_fields__)
+    assert result.style_applied is True
+    assert result.params["exposure"] == pytest.approx(0.4)
 
 
 def test_style_cannot_bypass_hard_rules():
