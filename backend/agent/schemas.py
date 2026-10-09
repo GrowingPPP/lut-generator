@@ -9,13 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # 风格参数字段,任一非空即认为用户表达了风格诉求
 STYLE_FIELDS = (
-    "base_photo_style", "tone_map",
-    "temp", "tint", "exposure", "contrast", "saturation",
+    "base_photo_style", "tone_map", "look_strength",
+    "temp", "tint", "exposure", "contrast", "contrast_pivot", "saturation",
     "hue", "vibrance", "lift", "gamma", "gain",
     # 影调分区与分离色调(逐点,可烘进 33³ LUT)
     "highlights", "shadows", "whites", "blacks", "curve",
     "split_shadow_hue", "split_shadow_sat",
     "split_highlight_hue", "split_highlight_sat", "split_balance",
+    "split_mid_hue", "split_mid_sat",
+    "selective_hue_center", "selective_hue_width",
+    "selective_hue_shift", "selective_saturation",
 )
 
 TOOL_NAME = "submit_lut_params"
@@ -44,7 +47,7 @@ class ExtractResult(BaseModel):
         None, description="基准照片风格,只能是 STD、NAT、VIVD、VLOG 之一,未提及则留空"
     )
     temp: Optional[float] = Field(
-        None, description="色温偏移,单位 Kelvin,范围约 -3000 到 3000,正数偏暖。如 +400 表示暖调, -300 表示冷调"
+        None, description="冷暖相对偏移,范围 -3000 到 3000,正数偏暖；以 6500K 为参考的 RGB 增益,不是拍摄光源色温"
     )
     tint: Optional[float] = Field(
         None, description="色调偏移,范围约 -500 到 500,正数偏绿、负数偏洋红"
@@ -54,6 +57,9 @@ class ExtractResult(BaseModel):
     )
     contrast: Optional[float] = Field(
         None, description="对比度,范围 -1 到 1,如 -0.15 表示轻微降低对比"
+    )
+    contrast_pivot: Optional[float] = Field(
+        None, ge=0.1, le=0.9, description="对比中心,编码域灰阶值 0.1 到 0.9,默认 0.462"
     )
     saturation: Optional[float] = Field(
         None, description="饱和度,范围 -1 到 1,如 -0.1 表示轻微降低饱和"
@@ -65,19 +71,22 @@ class ExtractResult(BaseModel):
         None, description="自然饱和度,范围 -1 到 1"
     )
     tone_map: Optional[float] = Field(
-        None, description="V-Log 基准的 tone mapping 强度,0 到 1,默认 1,仅 V-Log 基准生效"
+        None, description="V-Log 显示映射强度,0 到 1,默认 1,会影响中间调及高光"
+    )
+    look_strength: Optional[float] = Field(
+        None, ge=0, le=1, description="创意风格强度,0 到 1。0 保留输入转换、曝光和白平衡校正"
     )
     highlights: Optional[float] = Field(
-        None, description="高光,-1 到 1,负数压高光找回溢出,正数提亮部。如「高光太亮」约 -0.4"
+        None, description="高光,-1 到 1,负数压高光,正数提亮部；无法恢复已剪切的细节"
     )
     shadows: Optional[float] = Field(
         None, description="阴影,-1 到 1,正数提阴影,负数压暗部。如「暗部提一点」约 +0.3"
     )
     whites: Optional[float] = Field(
-        None, description="白场,-1 到 1,正数提白让画面更亮,负数收白"
+        None, description="白部层次,-1 到 1,正数增强亮部,负数降低白点"
     )
     blacks: Optional[float] = Field(
-        None, description="黑场,-1 到 1,正数抬黑去死黑(胶片感),负数压黑"
+        None, description="黑部层次,-1 到 1,正数抬黑位,负数压暗部"
     )
     curve: Optional[float] = Field(
         None, description="S 曲线强度,-1 到 1,正数增强层次,负数减弱"
@@ -97,14 +106,32 @@ class ExtractResult(BaseModel):
     split_balance: Optional[float] = Field(
         None, description="阴影/高光染色的分界,0 到 1,默认 0.5,越大高光染色范围越广"
     )
+    split_mid_hue: Optional[float] = Field(
+        None, ge=0, le=360, description="中间调染色色相,0 到 360 度"
+    )
+    split_mid_sat: Optional[float] = Field(
+        None, ge=0, le=1, description="中间调染色强度,0 到 1"
+    )
+    selective_hue_center: Optional[float] = Field(
+        None, ge=0, le=360, description="局部色彩的目标色相中心,0 到 360 度"
+    )
+    selective_hue_width: Optional[float] = Field(
+        None, ge=1, le=180, description="局部色彩的色相作用半径,1 到 180 度"
+    )
+    selective_hue_shift: Optional[float] = Field(
+        None, ge=-180, le=180, description="目标色相旋转,-180 到 180 度"
+    )
+    selective_saturation: Optional[float] = Field(
+        None, ge=-1, le=1, description="目标色饱和度,-1 到 1"
+    )
     lift: Optional[List[float]] = Field(
-        None, min_length=3, max_length=3, description="暗部 RGB 偏移,三个 -0.1 到 0.1 之间的小数,如 [0.03, 0.0, -0.02]"
+        None, min_length=3, max_length=3, description="线性域 RGB 偏移,影响全部亮度,三个 -0.1 到 0.1 之间的小数"
     )
     gamma: Optional[List[float]] = Field(
         None, min_length=3, max_length=3, description="中间调 RGB 幂,三个 0.5 到 1.5 之间的小数,如 [0.9, 1.0, 1.0]"
     )
     gain: Optional[List[float]] = Field(
-        None, min_length=3, max_length=3, description="亮部 RGB 增益,三个 0.5 到 1.5 之间的小数,如 [1.05, 1.0, 1.0]"
+        None, min_length=3, max_length=3, description="线性域 RGB 增益,影响全部亮度,三个 0.5 到 1.5 之间的小数"
     )
 
 
@@ -176,7 +203,7 @@ class CorrectionProposal(BaseModel):
     tint: Optional[float] = Field(None, ge=-200, le=200, description="色调偏移增量,正=绿")
     saturation: Optional[float] = Field(None, ge=-0.5, le=0.5, description="饱和度增量")
     vibrance: Optional[float] = Field(None, ge=-0.5, le=0.5, description="自然饱和度增量")
-    highlights: Optional[float] = Field(None, ge=-1, le=1, description="高光增量,负=压高光找回溢出")
+    highlights: Optional[float] = Field(None, ge=-1, le=1, description="高光增量,负=压高光,无法恢复已剪切细节")
     shadows: Optional[float] = Field(None, ge=-1, le=1, description="阴影增量,正=提亮暗部")
     whites: Optional[float] = Field(None, ge=-0.5, le=0.5, description="白场增量")
     blacks: Optional[float] = Field(None, ge=-0.5, le=0.5, description="黑场增量,正=抬黑去死黑")

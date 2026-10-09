@@ -9,10 +9,12 @@ export function defaultParams() {
     tint: 0,
     exposure: 0,
     contrast: 0,
+    contrast_pivot: 0.462,
     saturation: 0,
     hue: 0,
     vibrance: 0,
     tone_map: 1,
+    look_strength: 1,
     highlights: 0,
     shadows: 0,
     whites: 0,
@@ -23,6 +25,12 @@ export function defaultParams() {
     split_highlight_hue: 0,
     split_highlight_sat: 0,
     split_balance: 0.5,
+    split_mid_hue: 0,
+    split_mid_sat: 0,
+    selective_hue_center: 30,
+    selective_hue_width: 45,
+    selective_hue_shift: 0,
+    selective_saturation: 0,
     lift: [0, 0, 0],
     gamma: [1, 1, 1],
     gain: [1, 1, 1],
@@ -113,19 +121,19 @@ function toneMapAces(x, strength = 1) {
   return x + (mapped - x) * strength
 }
 
-function vlogToLinearRgb(r, g, b, toneMap = 1) {
+function vlogDecodeToRec709Linear(r, g, b) {
   const lr = vlogToLinear(r)
   const lg = vlogToLinear(g)
   const lb = vlogToLinear(b)
   const nr = V_GAMUT_TO_709[0][0] * lr + V_GAMUT_TO_709[0][1] * lg + V_GAMUT_TO_709[0][2] * lb
   const ng = V_GAMUT_TO_709[1][0] * lr + V_GAMUT_TO_709[1][1] * lg + V_GAMUT_TO_709[1][2] * lb
   const nb = V_GAMUT_TO_709[2][0] * lr + V_GAMUT_TO_709[2][1] * lg + V_GAMUT_TO_709[2][2] * lb
-  return [toneMapAces(nr, toneMap), toneMapAces(ng, toneMap), toneMapAces(nb, toneMap)]
+  return [nr, ng, nb]
 }
 
 // ---- 算子 ----
 
-function applyLinearOps(r, g, b, p) {
+function applyTechnicalOps(r, g, b, p) {
   const wb = whiteBalanceGain(p.temp, p.tint)
   r *= wb[0]
   g *= wb[1]
@@ -134,13 +142,13 @@ function applyLinearOps(r, g, b, p) {
   r *= exp
   g *= exp
   b *= exp
-  r += p.lift[0]
-  g += p.lift[1]
-  b += p.lift[2]
-  r *= p.gain[0]
-  g *= p.gain[1]
-  b *= p.gain[2]
   return [r, g, b]
+}
+
+function applyCreativeLinearOps(r, g, b, p) {
+  return [(r + p.lift[0]) * p.gain[0],
+          (g + p.lift[1]) * p.gain[1],
+          (b + p.lift[2]) * p.gain[2]]
 }
 
 // ---- 影调分区与分离色调(逐点,与后端 transforms.py 同数学)----
@@ -172,20 +180,27 @@ function applyShadows(r, g, b, amount) {
   return rescaleToLuma(r, g, b, y, y + amount * w * y)
 }
 
-// 白场:只作用于亮部。权重 (1-(1-c)^2) —— 暗部≈0、亮部→1,且平滑。
+// 白部层次:端点受控的单调映射。
 function applyWhites(r, g, b, amount) {
   if (amount === 0) return [r, g, b]
   const c = (v) => Math.max(0, Math.min(1, v))
-  const w = (v) => 1 - (1 - c(v)) * (1 - c(v))
-  return [r + amount * w(r), g + amount * w(g), b + amount * w(b)]
+  const f = amount > 0
+    ? (v) => v + amount * c(v) * c(v) * (1 - c(v))
+    : (v) => {
+        const x = c(v)
+        return v + (amount / (1 - amount)) * (2 * x - x * x)
+      }
+  return [f(r), f(g), f(b)]
 }
 
-// 黑场:只作用于暗部。权重 (1-c)^2 —— 纯黑处=1,所以正值能真正抬起死黑。
+// 黑部层次:正值抬黑位,负值压暗部,全范围保持灰阶单调。
 function applyBlacks(r, g, b, amount) {
   if (amount === 0) return [r, g, b]
   const c = (v) => Math.max(0, Math.min(1, v))
-  const w = (v) => (1 - c(v)) * (1 - c(v))
-  return [r + amount * w(r), g + amount * w(g), b + amount * w(b)]
+  const f = amount > 0
+    ? (v) => v + (amount / (1 + amount)) * (1 - c(v)) * (1 - c(v))
+    : (v) => v + amount * c(v) * (1 - c(v)) * (1 - c(v))
+  return [f(r), f(g), f(b)]
 }
 
 // S 曲线:smoothstep(x) - x —— 暗部压低、亮部抬高,0/0.5/1 三点固定。
@@ -209,8 +224,8 @@ function hueToRgb(hueDeg) {
   return table[i]
 }
 
-function applySplitTone(r, g, b, shHue, shSat, hiHue, hiSat, balance) {
-  if (shSat === 0 && hiSat === 0) return [r, g, b]
+function applySplitTone(r, g, b, shHue, shSat, hiHue, hiSat, balance, midHue = 0, midSat = 0) {
+  if (shSat === 0 && hiSat === 0 && midSat === 0) return [r, g, b]
   const y = Math.max(0, Math.min(1, LUMA[0] * r + LUMA[1] * g + LUMA[2] * b))
   const bl = Math.max(0, Math.min(1, balance))
   // balance 越大 → 高光染色覆盖越广(与 ACR 的 Balance 方向一致)
@@ -229,6 +244,13 @@ function applySplitTone(r, g, b, shHue, shSat, hiHue, hiSat, balance) {
     tg += hiW * (hiSat * 0.5) * (h[1] - 0.5)
     tb += hiW * (hiSat * 0.5) * (h[2] - 0.5)
   }
+  if (midSat > 0) {
+    const m = hueToRgb(midHue)
+    const midW = smoothstep(y / 0.5) * smoothstep((1 - y) / 0.5)
+    tr += midW * (midSat * 0.5) * (m[0] - 0.5)
+    tg += midW * (midSat * 0.5) * (m[1] - 0.5)
+    tb += midW * (midSat * 0.5) * (m[2] - 0.5)
+  }
   return [r + tr, g + tg, b + tb]
 }
 
@@ -239,15 +261,65 @@ function applyToneOps(r, g, b, p) {
   o = applyBlacks(o[0], o[1], o[2], p.blacks)
   o = applyCurve(o[0], o[1], o[2], p.curve)
   o = applySplitTone(o[0], o[1], o[2], p.split_shadow_hue, p.split_shadow_sat,
-                    p.split_highlight_hue, p.split_highlight_sat, p.split_balance)
+                    p.split_highlight_hue, p.split_highlight_sat, p.split_balance,
+                    p.split_mid_hue, p.split_mid_sat)
   return o
 }
 
+function applySelectiveColor(r, g, b, p) {
+  if (p.selective_hue_shift === 0 && p.selective_saturation === 0) return [r, g, b]
+  const cr = clamp01(r), cg = clamp01(g), cb = clamp01(b)
+  const mx = Math.max(cr, cg, cb)
+  const mn = Math.min(cr, cg, cb)
+  const chroma = mx - mn
+  const safe = Math.max(chroma, 1e-6)
+  let hue
+  if (mx === cr) hue = (((cg - cb) / safe) % 6 + 6) % 6
+  else if (mx === cg) hue = (cb - cr) / safe + 2
+  else hue = (cr - cg) / safe + 4
+  hue *= 60
+  const distance = Math.abs(((hue - p.selective_hue_center + 180 + 360) % 360) - 180)
+  const weight = (1 - smoothstep(distance / p.selective_hue_width)) * smoothstep(chroma / 0.08)
+  if (weight === 0) return [r, g, b]
+  if (p.selective_hue_shift !== 0) {
+    const rotated = rotateHue(r, g, b, p.selective_hue_shift)
+    r += weight * (rotated[0] - r)
+    g += weight * (rotated[1] - g)
+    b += weight * (rotated[2] - b)
+  }
+  if (p.selective_saturation !== 0) {
+    const y = LUMA[0] * r + LUMA[1] * g + LUMA[2] * b
+    const scale = 1 + p.selective_saturation * weight
+    r = y + (r - y) * scale
+    g = y + (g - y) * scale
+    b = y + (b - y) * scale
+  }
+  return [r, g, b]
+}
+
+function rotateHue(r, g, b, hue) {
+  const theta = (hue * Math.PI) / 180
+  const c = Math.cos(theta)
+  const sn = Math.sin(theta)
+  const m = [
+    [0.213 + 0.787 * c - 0.213 * sn, 0.715 - 0.715 * c - 0.715 * sn, 0.072 - 0.072 * c + 0.928 * sn],
+    [0.213 - 0.213 * c + 0.143 * sn, 0.715 + 0.285 * c + 0.140 * sn, 0.072 - 0.072 * c - 0.283 * sn],
+    [0.213 - 0.213 * c - 0.787 * sn, 0.715 - 0.715 * c + 0.715 * sn, 0.072 + 0.928 * c + 0.072 * sn],
+  ]
+  return gamutClamp(
+    m[0][0] * r + m[0][1] * g + m[0][2] * b,
+    m[1][0] * r + m[1][1] * g + m[1][2] * b,
+    m[2][0] * r + m[2][1] * g + m[2][2] * b,
+  )
+}
+
 function applyEncodedOps(r, g, b, p) {
-  const k = 1 + p.contrast
-  r = (r - 0.462) * k + 0.462
-  g = (g - 0.462) * k + 0.462
-  b = (b - 0.462) * k + 0.462
+  if (p.contrast !== 0) {
+    const k = 1 + (p.contrast < 0 ? p.contrast / (1 - 0.25 * p.contrast) : p.contrast)
+    r = (r - p.contrast_pivot) * k + p.contrast_pivot
+    g = (g - p.contrast_pivot) * k + p.contrast_pivot
+    b = (b - p.contrast_pivot) * k + p.contrast_pivot
+  }
   r = Math.pow(Math.max(0, r), 1 / p.gamma[0])
   g = Math.pow(Math.max(0, g), 1 / p.gamma[1])
   b = Math.pow(Math.max(0, b), 1 / p.gamma[2])
@@ -257,22 +329,15 @@ function applyEncodedOps(r, g, b, p) {
   g = y + (g - y) * s
   b = y + (b - y) * s
   if (p.hue !== 0) {
-    const theta = (p.hue * Math.PI) / 180
-    const c = Math.cos(theta)
-    const sn = Math.sin(theta)
-    const m = [
-      [0.213 + 0.787 * c - 0.213 * sn, 0.715 - 0.715 * c - 0.715 * sn, 0.072 - 0.072 * c + 0.928 * sn],
-      [0.213 - 0.213 * c + 0.143 * sn, 0.715 + 0.285 * c + 0.140 * sn, 0.072 - 0.072 * c - 0.283 * sn],
-      [0.213 - 0.213 * c - 0.787 * sn, 0.715 - 0.715 * c + 0.715 * sn, 0.072 + 0.928 * c + 0.072 * sn],
-    ]
-    const nr = m[0][0] * r + m[0][1] * g + m[0][2] * b
-    const ng = m[1][0] * r + m[1][1] * g + m[1][2] * b
-    const nb = m[2][0] * r + m[2][1] * g + m[2][2] * b
-    const gc = gamutClamp(nr, ng, nb)
-    r = gc[0]
-    g = gc[1]
-    b = gc[2]
+    const rotated = rotateHue(r, g, b, p.hue)
+    r = rotated[0]
+    g = rotated[1]
+    b = rotated[2]
   }
+  const selective = applySelectiveColor(r, g, b, p)
+  r = selective[0]
+  g = selective[1]
+  b = selective[2]
   if (p.vibrance !== 0) {
     const mx = Math.max(r, g, b)
     const mn = Math.min(r, g, b)
@@ -295,6 +360,7 @@ export function generateLUT(params = defaultParams(), size = 33) {
   const data = new Float32Array(n * 4)
   const step = 1 / (size - 1)
   const isVlog = params.base_photo_style === 'VLOG'
+  const encode = isVlog ? rec709Oetf : srgbOetf
   let idx = 0
   for (let b = 0; b < size; b++) {
     for (let g = 0; g < size; g++) {
@@ -303,7 +369,7 @@ export function generateLUT(params = defaultParams(), size = 33) {
         let gg = g * step
         let bb = b * step
         if (isVlog) {
-          const conv = vlogToLinearRgb(rr, gg, bb, params.tone_map)
+          const conv = vlogDecodeToRec709Linear(rr, gg, bb)
           rr = conv[0]
           gg = conv[1]
           bb = conv[2]
@@ -312,23 +378,22 @@ export function generateLUT(params = defaultParams(), size = 33) {
           gg = srgbEotf(gg)
           bb = srgbEotf(bb)
         }
-        const lin = applyLinearOps(rr, gg, bb, params)
+        const lin = applyTechnicalOps(rr, gg, bb, params)
         rr = lin[0]
         gg = lin[1]
         bb = lin[2]
         if (isVlog) {
-          rr = rec709Oetf(rr)
-          gg = rec709Oetf(gg)
-          bb = rec709Oetf(bb)
-        } else {
-          rr = srgbOetf(rr)
-          gg = srgbOetf(gg)
-          bb = srgbOetf(bb)
+          rr = toneMapAces(rr, params.tone_map)
+          gg = toneMapAces(gg, params.tone_map)
+          bb = toneMapAces(bb, params.tone_map)
         }
-        const enc = applyEncodedOps(rr, gg, bb, params)
-        data[idx++] = enc[0]
-        data[idx++] = enc[1]
-        data[idx++] = enc[2]
+        const creative = applyCreativeLinearOps(rr, gg, bb, params)
+        const base = [clamp01(encode(rr)), clamp01(encode(gg)), clamp01(encode(bb))]
+        const enc = applyEncodedOps(encode(creative[0]), encode(creative[1]),
+                                    encode(creative[2]), params)
+        data[idx++] = clamp01(base[0] + params.look_strength * (enc[0] - base[0]))
+        data[idx++] = clamp01(base[1] + params.look_strength * (enc[1] - base[1]))
+        data[idx++] = clamp01(base[2] + params.look_strength * (enc[2] - base[2]))
         data[idx++] = 1
       }
     }
@@ -366,7 +431,10 @@ export function lutToCube(data, size, { title, photoStyle } = {}) {
 export function paramsToCube(params, { title, mode = 'camera', size = 33 } = {}) {
   const { data } = generateLUT(params, size)
   const photoStyle = mode === 'camera' ? params.base_photo_style : undefined
-  return lutToCube(data, size, { title, photoStyle })
+  const inputSignal = params.base_photo_style === 'VLOG' ? 'VLOG/V-Gamut' : `${params.base_photo_style}/sRGB`
+  const outputSignal = params.base_photo_style === 'VLOG' ? 'Rec709' : 'sRGB'
+  const labeledTitle = mode === 'camera' || !title ? title : `${title} [${inputSignal} -> ${outputSignal}]`
+  return lutToCube(data, size, { title: labeledTitle, photoStyle })
 }
 
 // 把 LUT 应用到 ImageData,返回新的 ImageData(三线性采样)

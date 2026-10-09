@@ -33,8 +33,11 @@ def apply_gain(rgb_linear, gain):
 
 
 def apply_contrast(rgb_encoded, contrast, pivot=0.462):
-    """对比度:围绕 pivot(18% 中灰)拉伸。"""
-    return (rgb_encoded - pivot) * (1.0 + contrast) + pivot
+    """围绕中灰拉伸，负向增益保留底限，避免整幅画面归于同一灰值。"""
+    if contrast == 0.0:
+        return rgb_encoded
+    slope = 1.0 + (contrast / (1.0 - 0.25 * contrast) if contrast < 0 else contrast)
+    return (rgb_encoded - pivot) * slope + pivot
 
 
 def apply_gamma(rgb_encoded, gamma):
@@ -88,6 +91,32 @@ def apply_vibrance(rgb_encoded, vibrance):
     return y[..., None] + (rgb_encoded - y[..., None]) * (1.0 + vibrance * scale[..., None])
 
 
+def apply_selective_color(rgb_encoded, center, width, hue_shift, saturation):
+    """在目标色相周围做平滑的色相与饱和度调整；低色度区域不参与。"""
+    if hue_shift == 0.0 and saturation == 0.0:
+        return rgb_encoded
+    c = np.clip(rgb_encoded, 0.0, 1.0)
+    r, g, b = c[..., 0], c[..., 1], c[..., 2]
+    mx, mn = c.max(axis=-1), c.min(axis=-1)
+    chroma = mx - mn
+    safe = np.maximum(chroma, 1e-6)
+    hue = np.select(
+        [mx == r, mx == g],
+        [((g - b) / safe) % 6.0, (b - r) / safe + 2.0],
+        default=(r - g) / safe + 4.0,
+    ) * 60.0
+    distance = np.abs((hue - center + 180.0) % 360.0 - 180.0)
+    weight = (1.0 - _smoothstep(distance / max(width, 1e-6))) * _smoothstep(chroma / 0.08)
+    out = rgb_encoded
+    if hue_shift != 0.0:
+        rotated = apply_hue(out, hue_shift)
+        out = out + weight[..., None] * (rotated - out)
+    if saturation != 0.0:
+        y = out @ _LUMA
+        out = y[..., None] + (out - y[..., None]) * (1.0 + saturation * weight[..., None])
+    return out
+
+
 # ---- 编码域:影调分区与分离色调(逐点,可烘进 33³ LUT)----
 #
 # 实现约束(实测得出):这些算子的掩码必须是**平滑过渡**,不能有硬阈值。
@@ -107,7 +136,7 @@ def _smoothstep(x):
 
 
 def apply_highlights(rgb_encoded, amount):
-    """高光:只作用于亮部。负=压高光(找回溢出),正=提亮部。"""
+    """高光:只作用于亮部。负=压高光,正=提亮部；不能恢复已剪切细节。"""
     if amount == 0.0:
         return rgb_encoded
     y = rgb_encoded @ _LUMA
@@ -128,26 +157,25 @@ def apply_shadows(rgb_encoded, amount):
 
 
 def apply_whites(rgb_encoded, amount):
-    """白场:只作用于亮部,调整白点。正=提白,负=收白。暗部不受影响。
-
-    用 (1-(1-c)²) 的余量形状:暗部权重≈0、亮部权重→1,且**平滑**(插值友好)。
-    """
+    """白部层次:正值增强亮部,负值降低白点；全范围保持灰阶单调。"""
     if amount == 0.0:
         return rgb_encoded
     c = np.clip(rgb_encoded, 0.0, 1.0)
-    return rgb_encoded + amount * (1.0 - (1.0 - c) ** 2)
+    if amount > 0.0:
+        return rgb_encoded + amount * c ** 2 * (1.0 - c)
+    effective = amount / (1.0 - amount)
+    return rgb_encoded + effective * (2.0 * c - c ** 2)
 
 
 def apply_blacks(rgb_encoded, amount):
-    """黑场:只作用于暗部,调整黑点。正=抬黑(去死黑),负=压黑。亮部不受影响。
-
-    用 (1-c)² 的形状:纯黑处权重=1(所以正 amount 能真正抬起死黑),
-    亮部权重→0。反向写法会在 c=0 处退化成 0,导致抬黑对纯黑完全无效。
-    """
+    """黑部层次:正值抬黑位,负值压暗部；全范围保持灰阶单调。"""
     if amount == 0.0:
         return rgb_encoded
     c = np.clip(rgb_encoded, 0.0, 1.0)
-    return rgb_encoded + amount * (1.0 - c) ** 2
+    if amount > 0.0:
+        effective = amount / (1.0 + amount)
+        return rgb_encoded + effective * (1.0 - c) ** 2
+    return rgb_encoded + amount * c * (1.0 - c) ** 2
 
 
 def apply_curve(rgb_encoded, strength):
@@ -182,12 +210,13 @@ def _hue_to_rgb(hue_deg):
     return table[i]
 
 
-def apply_split_tone(rgb_encoded, sh_hue, sh_sat, hi_hue, hi_sat, balance):
+def apply_split_tone(rgb_encoded, sh_hue, sh_sat, hi_hue, hi_sat, balance,
+                     mid_hue=0.0, mid_sat=0.0):
     """分离色调:阴影与高光分别染色,按亮度平滑插值。
 
     与「颜色分级」同样的思路:阴影色只影响暗部、高光色只影响亮部,中间调两者都弱。
     """
-    if sh_sat == 0.0 and hi_sat == 0.0:
+    if sh_sat == 0.0 and hi_sat == 0.0 and mid_sat == 0.0:
         return rgb_encoded
     y = np.clip(rgb_encoded @ _LUMA, 0.0, 1.0)[..., None]
     b = float(np.clip(balance, 0.0, 1.0))
@@ -201,14 +230,16 @@ def apply_split_tone(rgb_encoded, sh_hue, sh_sat, hi_hue, hi_sat, balance):
         tint = tint + sh_w * (sh_sat * 0.5) * (_hue_to_rgb(sh_hue) - 0.5)
     if hi_sat > 0:
         tint = tint + hi_w * (hi_sat * 0.5) * (_hue_to_rgb(hi_hue) - 0.5)
+    if mid_sat > 0:
+        mid_w = _smoothstep(y / 0.5) * _smoothstep((1.0 - y) / 0.5)
+        tint = tint + mid_w * (mid_sat * 0.5) * (_hue_to_rgb(mid_hue) - 0.5)
     return rgb_encoded + tint
 
 
 def apply_tone_ops(rgb_encoded, params):
-    """影调分区链:高光 → 阴影 → 白场 → 黑场 → S 曲线 → 分离色调。
+    """影调分区链:高光 → 阴影 → 白部 → 黑部 → S 曲线 → 分离色调。
 
-    顺序说明:先做分区提压(高光/阴影),再动端点(白/黑场),最后整体曲线与染色。
-    这个顺序符合「先救细节、再定黑白场、最后定风格」的修图习惯。
+    先做分区提压,再动黑白部层次,最后整体曲线与染色。
     """
     out = apply_highlights(rgb_encoded, params.highlights)
     out = apply_shadows(out, params.shadows)
@@ -219,7 +250,7 @@ def apply_tone_ops(rgb_encoded, params):
         out,
         params.split_shadow_hue, params.split_shadow_sat,
         params.split_highlight_hue, params.split_highlight_sat,
-        params.split_balance,
+        params.split_balance, params.split_mid_hue, params.split_mid_sat,
     )
     return out
 
@@ -229,11 +260,18 @@ def apply_tone_ops(rgb_encoded, params):
 
 def apply_linear_ops(rgb_linear, params):
     """线性域算子链:白平衡 → 曝光 → Lift → Gain。"""
+    return apply_creative_linear_ops(apply_technical_ops(rgb_linear, params), params)
+
+
+def apply_technical_ops(rgb_linear, params):
+    """针对当前样张的白平衡与曝光。"""
     out = apply_white_balance(rgb_linear, params.temp, params.tint)
-    out = apply_exposure(out, params.exposure)
-    out = apply_lift(out, params.lift)
-    out = apply_gain(out, params.gain)
-    return out
+    return apply_exposure(out, params.exposure)
+
+
+def apply_creative_linear_ops(rgb_linear, params):
+    """可由风格强度控制的分通道 Lift/Gain。"""
+    return apply_gain(apply_lift(rgb_linear, params.lift), params.gain)
 
 
 def apply_encoded_ops(rgb_encoded, params):
@@ -244,10 +282,13 @@ def apply_encoded_ops(rgb_encoded, params):
     新算子追加在**饱和度与色相之后**:它们调的是亮度分区与端点,
     放在色彩处理之后可以避免被饱和度放大或把染色带进色相旋转。
     """
-    out = apply_contrast(rgb_encoded, params.contrast)
+    out = apply_contrast(rgb_encoded, params.contrast, params.contrast_pivot)
     out = apply_gamma(out, params.gamma)
     out = apply_saturation(out, params.saturation)
     out = apply_hue(out, params.hue)
+    out = apply_selective_color(out, params.selective_hue_center,
+                                params.selective_hue_width, params.selective_hue_shift,
+                                params.selective_saturation)
     out = apply_vibrance(out, params.vibrance)
     out = apply_tone_ops(out, params)
     return np.clip(out, 0.0, 1.0)

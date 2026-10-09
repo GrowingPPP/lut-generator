@@ -57,6 +57,17 @@ def test_download_software_no_photo_style(auth):
     assert "#LUMIXPHOTOSTYLE" not in resp.text
 
 
+def test_software_download_identifies_vlog_signal_contract(auth):
+    created = client.post("/api/luts", json={
+        "name": "look", "params": {"base_photo_style": "VLOG"},
+    }, headers=auth).json()
+    resp = client.get(f"/api/luts/{created['id']}/download?mode=software", headers=auth)
+    assert resp.status_code == 200
+    assert resp.text.startswith('TITLE "look [VLOG/V-Gamut -> Rec709]"')
+    assert "VLOG_to_Rec709.cube" in resp.headers["content-disposition"]
+    assert "#LUMIXPHOTOSTYLE" not in resp.text
+
+
 def test_update_and_delete(auth):
     created = client.post("/api/luts", json={"name": "old", "params": {}}, headers=auth).json()
     lut_id = created["id"]

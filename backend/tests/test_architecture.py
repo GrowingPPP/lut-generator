@@ -94,10 +94,18 @@ def test_param_count_consistent_across_implementations():
     三处实现(两份引擎 + 一份 schema)靠人工同步必然漂移 ——
     这个项目已经吃过双实现漂移的苦(所以才有 test-parity)。
     """
+    from dataclasses import asdict
+
     from agent.schemas import STYLE_FIELDS
+    from api.main import LutParamsModel
     from lut_engine.params import LutParams
 
     backend_fields = set(LutParams.__dataclass_fields__)
+    assert set(LutParamsModel.model_fields) == backend_fields
+    engine_defaults = asdict(LutParams())
+    for key in ("lift", "gamma", "gain"):
+        engine_defaults[key] = list(engine_defaults[key])
+    assert LutParamsModel().model_dump() == engine_defaults
     assert backend_fields == set(STYLE_FIELDS), (
         f"LutParams 与 STYLE_FIELDS 不一致:"
         f" 仅引擎有 {sorted(backend_fields - set(STYLE_FIELDS))},"

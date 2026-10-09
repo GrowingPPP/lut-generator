@@ -22,16 +22,20 @@ def generate_lut(params: LutParams, size: int = 33):
     flat = grid.reshape(-1, 3)
 
     if params.base_photo_style == "VLOG":
-        lin = vlog.vlog_to_linear_rgb(flat, params.tone_map)
+        lin = vlog.vlog_decode_to_rec709_linear(flat)
     else:
         lin = colorspace.srgb_eotf(flat)
 
-    lin = transforms.apply_linear_ops(lin, params)
-
+    lin = transforms.apply_technical_ops(lin, params)
     if params.base_photo_style == "VLOG":
-        enc = vlog.linear_to_rec709(lin)
-    else:
-        enc = colorspace.srgb_oetf(lin)
+        lin = vlog.tone_map_aces(lin, params.tone_map)
+    creative_lin = transforms.apply_creative_linear_ops(lin, params)
 
-    out = transforms.apply_encoded_ops(enc, params)
+    encode = vlog.linear_to_rec709 if params.base_photo_style == "VLOG" else colorspace.srgb_oetf
+    base_enc = encode(lin)
+    enc = encode(creative_lin)
+
+    base = np.clip(base_enc, 0.0, 1.0)
+    look = transforms.apply_encoded_ops(enc, params)
+    out = base + params.look_strength * (look - base)
     return out.reshape(size, size, size, 3)

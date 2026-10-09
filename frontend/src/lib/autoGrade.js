@@ -4,37 +4,45 @@
 // frontend/scripts/check_parity.mjs,用 Node 内置 node:test)。
 // 这些函数把服务端的技术字段翻译成中文,任何一处漏翻译都会把原始键名甩给用户。
 
-// 22 个参数的展示名与单位。改参数集时这里必须同步 —— 有测试锁住覆盖率。
+// 参数展示名与单位。改参数集时这里必须同步。
 export const PARAM_LABELS = {
   base_photo_style: ['基准', ''],
-  tone_map: ['高光映射', ''],
-  temp: ['色温', 'K'],
-  tint: ['色调', ''],
+  tone_map: ['V-Log 显示映射', ''],
+  look_strength: ['风格强度', ''],
+  temp: ['冷暖偏移', ''],
+  tint: ['绿/洋红', ''],
   exposure: ['曝光', ' EV'],
   contrast: ['对比度', ''],
+  contrast_pivot: ['对比中心', ''],
   highlights: ['高光', ''],
   shadows: ['阴影', ''],
-  whites: ['白场', ''],
-  blacks: ['黑场', ''],
+  whites: ['白部层次', ''],
+  blacks: ['黑部层次', ''],
   curve: ['S 曲线', ''],
   saturation: ['饱和度', ''],
   vibrance: ['自然饱和', ''],
-  hue: ['色相', '°'],
+  hue: ['全局色相', '°'],
+  selective_hue_center: ['目标色相', '°'],
+  selective_hue_width: ['色相范围', '°'],
+  selective_hue_shift: ['目标色相偏移', '°'],
+  selective_saturation: ['目标色饱和', ''],
   split_shadow_hue: ['阴影色相', '°'],
   split_shadow_sat: ['阴影强度', ''],
   split_highlight_hue: ['高光色相', '°'],
   split_highlight_sat: ['高光强度', ''],
+  split_mid_hue: ['中间调色相', '°'],
+  split_mid_sat: ['中间调强度', ''],
   split_balance: ['平衡', ''],
-  lift: ['暗部 RGB', ''],
+  lift: ['RGB 偏移', ''],
   gamma: ['中间调 RGB', ''],
-  gain: ['亮部 RGB', ''],
+  gain: ['RGB 增益', ''],
 }
 
 const ARRAY_KEYS = ['lift', 'gamma', 'gain']
 
 function fmtNumber(key, value) {
   const [, unit] = PARAM_LABELS[key] || ['', '']
-  if (unit === 'K' || unit === '°') return String(Math.round(value))
+  if (key === 'temp' || key === 'tint' || unit === '°') return String(Math.round(value))
   // 这些增量本来就在 0.01 量级,取整会把 0.06 显示成 0
   return value.toFixed(2)
 }
@@ -48,12 +56,16 @@ export function buildAutoGradePayload({ params, style, useVision = true, maxRoun
   return payload
 }
 
-// 风格提取器返回的是目标参数。gamma/gain 的中性值是 1，平衡的中性值是 0.5。
+  // 风格提取器返回目标参数；部分字段的中性值不是 0。
 export function styleDiff(styleParams) {
   if (!styleParams) return []
   const neutralBase = {}
   for (const [k, v] of Object.entries(styleParams)) {
-    const neutral = k === 'gamma' || k === 'gain' ? 1 : k === 'split_balance' ? 0.5 : 0
+    const neutral = k === 'gamma' || k === 'gain' || k === 'look_strength' ? 1
+      : k === 'split_balance' ? 0.5
+        : k === 'contrast_pivot' ? 0.462
+        : k === 'selective_hue_center' ? 30
+          : k === 'selective_hue_width' ? 45 : 0
     neutralBase[k] = Array.isArray(v) ? v.map(() => neutral) : neutral
   }
   return diffParams(neutralBase, styleParams)

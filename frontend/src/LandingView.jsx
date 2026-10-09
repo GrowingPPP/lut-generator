@@ -310,7 +310,7 @@ export default function LandingView({ onEnter }) {
             <div className="landing-feature-mock">
               <p className="landing-bubble landing-bubble-user">我想要一个复古胶片感，稍微偏暖，暗部有点褪色。</p>
               <p className="landing-bubble landing-bubble-bot">
-                已为你生成「复古胶片」参数。已应用：色温 +350K，对比度 +0.18，饱和度 -0.05，暗部轻微提亮。
+                已为你生成「复古胶片」参数。已应用：冷暖偏移 +350，对比度 +0.18，饱和度 -0.05，暗部轻微提亮。
                 <br /><br />
                 你可以继续微调，或直接保存 .cube。
               </p>
@@ -319,7 +319,7 @@ export default function LandingView({ onEnter }) {
               <span className="landing-mark">▸</span>
               <h3>会话式生成</h3>
               <p>
-                无需手搓 22 个调色参数。通过简单的对话描述（例如「日系清透」），模型会理解你的意图并设定参数，
+                无需逐项设置 30 个调色参数。通过简单的对话描述（例如「日系清透」），模型会理解你的意图并设定参数，
                 你只需微调确认，即可直接导出标准 .cube 文件。
               </p>
             </div>
@@ -377,8 +377,8 @@ export default function LandingView({ onEnter }) {
               <span className="landing-mark">▾</span>
               <h3>精细调色参数面板</h3>
               <p>
-                并非简单的滤镜黑盒。我们开放了 22 个专业级参数，按组逻辑折叠：基础（色温/曝光）、
-                影调（对比度/高光/阴影/S 曲线）、色彩（饱和度/自然饱和/色相）、分离色调及分通道调整，
+                开放 30 个可调参数，按组折叠：单张校正（冷暖/曝光）、风格强度、
+                影调（对比度/高光/阴影/S 曲线）、全局与局部色彩、分离色调及分通道调整，
                 满足后期深度定制。
               </p>
             </div>
@@ -391,7 +391,7 @@ export default function LandingView({ onEnter }) {
                   </div>
                   <div className="landing-params-row">
                     <div className="landing-params-label">
-                      <span>色温 (Temp)</span>
+                      <span>冷暖偏移</span>
                       <em>+350</em>
                     </div>
                     <div className="landing-params-track"><i style={{ width: '56%' }} /></div>
@@ -423,18 +423,18 @@ export default function LandingView({ onEnter }) {
               <h2>专为松下机内烧录设计</h2>
               <p className="landing-sub">
                 彻底打通后期与前期的壁垒。生成的 LUT 专门针对松下机身（如 S5M2 / G9M2 等）的
-                Real-Time LUT 功能进行了深度优化，支持 V-Log 高光映射，让直出也能拥有电影级色彩。
+                Real-Time LUT 功能进行了适配，支持 V-Log 显示映射与风格调整。使用时需匹配相机 Photo Style。
               </p>
               <div className="landing-downloads">
                 <div className="landing-download">
                   <span className="landing-mark-sm">▼</span>
                   <strong>下载机内版</strong>
-                  <span className="landing-quiet">带特定 Panasonic 表头，机内完美读取</span>
+                  <span className="landing-quiet">带 Panasonic 标签，需匹配基准 Photo Style</span>
                 </div>
                 <div className="landing-download">
                   <span className="landing-mark-sm">▸</span>
                   <strong>下载后期版</strong>
-                  <span className="landing-quiet">标准通用格式，兼容达芬奇与 PR</span>
+                  <span className="landing-quiet">标准 .cube 格式，使用时需匹配输入信号</span>
                 </div>
               </div>
             </div>

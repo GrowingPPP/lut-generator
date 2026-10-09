@@ -1,4 +1,4 @@
-"""V-Log → Rec.709 转换。松下官方反曲线 + 标准色域矩阵 + ACES filmic tone mapping。"""
+"""V-Log → Rec.709 转换。V-Log 反曲线、色域矩阵和简化的 Narkowicz 显示映射。"""
 import numpy as np
 
 # V-Gamut → Rec.709 色域矩阵(由原色标准经 RGB→XYZ→RGB 计算)
@@ -20,7 +20,7 @@ def vlog_to_linear(vlog):
 
 
 def tone_map_aces(linear, strength=1.0):
-    """ACES filmic tone mapping(Narkowicz 近似),压缩高光到 [0,1]。
+    """Narkowicz ACES 风格近似曲线,同时改变中间调与高光。
 
     strength 0=不压缩,1=全压缩,中间值线性插值。
     """
@@ -42,9 +42,13 @@ def linear_to_rec709(linear):
 
 def vlog_to_linear_rgb(rgb, tone_map=1.0):
     """V-Log 编码 RGB → 线性 Rec.709 RGB(反曲线 + 色域矩阵 + tone mapping)。"""
+    return tone_map_aces(vlog_decode_to_rec709_linear(rgb), tone_map)
+
+
+def vlog_decode_to_rec709_linear(rgb):
+    """解码 V-Log/V-Gamut；供曝光与白平衡在显示映射前使用。"""
     lin = vlog_to_linear(rgb)
-    lin = lin @ V_GAMUT_TO_709.T
-    return tone_map_aces(lin, tone_map)
+    return lin @ V_GAMUT_TO_709.T
 
 
 def vlog_to_rec709(rgb):

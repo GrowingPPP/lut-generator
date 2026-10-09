@@ -24,12 +24,14 @@ const CASES = [
   { name: 'identity', params: {}, title: 'demo', mode: 'camera', bytesExact: true },
   { name: 'warm_camera', params: { temp: 520, tint: 100 }, title: '日系清透', mode: 'camera', bytesExact: true },
   { name: 'software_no_header', params: { contrast: 0.2 }, title: 'demo', mode: 'software', bytesExact: true },
+  { name: 'software_vlog_signal', params: { base_photo_style: 'VLOG', look_strength: 0 }, title: 'vlog', mode: 'software' },
   { name: 'vlog_camera', params: { base_photo_style: 'VLOG', tone_map: 0.3 }, title: 'vlog', mode: 'camera' },
   { name: 'vlog_tone07', params: { base_photo_style: 'VLOG', tone_map: 0.7, exposure: 0.4, saturation: 0.2 }, title: 'vlog2', mode: 'camera' },
   { name: 'full_ops', params: { lift: [0.05, 0, -0.03], gamma: [0.9, 1, 1.1], gain: [1.05, 1, 0.95], vibrance: 0.3 }, title: 'full', mode: 'camera' },
   { name: 'tone_regions', params: { highlights: -0.7, shadows: 0.7, whites: 0.15, blacks: 0.15, curve: 0.6 }, title: 'tone', mode: 'camera' },
   { name: 'split_tone', params: { split_shadow_hue: 220, split_shadow_sat: 0.7, split_highlight_hue: 40, split_highlight_sat: 0.6, split_balance: 0.45 }, title: 'split', mode: 'camera' },
   { name: 'tone_extreme_vlog', params: { base_photo_style: 'VLOG', tone_map: 0.4, highlights: -1, shadows: 1, curve: 1, split_shadow_sat: 0.8, split_highlight_sat: 0.8, split_balance: 0.2 }, title: 'vlog-tone', mode: 'camera' },
+  { name: 'selective_mid_strength', params: { selective_hue_center: 28, selective_hue_width: 50, selective_hue_shift: 16, selective_saturation: -0.25, split_mid_hue: 210, split_mid_sat: 0.28, look_strength: 0.65 }, title: 'look', mode: 'camera' },
 ]
 
 const py = `
@@ -40,7 +42,10 @@ spec = json.loads(sys.argv[1])
 p = lut_params_from_dict(spec["params"])
 lut = generate_lut(p, size=33)
 style = p.base_photo_style if spec["mode"] == "camera" else None
-sys.stdout.write(lut_to_cube(lut, title=spec["title"], photo_style=style))
+input_signal = "VLOG/V-Gamut" if p.base_photo_style == "VLOG" else f"{p.base_photo_style}/sRGB"
+output_signal = "Rec709" if p.base_photo_style == "VLOG" else "sRGB"
+title = spec["title"] if spec["mode"] == "camera" else f"{spec['title']} [{input_signal} -> {output_signal}]"
+sys.stdout.write(lut_to_cube(lut, title=title, photo_style=style))
 `
 
 let failures = 0
@@ -55,7 +60,7 @@ for (const c of CASES) {
   const got = paramsToCube(params, { title: c.title, mode: c.mode })
 
   if (c.bytesExact && got === want) {
-    const n = got.split('\n').filter((l) => l).length - 3
+    const n = got.split('\n').filter((l) => l).filter((l) => !l.startsWith('TITLE ') && !l.startsWith('#') && !l.startsWith('LUT_3D_SIZE ')).length
     totalValues += n * 3
     console.log(`ok   ${c.name} (逐字节一致, ${n} 数据行)`)
     continue
@@ -63,7 +68,7 @@ for (const c of CASES) {
 
   const gl = got.split('\n').filter((l) => l !== '')
   const wl = want.split('\n').filter((l) => l !== '')
-  const HEADER = 3
+  const HEADER = c.mode === 'camera' ? 3 : 2
 
   if (gl.length !== wl.length) {
     console.error(`FAIL ${c.name}: 行数 前端 ${gl.length} / 后端 ${wl.length}`)

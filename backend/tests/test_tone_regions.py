@@ -160,6 +160,10 @@ GRADING_RECIPES = {
                     "whites": 0.08, "blacks": 0.10, "vibrance": 0.25}, 4.5),
     "人像柔和": ({"contrast": -0.1, "highlights": -0.3, "shadows": 0.35,
                   "saturation": -0.05, "vibrance": 0.15}, 3.0),
+    "局部色彩": ({"selective_hue_center": 28, "selective_hue_width": 45,
+                  "selective_hue_shift": 30, "selective_saturation": -0.25,
+                  "split_mid_hue": 210, "split_mid_sat": 0.28,
+                  "look_strength": 0.65}, 3.0),
 }
 
 

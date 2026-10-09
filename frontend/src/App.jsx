@@ -18,21 +18,28 @@ import './Landing.css'
 
 const PARAM_GROUPS = [
   {
-    id: 'basic', label: '基础', defaultOpen: true,
+    id: 'basic', label: '单张校正', defaultOpen: true,
     sliders: [
-      { key: 'temp', label: '色温', min: -3000, max: 3000, step: 10, unit: 'K' },
-      { key: 'tint', label: '色调', min: -500, max: 500, step: 5, unit: '' },
+      { key: 'temp', label: '冷暖偏移', min: -3000, max: 3000, step: 10, unit: '' },
+      { key: 'tint', label: '绿/洋红', min: -500, max: 500, step: 5, unit: '' },
       { key: 'exposure', label: '曝光', min: -2, max: 2, step: 0.05, unit: ' EV' },
+    ],
+  },
+  {
+    id: 'look', label: '风格', defaultOpen: true,
+    sliders: [
+      { key: 'look_strength', label: '风格强度', min: 0, max: 1, step: 0.01, unit: '' },
     ],
   },
   {
     id: 'tone', label: '影调', defaultOpen: true,
     sliders: [
       { key: 'contrast', label: '对比度', min: -1, max: 1, step: 0.01, unit: '' },
+      { key: 'contrast_pivot', label: '对比中心', min: 0.1, max: 0.9, step: 0.005, unit: '' },
       { key: 'highlights', label: '高光', min: -1, max: 1, step: 0.01, unit: '' },
       { key: 'shadows', label: '阴影', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'whites', label: '白场', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'blacks', label: '黑场', min: -1, max: 1, step: 0.01, unit: '' },
+      { key: 'whites', label: '白部层次', min: -1, max: 1, step: 0.01, unit: '' },
+      { key: 'blacks', label: '黑部层次', min: -1, max: 1, step: 0.01, unit: '' },
       { key: 'curve', label: 'S 曲线', min: -1, max: 1, step: 0.01, unit: '' },
     ],
   },
@@ -41,7 +48,16 @@ const PARAM_GROUPS = [
     sliders: [
       { key: 'saturation', label: '饱和度', min: -1, max: 1, step: 0.01, unit: '' },
       { key: 'vibrance', label: '自然饱和', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'hue', label: '色相', min: -180, max: 180, step: 1, unit: '°' },
+      { key: 'hue', label: '全局色相', min: -180, max: 180, step: 1, unit: '°' },
+    ],
+  },
+  {
+    id: 'selective', label: '局部色彩', defaultOpen: false,
+    sliders: [
+      { key: 'selective_hue_center', label: '目标色相', min: 0, max: 360, step: 1, unit: '°' },
+      { key: 'selective_hue_width', label: '色相范围', min: 1, max: 180, step: 1, unit: '°' },
+      { key: 'selective_hue_shift', label: '目标色相偏移', min: -180, max: 180, step: 1, unit: '°' },
+      { key: 'selective_saturation', label: '目标色饱和', min: -1, max: 1, step: 0.01, unit: '' },
     ],
   },
   {
@@ -51,6 +67,8 @@ const PARAM_GROUPS = [
       { key: 'split_shadow_sat', label: '阴影强度', min: 0, max: 1, step: 0.01, unit: '' },
       { key: 'split_highlight_hue', label: '高光色相', min: 0, max: 360, step: 1, unit: '°' },
       { key: 'split_highlight_sat', label: '高光强度', min: 0, max: 1, step: 0.01, unit: '' },
+      { key: 'split_mid_hue', label: '中间调色相', min: 0, max: 360, step: 1, unit: '°' },
+      { key: 'split_mid_sat', label: '中间调强度', min: 0, max: 1, step: 0.01, unit: '' },
       { key: 'split_balance', label: '平衡', min: 0, max: 1, step: 0.01, unit: '' },
     ],
   },
@@ -68,9 +86,9 @@ function defaultGroupOpen() {
 }
 
 const RGB_GROUPS = [
-  { key: 'lift', label: '暗部', min: -0.1, max: 0.1, step: 0.005 },
+  { key: 'lift', label: 'RGB 偏移', min: -0.1, max: 0.1, step: 0.005 },
   { key: 'gamma', label: '中间调', min: 0.5, max: 1.5, step: 0.005 },
-  { key: 'gain', label: '亮部', min: 0.5, max: 1.5, step: 0.005 },
+  { key: 'gain', label: 'RGB 增益', min: 0.5, max: 1.5, step: 0.005 },
 ]
 
 const RGB_CHANNELS = ['R', 'G', 'B']
@@ -336,7 +354,8 @@ function GenerateView({ previewLut }) {
     try {
       const n = name.trim() || '未命名 LUT'
       const text = paramsToCube(params, { title: n, mode })
-      const filename = mode === 'camera' ? cameraFileName(n) : `${n}_software.cube`
+      const signal = params.base_photo_style === 'VLOG' ? 'VLOG_to_Rec709' : `${params.base_photo_style}_sRGB`
+      const filename = mode === 'camera' ? cameraFileName(n) : `${n}_${signal}.cube`
       saveTextFile(text, filename)
       setStatus(`已下载:${filename}`)
     } catch (e) {
@@ -442,7 +461,9 @@ function GenerateView({ previewLut }) {
           />
         </div>
 
-        <p className="text-muted">上传与所选基准 Photo Style 相同的 JPEG 样张，预览与自动修图才有参考价值。</p>
+        <p className="text-muted">{params.base_photo_style === 'VLOG'
+          ? '上传未经显示转换的 V-Log/V-Gamut 帧作预览；普通 JPEG 不代表 V-Log 输入信号。'
+          : `上传与 ${params.base_photo_style} Photo Style 相同的相机直出 JPEG，预览与自动修图才有参考价值。`}</p>
 
         {displayMode === 'slider' ? (
           <div
@@ -528,7 +549,7 @@ function GenerateView({ previewLut }) {
             </label>
             {params.base_photo_style === 'VLOG' && (
               <label className="slider">
-                <span>高光映射</span>
+                <span>V-Log 显示映射</span>
                 <input
                   type="range"
                   min={0}
@@ -541,6 +562,7 @@ function GenerateView({ previewLut }) {
               </label>
             )}
           </div>
+          <p className="text-muted">Standard、Natural、Vivid 使用相同的相对调色曲线，并依赖各自的原始 Photo Style；此处不会将三种风格校准成同一画面。冷暖是以 6500K 为参考的相对 RGB 偏移，不代表拍摄色温。风格强度为 0 时仍保留输入转换、曝光和白平衡。RGB 偏移和增益影响全部亮度，只是在暗部或亮部更明显。</p>
 
           {PARAM_GROUPS.map((g) => (
             <section key={g.id} className="param-group">
@@ -611,7 +633,7 @@ function GenerateView({ previewLut }) {
           </button>
           <button className="btn" onClick={() => downloadCube('camera')} disabled={grading || sending}>直接下载机内版</button>
           <button className="btn" onClick={() => downloadCube('software')} disabled={grading || sending}>直接下载后期版</button>
-          <span className="text-muted">机内版须与相机的 Photo Style「{params.base_photo_style}」匹配；文件名为 8 位字母数字。单张样张自动修正的曝光和白平衡仅适合相近光线。</span>
+          <span className="text-muted">机内版须与相机的 Photo Style「{params.base_photo_style}」匹配；文件名为 8 位字母数字。后期版仅省略机内标签，输入仍须为{params.base_photo_style === 'VLOG' ? ' V-Log/V-Gamut，输出 Rec.709' : ` ${params.base_photo_style} 照片信号，输出 sRGB`}。单张样张自动修正的曝光和白平衡仅适合相近光线。旧预设重新导出前请预览影调。</span>
           <span className="status">{status}</span>
         </div>
       </section>

@@ -10,7 +10,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from api.main import app, LutParamsModel
 from photo.fixtures import make_jpeg_bytes
 from storage import db
 
@@ -37,14 +37,7 @@ def auth():
 
 client = TestClient(app)
 
-DEFAULT_PARAMS = {
-    "base_photo_style": "STD", "temp": 0, "tint": 0, "exposure": 0, "contrast": 0,
-    "saturation": 0, "hue": 0, "vibrance": 0, "tone_map": 1,
-    "highlights": 0, "shadows": 0, "whites": 0, "blacks": 0, "curve": 0,
-    "split_shadow_hue": 0, "split_shadow_sat": 0,
-    "split_highlight_hue": 0, "split_highlight_sat": 0, "split_balance": 0.5,
-    "lift": [0, 0, 0], "gamma": [1, 1, 1], "gain": [1, 1, 1],
-}
+DEFAULT_PARAMS = LutParamsModel().model_dump()
 
 
 def _post(auth, kind="under_exposed", params=None, **form):

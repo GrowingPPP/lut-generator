@@ -196,7 +196,7 @@ def test_r1_rejects_highlight_clipping_increase():
 
 def test_r2_rejects_shadow_crush_increase():
     img = make_fixture("under_exposed")
-    ok, reasons = _check(img, {}, {"exposure": -0.9, "blacks": -0.2})
+    ok, reasons = _check(img, {}, {"exposure": -0.9, "blacks": -0.8})
     assert not ok
     assert any("阴影" in r or "压死" in r for r in reasons), reasons
 
@@ -439,8 +439,10 @@ def test_schema_rejects_out_of_range_proposal_before_hard_rules():
 def test_hard_rules_reject_plausible_but_harmful_proposal():
     """**第二道闸门**:schema 内但实际有害的提议,由硬校验拒绝并记录原因。"""
     img = make_fixture("under_exposed")
-    # exposure=0.9 在 schema 内(≤1),但在已经暗部压死的图上加曝光+压黑会加剧压死
-    r = A.auto_grade(img, {}, client=stub_client([{"exposure": 0.9, "blacks": -0.2}]),
+    # 各参数都在单轮 schema 内,组合后仍会造成暗部裁剪
+    r = A.auto_grade(img, {}, client=stub_client([{"exposure": 0.9,
+                                                   "contrast": 0.5,
+                                                   "blacks": -0.5}]),
                      use_vision=False)
     rejected = [st for st in r.steps if not st.applied and st.rejections]
     assert rejected, "有害提议必须被硬校验拦下并记录"

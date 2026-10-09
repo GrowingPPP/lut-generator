@@ -8,7 +8,7 @@
 - **LUT 管理**:个人 LUT 的增删改查,下载机内版(带松下头)与后期版
 - **实时预览**:上传样张,滑动对比 / 独立展示两种形式
 - **AI 自动修图**:上传照片,一键自动分析并产出调好的 LUT;可叠加自然语言风格描述(如「日系清透一点」),展示诊断依据、前后对比与完整修改说明,可一键撤销
-- **精细调色**:22 个参数,按组折叠 —— 基础(色温/色调/曝光)、影调(对比度/高光/阴影/白场/黑场/S 曲线)、色彩(饱和度/自然饱和/色相)、分离色调(阴影与高光分别染色)、分通道(暗部/中间调/亮部 × R/G/B)、基准照片风格与 V-Log 高光映射
+- **精细调色**:30 个参数,按单张校正、风格强度、影调、全局与局部色彩、阴影/中间调/高光染色、RGB 分通道和输入基准分组。风格强度可在技术转换与完整效果之间调整
 
 ## 技术栈
 
@@ -173,13 +173,13 @@ key 优先级:`CHROMA_LLM_API_KEY`(环境变量或项目根 `.env`)> `OPENAI_API
 ## 使用说明
 
 1. **生成**:描述风格 → 大模型展示理解到的参数请你确认 → 确认后生成 LUT
-2. **预览**:上传与所选基准 Photo Style 一致的相机直出 JPEG，拖动分割线对比原图与 LUT 效果
-3. **保存/下载**:生成结果可直接下载机内版(导入 S5M2 等)或后期版(DaVinci/PR),也可先保存到「我的 LUT」再下载。机内版文件主名固定为 8 位 ASCII，使用时相机 Photo Style 必须匹配 LUT 基准
+2. **预览**:照片基准上传与所选 Photo Style 一致的相机直出 JPEG；V-Log 基准使用未经显示转换的 V-Log/V-Gamut 帧。拖动分割线比较原图与 LUT 效果
+3. **保存/下载**:生成结果可下载机内版或后期版，也可先保存到「我的 LUT」。机内版文件主名固定为 8 位 ASCII，使用时相机 Photo Style 必须匹配 LUT 基准。后期版仅去掉机内标签，文件名和标题注明输入输出信号；它需要应用在相同输入信号上
 
    兼容条件见[松下 Real Time LUT 指南](https://www.panasonic.com/uk/consumer/cameras-camcorders/lumix-expert-advice-learn/lumix-expert-advice/using-real-time-luts.html)与[松下 LUT 导入说明](https://av.jpn.support.panasonic.com/support/dsc/download/lut/index.html)。
 4. **管理**:在「我的 LUT」查看缩略图、预览、改名、删除
 5. **AI 自动修图**:上传照片 → 点「AI 自动修图」→ 可先在风格框里写一句自然语言描述。
-   - 修图以当前 22 个参数所渲染的样张为基准诊断；优化提议叠加到当前参数，风格目标值按目标应用
+   - 修图以当前 30 个参数所渲染的样张为基准诊断；优化提议叠加到当前参数，风格目标值按目标应用
    - 对一张样张自动修正的曝光与白平衡，只适合相近光线；其他场景应重新检查效果
    - 报告面板会列出诊断依据、本次调整、被安全规则拦下的提议、以及视觉复核意见
    - **视觉复核**是可选开关:开启后会把照片与修图结果发给模型做主观复检(更准但更慢);关闭后只依据客观数据分析
@@ -191,7 +191,8 @@ key 优先级:`CHROMA_LLM_API_KEY`(环境变量或项目根 `.env`)> `OPENAI_API
 ## 松下相机适配说明
 
 - 输出 `.cube` 3D LUT(33 点),机内版注入 `#LUMIXPHOTOSTYLE` 头信息
-- 基准照片风格决定 LUT 输入侧:Standard/Natural/Vivid 走 sRGB 照片线;V-Log 走视频线(松下 V-Log 反曲线 → V-Gamut→Rec.709 矩阵 → ACES filmic tone mapping,强度由 `tone_map` 控制)
+- Standard/Natural/Vivid 走相同的 sRGB 相对调色曲线，输入必须是对应 Photo Style 的照片信号；它们尚未针对各风格做设备校准。V-Log 走 V-Log/V-Gamut 解码 → 线性域曝光和白平衡 → 简化显示映射 → Rec.709 编码
+- 冷暖滑杆是以 6500K 为参考的相对 RGB 增益，不测量拍摄色温。风格强度不衰减曝光、白平衡或 V-Log 显示转换。旧预设因影调公式变更，在重新导出前应预览
 - 机内烧录(Real-Time LUT)支持 S5M2 / S5M2X / G9M2;S5 / GH6 等仅机内监视
 
 ## 测试
@@ -229,7 +230,7 @@ make admin          # 创建/重置本地账号
 
 | 校验 | 内容 | 判定标准 |
 |---|---|---|
-| `check_parity.mjs` | 引擎数学 | 25 个采样点 × 8 组参数,逐点差 < 1e-6 |
+| `check_parity.mjs` | 引擎数学 | 125 个采样点 × 21 组参数,逐点差 < 1e-6 |
 | `check_cube_parity.mjs` | `.cube` 序列化 | header 与行数逐字节相同;数值差异 ≤ 6 位小数下 1 个最低位 |
 | `test_photo_render.py` | LUT 采样语义 | Python 渲染与前端 GLSL 公式逐点一致(< 1e-5) |
 
@@ -243,6 +244,7 @@ make admin          # 创建/重置本地账号
 |---|---|
 | [docs/auto-retouch.md](docs/auto-retouch.md) | AI 自动修图总览与范围边界 |
 | [docs/specs/architecture.md](docs/specs/architecture.md) | 分层职责、关键取舍、成本预算、风险 |
+| [docs/lut-design-remediation.md](docs/lut-design-remediation.md) | LUT 参数设计问题、修订任务、验收与设备校准限制 |
 | [docs/specs/technical.md](docs/specs/technical.md) | 接口签名、数据结构、阈值常量、精度包络、API 契约 |
 | [docs/specs/ui-design.md](docs/specs/ui-design.md) | 线框、组件规格、状态机、完整微文案 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |

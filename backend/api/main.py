@@ -24,10 +24,12 @@ class LutParamsModel(BaseModel):
     tint: float = Field(0.0, ge=-500, le=500)
     exposure: float = Field(0.0, ge=-3, le=3)
     contrast: float = Field(0.0, ge=-1, le=1)
+    contrast_pivot: float = Field(0.462, ge=0.1, le=0.9)
     saturation: float = Field(0.0, ge=-1, le=1)
     hue: float = Field(0.0, ge=-180, le=180)
     vibrance: float = Field(0.0, ge=-1, le=1)
     tone_map: float = Field(1.0, ge=0, le=1)
+    look_strength: float = Field(1.0, ge=0, le=1)
     # 影调分区(逐点,可烘进 33³ LUT)
     highlights: float = Field(0.0, ge=-1, le=1)
     shadows: float = Field(0.0, ge=-1, le=1)
@@ -40,6 +42,12 @@ class LutParamsModel(BaseModel):
     split_highlight_hue: float = Field(0.0, ge=0, le=360)
     split_highlight_sat: float = Field(0.0, ge=0, le=1)
     split_balance: float = Field(0.5, ge=0, le=1)
+    split_mid_hue: float = Field(0.0, ge=0, le=360)
+    split_mid_sat: float = Field(0.0, ge=0, le=1)
+    selective_hue_center: float = Field(30.0, ge=0, le=360)
+    selective_hue_width: float = Field(45.0, ge=1, le=180)
+    selective_hue_shift: float = Field(0.0, ge=-180, le=180)
+    selective_saturation: float = Field(0.0, ge=-1, le=1)
     lift: List[float] = Field([0.0, 0.0, 0.0], min_length=3, max_length=3)
     gamma: List[float] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
     gain: List[float] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
@@ -135,10 +143,11 @@ def _safe_stem(name: str) -> str:
     return cleaned.strip() or "lut"
 
 
-def _content_disposition(stem: str, mode: str) -> str:
+def _content_disposition(stem: str, mode: str, photo_style: str = "STD") -> str:
     """构造下载头:filename* 保真 UTF-8,filename 作为老客户端兜底(纯 ASCII)。"""
     mode = "camera" if mode == "camera" else "software"  # 白名单,不信调用方
-    full = camera_file_name(stem) if mode == "camera" else f"{stem}_{mode}.cube"
+    signal = "VLOG_to_Rec709" if photo_style == "VLOG" else f"{photo_style}_sRGB"
+    full = camera_file_name(stem) if mode == "camera" else f"{stem}_{signal}.cube"
     ascii_fallback = "".join(ch if ch.isascii() and ch.isprintable() and ch not in '\\"' else "_" for ch in full)
     return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(full)}"
 
@@ -202,11 +211,15 @@ def download_lut(
     engine_params = lut_params_from_dict(json.loads(rec["params_json"]))
     lut = generate_lut(engine_params, size=33)
     photo_style = engine_params.base_photo_style if mode == "camera" else None
-    text = lut_to_cube(lut, title=rec["name"], photo_style=photo_style)
+    input_signal = "VLOG/V-Gamut" if engine_params.base_photo_style == "VLOG" else f"{engine_params.base_photo_style}/sRGB"
+    output_signal = "Rec709" if engine_params.base_photo_style == "VLOG" else "sRGB"
+    title = rec["name"] if mode == "camera" else f"{rec['name']} [{input_signal} -> {output_signal}]"
+    text = lut_to_cube(lut, title=title, photo_style=photo_style)
     return Response(
         content=text,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": _content_disposition(_safe_stem(rec["name"]), mode)},
+        headers={"Content-Disposition": _content_disposition(
+            _safe_stem(rec["name"]), mode, engine_params.base_photo_style)},
     )
 
 

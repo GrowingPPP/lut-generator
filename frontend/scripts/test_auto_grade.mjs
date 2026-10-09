@@ -50,7 +50,7 @@ test('diffParams 只列出真正变化的字段', () => {
   const out = diffParams(before, after)
   assert.equal(out.length, 1)
   assert.equal(out[0].key, 'temp')
-  assert.match(out[0].text, /色温/)
+  assert.match(out[0].text, /冷暖偏移/)
   assert.match(out[0].text, /-180/)
   assert.match(out[0].text, /偏冷/)     // 负值 = 降温
 })
@@ -71,7 +71,7 @@ test('diffParams 小数不取整成 0', () => {
 test('diffParams 处理三通道数组', () => {
   const out = diffParams({ lift: [0, 0, 0] }, { lift: [-0.03, 0.02, 0] })
   assert.equal(out.length, 1)
-  assert.match(out[0].text, /暗部 RGB/)
+  assert.match(out[0].text, /RGB 偏移/)
   assert.match(out[0].text, /-0\.03\/\+0\.02\/\+0\.00/)
 })
 
@@ -164,7 +164,7 @@ test('styleDiff 以各参数中性值展示风格目标', () => {
   assert.match(temp.text, /-150/)
   assert.match(temp.text, /偏冷/)
   const lift = out.find((o) => o.key === 'lift')
-  assert.match(lift.text, /暗部 RGB/)
+  assert.match(lift.text, /RGB 偏移/)
 })
 
 test('styleDiff 对 null / 空对象安全', () => {

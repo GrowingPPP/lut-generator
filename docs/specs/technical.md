@@ -184,21 +184,22 @@ def to_prompt_dict(stats: PhotoStats) -> dict:
 
 ---
 
-## 4. 调色参数全集(22 个)与 LUT 能力边界
+## 4. 调色参数全集(30 个)与 LUT 能力边界
 
 ### 能做的:逐点运算 `f(r,g,b)`
 
 一个 3D LUT 只能表达**逐点**色彩映射 —— 引擎的 `build_grid()` 只喂三个通道值,签名里
-没有位置 `(x,y)`、也没有邻域像素。当前 22 个参数**全部**属于这一类:
+没有位置 `(x,y)`、也没有邻域像素。当前 30 个参数**全部**属于这一类:
 
 | 组 | 参数 | 说明 |
 |---|---|---|
-| 基础 | `temp` `tint` `exposure` | 白平衡与曝光(线性域) |
-| 影调 | `contrast` `highlights` `shadows` `whites` `blacks` `curve` | 分区提压、黑白场、S 曲线 |
+| 单张校正 | `temp` `tint` `exposure` | 相对冷暖、绿洋红与曝光(线性域) |
+| 影调 | `contrast` `contrast_pivot` `highlights` `shadows` `whites` `blacks` `curve` | 对比中心、分区提压、黑白部层次、S 曲线 |
 | 色彩 | `saturation` `vibrance` `hue` | 饱和度、自然饱和度、色相旋转 |
-| 分离色调 | `split_shadow_hue/sat` `split_highlight_hue/sat` `split_balance` | 阴影与高光分别染色 |
-| 分通道 | `lift` `gamma` `gain`(各 3 通道) | 暗部/中间调/亮部的 RGB 微调 |
-| 基准 | `base_photo_style` `tone_map` | 决定 LUT 输入侧,不参与调色 |
+| 局部色彩 | `selective_hue_center/width/shift` `selective_saturation` | 目标色相范围内的色相与饱和度 |
+| 分离色调 | `split_shadow_hue/sat` `split_mid_hue/sat` `split_highlight_hue/sat` `split_balance` | 阴影、中间调与高光染色 |
+| 分通道 | `lift` `gamma` `gain`(各 3 通道) | RGB 偏移、中间调与增益 |
+| 基准与风格 | `base_photo_style` `tone_map` `look_strength` | 输入/显示转换与创意风格强度 |
 
 ### 不能做的:位置相关与邻域相关
 
@@ -207,7 +208,7 @@ def to_prompt_dict(stats: PhotoStats) -> dict:
 | 位置相关 | 暗角、渐变滤镜、径向滤镜、蒙版、局部画笔、修复/仿制 | 同一颜色在不同位置必须映射到同一输出,LUT 无法区分位置 |
 | 邻域相关 | 清晰度、纹理、去雾、锐化、降噪、颗粒 | LUT 对每个像素独立作用,看不到邻居 |
 
-**这两类是类型不匹配,不是精度问题** —— 加参数、换更大网格都无法解决。
+**这两类是类型不匹配,不是精度问题** —— 加参数、换更大网格都无法解决。相机厂商可通过 `.cube` 之外的专用元数据另外控制颗粒或锐化；这不改变 3D LUT 的逐点性质。
 边界清晰带来一个实际好处:所有参数都能烘进**单个** 33³ `.cube`,机内烧录与后期软件两条路都成立。
 
 ### 新增算子的实现约束(实测得出)
