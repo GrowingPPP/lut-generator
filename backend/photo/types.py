@@ -107,7 +107,12 @@ class AutoGradeResult:
     params: Dict[str, Any]              # 最终参数,可直接喂 LutParamsModel
     steps: List[StepReport] = field(default_factory=list)
     issues: List[Issue] = field(default_factory=list)
-    style_params: Optional[Dict[str, Any]] = None   # 风格阶段抽到的增量,供用户核对
+    # 风格阶段:必须把「理解到什么」和「实际应用了什么」分开,否则用户会看到
+    # 一个从未落到参数上的数字(风格被硬校验拒绝时曾出现这种情况)。
+    style_params: Optional[Dict[str, Any]] = None     # 模型从风格描述抽到的**提议**增量
+    style_applied: bool = False                       # 该提议是否通过硬校验并被应用
+    style_applied_params: Optional[Dict[str, Any]] = None  # 真正生效的部分
+    style_rejections: List[str] = field(default_factory=list)   # 被拒原因
     review: Optional[str] = None                     # 视觉复检意见
     # 复检未执行的原因。三选一:disabled(用户关闭)/ failed(调用失败)/ no_client(未配置模型)。
     # 必须与「复检完成但没意见」区分开 —— 否则失败会被显示成「你关的」。

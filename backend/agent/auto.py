@@ -484,6 +484,9 @@ def auto_grade(
 
     # ---------- 阶段 B:风格 ----------
     style_params: Optional[Dict[str, Any]] = None
+    style_applied = False
+    style_applied_params: Optional[Dict[str, Any]] = None
+    style_rejections: List[str] = []
     if style and client is not None and style_extractor is not None:
         try:
             extracted = style_extractor(client, style) or {}
@@ -497,11 +500,16 @@ def auto_grade(
             ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params, img)
             if ok:
                 params = candidate
+                style_applied = True
+                style_applied_params = dict(style_params)
                 stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img))
                 steps.append(StepReport(stage="style", round=1,
                                         diagnosis=f"风格:{style}", proposed=style_params,
                                         applied=True, stats_after=stats_current))
             else:
+                # 被拒时**不能**把提议当成结果:style_applied 保持 False、
+                # style_applied_params 保持空,让前端如实呈现「没应用」。
+                style_rejections = list(reasons)
                 steps.append(StepReport(stage="style", round=1,
                                         diagnosis=f"风格:{style}", proposed=style_params,
                                         applied=False, rejections=reasons))
@@ -526,6 +534,9 @@ def auto_grade(
         steps=steps,
         issues=issues,
         style_params=style_params,
+        style_applied=style_applied,
+        style_applied_params=style_applied_params,
+        style_rejections=style_rejections,
         review=review,
         review_skip_reason=review_skip_reason,
         degraded=degraded,

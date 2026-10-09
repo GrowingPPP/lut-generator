@@ -14,7 +14,15 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
   if (!result) return null
 
   const changes = diffParams(beforeParams, result.params)
-  const styleChanges = styleDiff(result.style_params)
+  // 风格分两种呈现,绝不能混:提议(可能没生效)与真正的应用结果。
+  // 曾经只用 style_params,于是被硬校验拦下的风格也会显示成一个数字,
+  // 而滑杆纹丝不动 —— 用户看到「曝光 -0.30 EV」却发现曝光还是 0.00。
+  const styleApplied = result.style_applied
+    ? styleDiff(result.style_applied_params || result.style_params)
+    : []
+  const styleBlocked = !result.style_applied && result.style_params
+    ? styleDiff(result.style_params)
+    : []
   const rejected = rejectionList(result.steps)
 
   return (
@@ -36,13 +44,30 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
             : <span className="text-muted">无</span>}
         </dd>
 
-        {styleChanges.length > 0 && (
+        {styleApplied.length > 0 && (
           <>
-            <dt>风格理解</dt>
+            <dt>风格已应用</dt>
             <dd>
-              {styleChanges.map((c) => (
+              {styleApplied.map((c) => (
                 <span key={c.key} className="chip delta chip-style">{c.text}</span>
               ))}
+            </dd>
+          </>
+        )}
+
+        {styleBlocked.length > 0 && (
+          <>
+            <dt>风格被拦下</dt>
+            <dd className="auto-span auto-style-blocked">
+              <div className="auto-small">
+                模型理解为以下调整,但未通过安全校验,没有应用到参数上:
+              </div>
+              {styleBlocked.map((c) => (
+                <span key={c.key} className="chip chip-blocked">{c.text}</span>
+              ))}
+              {result.style_rejections?.length > 0 && (
+                <div className="auto-small">原因:{result.style_rejections.join(';')}</div>
+              )}
             </dd>
           </>
         )}
@@ -50,7 +75,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
         {result.issues?.length > 0 && (
           <>
             <dt>诊断</dt>
-            <dd className="auto-evidence">
+            <dd className="auto-span auto-evidence">
               {result.issues.map((i) => <div key={i.code}>· {i.evidence}</div>)}
             </dd>
           </>

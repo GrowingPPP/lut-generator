@@ -1037,7 +1037,8 @@ input[type='range']::-webkit-slider-thumb {
 
 .auto-summary {
   display: grid;
-  grid-template-columns: 64px 1fr;
+  /* 84px 而非 64px:「风格被拦下」这类 5 字标签在 64px 下会折行 */
+  grid-template-columns: 84px 1fr;
   gap: 8px 12px;
   margin: 0;
   font-size: 13px;
@@ -1189,4 +1190,25 @@ input[type='range']::-webkit-slider-thumb {
   .topbar-user > span {
     display: none;     /* 隐藏用户名,保留「退出」*/
   }
+}
+
+/* 风格被硬校验拦下:用删除线 + 警示色,与「已应用」在视觉上明确区分。
+   关键是不能让用户以为这个数字已经生效 —— 滑杆没动才是真相。 */
+.chip.chip-blocked {
+  border-color: var(--warn);
+  color: var(--warn);
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+/* 多行内容块显式跨两列。
+   不能依赖 dt/dd 的奇偶自动排布:任何一个 dt 被条件渲染省略,后面的 dd 就会
+   掉进 64px 的标签列(实测「风格被拦下」的文字被压在该列并与其 chip 重叠)。 */
+.auto-summary > .auto-span {
+  grid-column: 1 / -1;
+  display: block;
+}
+
+.auto-style-blocked .chip {
+  margin: 4px 6px 0 0;
 }

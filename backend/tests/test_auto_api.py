@@ -237,3 +237,30 @@ def test_persistence_failure_does_not_break_response(auth, monkeypatch):
     monkeypatch.setattr(m.db, "create_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
     r = _post(auth, kind="under_exposed")
     assert r.status_code == 200
+
+
+def test_style_fields_distinguish_proposal_from_result(auth):
+    """API 层必须把「风格提议」与「风格实际应用」分开暴露。
+
+    回归一个真 bug:风格被硬校验拦下时,响应里仍有 style_params,
+    前端据此渲染出「风格理解:曝光 -0.30 EV」,而曝光滑杆没动 ——
+    用户合理地以为「调整没作用到参数上」。
+    """
+    body = _post(auth, kind="warm_cast", style="极暖").json()
+    assert "style_applied" in body
+    assert "style_applied_params" in body
+    assert "style_rejections" in body
+    if body["style_applied"] is False and body["style_params"]:
+        # 关键断言:未应用时不能给出「已应用」的参数
+        assert body["style_applied_params"] is None, \
+            "被拒的风格不该带 style_applied_params"
+        assert body["style_rejections"], "被拒应给出原因"
+
+
+def test_applied_style_params_match_final_params(auth):
+    """凡是标为已应用的字段,最终 params 里必须一致。"""
+    body = _post(auth, kind="neutral", style="稍微提亮一点").json()
+    if body["style_applied"] and body["style_applied_params"]:
+        for k, v in body["style_applied_params"].items():
+            assert body["params"][k] == pytest.approx(v, abs=1e-6), \
+                f"{k} 标为已应用但最终参数不符"

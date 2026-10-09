@@ -148,8 +148,12 @@ export function diffParams(before, after) {
 // 报告顶部的一句话结论
 export function gradeHeadline(result) {
   if (!result) return ''
-  if (result.degraded) return '未能完全达标,已采用保守调整'
   const n = (result.steps || []).filter((s) => s.applied).length
+  // 降级时**不重复**警示条的措辞(否则同一句话在报告里出现两遍),
+  // 这里只说「做了多少」,「没完全达标」交给上方警示条表达。
+  if (result.degraded) {
+    return n === 0 ? '未能做出有效调整' : `已应用 ${n} 步调整,但未完全达标`
+  }
   if (n === 0) return '照片状态良好,无需明显调整'
   return `已应用 ${n} 步调整`
 }

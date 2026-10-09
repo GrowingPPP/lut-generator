@@ -343,7 +343,10 @@ class AutoGradeOut(BaseModel):
     params: LutParamsModel
     issues: List[AutoGradeIssueOut] = Field(default_factory=list)
     steps: List[AutoGradeStepOut] = Field(default_factory=list)
-    style_params: Optional[dict] = None
+    style_params: Optional[dict] = None          # 风格提议(可能未被应用)
+    style_applied: bool = False                  # 提议是否真的生效
+    style_applied_params: Optional[dict] = None  # 真正生效的部分
+    style_rejections: List[str] = Field(default_factory=list)
     review: Optional[str] = None
     # 视觉复核未执行的原因:disabled(用户关闭)/ failed(调用失败)/ no_client(未配置模型)
     review_skip_reason: Optional[str] = None
@@ -484,6 +487,9 @@ async def auto_grade_endpoint(
                                 rejections=st.rejections)
                for st in result.steps],
         style_params=result.style_params,
+        style_applied=result.style_applied,
+        style_applied_params=result.style_applied_params,
+        style_rejections=result.style_rejections,
         review=result.review,
         review_skip_reason=result.review_skip_reason,
         degraded=result.degraded,

@@ -686,3 +686,70 @@ def test_review_skip_reason_absent_when_review_succeeds():
     r = A.auto_grade(img, {}, client=c, use_vision=True)
     assert r.review == "画面更通透了"
     assert r.review_skip_reason is None
+
+
+# --------------------------------------------------------------------------
+# 风格的「提议」与「已应用」必须分开(真 bug 回归)
+# --------------------------------------------------------------------------
+#
+# 曾经的实现:只要抽取到风格参数就无条件写进 result.style_params,被硬校验
+# 拒绝时也一样。前端据此渲染「风格理解:曝光 -0.30 EV」,而曝光滑杆仍是 0.00
+# —— 用户看到一个从未生效的数字,合理地以为「参数没被应用」。
+#
+# 修复要点:被拒时 style_applied=False 且 style_applied_params 必须为空。
+
+def test_rejected_style_does_not_masquerade_as_applied():
+    """风格被硬校验拦下时,不能把提议当作结果暴露出去。"""
+    img = make_fixture("skin_tone")      # 有可测肤色,大色温改动必被拒
+    r = A.auto_grade(img, {}, "极暖", client=stub_client([], review=None),
+                     use_vision=False,
+                     style_extractor=_style_extractor({"temp": 900, "saturation": 0.5}))
+    assert r.style_params, "提议本身应被记录,便于排查"      # 提议保留
+    assert r.style_applied is False, "被拒时 style_applied 必须为 False"
+    assert r.style_applied_params is None, \
+        "被拒时不能给出「已应用」的参数 —— 那会让用户以为滑杆该动"
+    assert r.style_rejections, "应记录被拒原因"
+
+
+def test_applied_style_reports_both_proposal_and_result():
+    """通过校验时,提议与已应用都应有值且一致。"""
+    img = make_fixture("neutral")
+    r = A.auto_grade(img, {}, "轻微提亮", client=stub_client([], review=None),
+                     use_vision=False,
+                     style_extractor=_style_extractor({"exposure": 0.05}))
+    assert r.style_applied is True
+    assert r.style_applied_params == {"exposure": 0.05}
+    assert r.style_rejections == []
+    # 真正生效 = 出现在最终参数里
+    assert r.params["exposure"] == pytest.approx(0.05, abs=1e-6)
+
+
+def test_applied_style_params_actually_land_in_final_params():
+    """最核心的一致性:凡是标为「已应用」的字段,最终参数里必须能看到。"""
+    img = make_fixture("under_exposed")
+    delta = {"exposure": 0.15, "shadows": 0.1}
+    r = A.auto_grade(img, {}, "提亮", client=stub_client([], review=None),
+                     use_vision=False, style_extractor=_style_extractor(delta))
+    if r.style_applied:
+        for k, v in r.style_applied_params.items():
+            assert r.params[k] == pytest.approx(v, abs=1e-6), \
+                f"{k} 标为已应用,但最终参数里是 {r.params[k]}"
+
+
+def test_no_style_leaves_style_fields_empty():
+    img = make_fixture("neutral")
+    r = A.auto_grade(img, {}, None, client=stub_client([{"exposure": 0.05}]),
+                     use_vision=False)
+    assert r.style_params is None
+    assert r.style_applied is False
+    assert r.style_applied_params is None
+    assert r.style_rejections == []
+
+
+def test_style_extraction_failure_leaves_fields_empty():
+    img = make_fixture("neutral")
+    r = A.auto_grade(img, {}, "日系", client=stub_client([], review=None), use_vision=False,
+                     style_extractor=_style_extractor({}, raises=True))
+    assert r.style_params is None
+    assert r.style_applied is False
+    assert r.style_applied_params is None

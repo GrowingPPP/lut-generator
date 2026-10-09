@@ -143,7 +143,12 @@ test('rejectionList 汇总所有被拒原因', () => {
 })
 
 test('gradeHeadline 区分降级/无调整/已调整', () => {
-  assert.match(gradeHeadline({ degraded: true, steps: [] }), /保守调整/)
+  // 降级时不再重复警示条的措辞 —— 那句话由上方警示条负责,标题行只说调整量
+  const degraded = gradeHeadline({ degraded: true, steps: [{ applied: true }] })
+  assert.match(degraded, /1 步/)
+  assert.match(degraded, /未完全达标/)
+  assert.doesNotMatch(degraded, /保守调整/, '不应与警示条重复')
+  assert.match(gradeHeadline({ degraded: true, steps: [] }), /未能做出有效调整/)
   assert.match(gradeHeadline({ degraded: false, steps: [] }), /无需明显调整/)
   assert.match(gradeHeadline({ degraded: false, steps: [{ applied: true }] }), /1 步/)
   assert.equal(gradeHeadline(null), '')
