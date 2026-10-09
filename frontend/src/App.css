@@ -1162,3 +1162,31 @@ input[type='range']::-webkit-slider-thumb {
   list-style: none;
   opacity: 0.75;
 }
+
+/* 首页是入口,与应用内导航用一条分隔线区分(顺序:首页 → 生成 → 我的 LUT)。
+   分隔线只占 1px + 少量间距 —— 窄屏下每个像素都要省。 */
+.nav .nav-home {
+  padding-right: 12px;
+  margin-right: 5px;
+  border-right: 1px solid var(--line);
+  border-radius: 8px 0 0 8px;
+}
+
+.nav .nav-home:hover {
+  color: var(--accent);
+}
+
+/* 窄屏顶栏:品牌只留标记、用户名隐藏 —— 否则三段并排会横向溢出。
+   实测 390px 下 品牌 120 + 导航 167 + 用户 108 = 395px,已超过视口。 */
+@media (max-width: 560px) {
+  .topbar {
+    gap: 12px;
+    padding: 0 12px;
+  }
+  .brand {
+    font-size: 0;      /* 隐藏字标,保留 .logo 方块 */
+  }
+  .topbar-user > span {
+    display: none;     /* 隐藏用户名,保留「退出」*/
+  }
+}

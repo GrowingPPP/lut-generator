@@ -95,7 +95,7 @@ const FAQ = [
   },
   {
     q: '需要注册账号才能使用吗？',
-    a: '基础预览和生成可以直接体验。如需管理你生成的个人 LUT 库、保存调色历史记录，需要创建一个免费账号。',
+    a: '生成与管理需要一个免费账号 —— 登录后即可描述影调生成 LUT，并保存你自己的 LUT 库与调色历史。',
   },
   {
     q: '生成一个 LUT 需要耗时多久？',
@@ -266,7 +266,7 @@ export default function LandingView({ onEnter }) {
           <BeforeAfter
             src={HERO_PHOTO}
             gradedSrc={gradedHero}
-            beforeLabel="原图 (V-Log)"
+            beforeLabel="原图"
             afterLabel="电影青橙 LUT"
           />
         </section>
