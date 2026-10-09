@@ -37,6 +37,7 @@ BRIGHT_Q = 0.80
 
 # 单张图最大像素数(PIL 的 decompression bomb 阈值远高于此,这里自己收一道)
 MAX_PIXELS = 8000 * 8000
+MAX_RENDER_SIDE = 2048  # 后续多轮 LUT 渲染按这个尺寸分配 float 数组
 
 _LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 # BT.601 的 RGB→YCbCr 系数(与肤色区间配套,不要换成 709)
@@ -71,6 +72,8 @@ def load_image(data: bytes) -> np.ndarray:
             raise ImageTooLargeError(
                 f"图片像素数 {img.width}×{img.height} 超出上限 {MAX_PIXELS}"
             )
+        img.draft("RGB", (MAX_RENDER_SIDE, MAX_RENDER_SIDE))
+        img.thumbnail((MAX_RENDER_SIDE, MAX_RENDER_SIDE), Image.Resampling.LANCZOS)
         img = ImageOps.exif_transpose(img)   # 应用方向,否则统计的是旋转过的图
         img = img.convert("RGB")
     except ImageTooLargeError:

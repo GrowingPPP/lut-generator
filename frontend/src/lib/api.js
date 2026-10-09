@@ -45,6 +45,15 @@ export const me = async () => {
 }
 export const logout = () => jsonFetch(`${BASE}/auth/logout`, { method: 'POST' })
 
+// 松下 FAT32 机内导入要求文件主名不超过 8 位且只用字母数字。
+export function cameraFileName(name) {
+  let hash = 0x811c9dc5
+  for (const byte of new TextEncoder().encode(name)) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0
+  }
+  return `${hash.toString(16).toUpperCase().padStart(8, '0')}.cube`
+}
+
 // LUT
 export const listLuts = () => jsonFetch(`${BASE}/luts`)
 export const createLut = (name, description, params) =>
@@ -116,6 +125,8 @@ export async function getAutoReport() {
   if (!res.ok) return null
   return res.json()
 }
+
+export const undoAutoGrade = () => jsonFetch(`${BASE}/auto/undo`, { method: 'POST' })
 
 // 自动修图。multipart 提交,base_params 必填(服务端拒绝默认值兜底)。
 export async function autoGrade({ file, params, style, useVision = true, maxRounds }) {

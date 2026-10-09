@@ -46,14 +46,14 @@ class LutParamsModel(BaseModel):
 
 
 class LutCreate(BaseModel):
-    name: str
-    description: str = ""
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field("", max_length=4000)
     params: LutParamsModel
 
 
 class LutUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=4000)
     params: Optional[LutParamsModel] = None
 
 
@@ -66,9 +66,9 @@ class LutOut(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=4000)
     params: Optional[LutParamsModel] = None
-    history: Optional[List[str]] = None
+    history: Optional[List[str]] = Field(None, max_length=12)
     session_id: Optional[int] = None
 
 
@@ -82,11 +82,11 @@ class ChatResponse(BaseModel):
 
 
 class SessionCreate(BaseModel):
-    title: str = "新会话"
+    title: str = Field("新会话", min_length=1, max_length=255)
 
 
 class SessionUpdate(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=255)
 
 
 class SessionOut(BaseModel):
@@ -125,6 +125,10 @@ app = FastAPI(title="CHROMA LUT API")
 db.init_db()
 
 
+def _secure_cookie() -> bool:
+    return os.environ.get("CHROMA_ENV", "").strip().lower() in ("production", "prod")
+
+
 def _safe_stem(name: str) -> str:
     """下载文件名主干:去掉路径分隔符与控制字符(含 CR/LF),避免变成路径或被用坏。"""
     cleaned = "".join(ch for ch in name if ch.isprintable() and ch not in "/\\")
@@ -134,9 +138,17 @@ def _safe_stem(name: str) -> str:
 def _content_disposition(stem: str, mode: str) -> str:
     """构造下载头:filename* 保真 UTF-8,filename 作为老客户端兜底(纯 ASCII)。"""
     mode = "camera" if mode == "camera" else "software"  # 白名单,不信调用方
-    full = f"{stem}_{mode}.cube"
+    full = camera_file_name(stem) if mode == "camera" else f"{stem}_{mode}.cube"
     ascii_fallback = "".join(ch if ch.isascii() and ch.isprintable() and ch not in '\\"' else "_" for ch in full)
     return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(full)}"
+
+
+def camera_file_name(name: str) -> str:
+    """松下 FAT32 导入可用的 8 位 ASCII 文件主名。"""
+    h = 0x811c9dc5
+    for byte in name.encode("utf-8"):
+        h = ((h ^ byte) * 0x01000193) & 0xffffffff
+    return f"{h:08X}.cube"
 
 
 @app.post("/api/luts", response_model=LutOut)
@@ -250,9 +262,10 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
     except BudgetExhaustedError as e:
         reply = "这次没能解析出结果,请再说一次或换种说法。"
         error = str(e)
-    except Exception as e:
-        reply = f"生成失败:{e}"
-        error = str(e)
+    except Exception:
+        logger.exception("session/chat 生成失败")
+        reply = "生成服务暂时不可用,请稍后重试"
+        error = "generation_failed"
 
     db.add_message(user["id"], session_id, "user", body.message, None)
     db.add_message(
@@ -341,6 +354,8 @@ class AutoGradeIssueOut(BaseModel):
 
 class AutoGradeOut(BaseModel):
     params: LutParamsModel
+    before_params: Optional[LutParamsModel] = None
+    session_id: Optional[int] = None
     issues: List[AutoGradeIssueOut] = Field(default_factory=list)
     steps: List[AutoGradeStepOut] = Field(default_factory=list)
     style_params: Optional[dict] = None          # 风格提议(可能未被应用)
@@ -361,17 +376,16 @@ class AutoGradeReportOut(AutoGradeOut):
 
 
 class RegisterRequest(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     password: str = Field(min_length=8, max_length=72)
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class AuthResponse(BaseModel):
-    token: str
     user_id: int
     username: str
 
@@ -380,10 +394,10 @@ MAX_AUTO_IMAGE_BYTES = 32 * 1024 * 1024      # 与模型 API 的单图上限对�
 
 
 @app.post("/api/auto/grade", response_model=AutoGradeOut)
-async def auto_grade_endpoint(
+def auto_grade_endpoint(
     request: Request,
     file: UploadFile = File(...),
-    base_params: str = Form(...),
+    base_params: str = Form(..., max_length=8192),
     style: Optional[str] = Form(None),
     use_vision: bool = Form(True),
     max_rounds: int = Form(2),
@@ -399,15 +413,6 @@ async def auto_grade_endpoint(
     from agent.llm import BudgetExhaustedError
     from photo.types import ImageTooLargeError, PhotoError
 
-    # 0) 配额:这是最贵的接口,每次都会打 LLM
-    if ratelimit.auto_quota_exceeded(user["id"]):
-        retry = ratelimit.auto_retry_after(user["id"])
-        raise HTTPException(
-            status_code=429,
-            detail=f"自动修图次数已达上限,请在 {max(1, retry // 60)} 分钟后重试",
-            headers={"Retry-After": str(retry)},
-        )
-
     # 1) 参数解析(base_params 非法直接 422)
     try:
         parsed = LutParamsModel(**json.loads(base_params))
@@ -415,13 +420,13 @@ async def auto_grade_endpoint(
         raise HTTPException(status_code=422, detail=f"base_params 非法:{exc}")
 
     # 2) 读图与校验
-    # 先用 Content-Length 预判,能省掉把 32MB 读进内存再拒绝的开销。
-    # 拿不到该头(分块传输)时退化为读后判断 —— 不能只依赖它。
+    # Content-Length 包含 multipart 边界与其他字段，允许 1 MiB 封装开销。
+    # 实际图片字节仍按 MAX_AUTO_IMAGE_BYTES + 1 有界读取和精确判断。
     declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > MAX_AUTO_IMAGE_BYTES:
+    if declared and declared.isdigit() and int(declared) > MAX_AUTO_IMAGE_BYTES + 1024 * 1024:
         raise HTTPException(status_code=413, detail="图片过大,请压缩到 32MB 以内")
 
-    raw = await file.read()
+    raw = file.file.read(MAX_AUTO_IMAGE_BYTES + 1)
     if len(raw) > MAX_AUTO_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="图片过大,请压缩到 32MB 以内")
     try:
@@ -431,6 +436,16 @@ async def auto_grade_endpoint(
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except PhotoError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # 校验通过后才扣配额；先原子预留再执行昂贵的模型调用。
+    retry = db.reserve_auto_grade_call(user["id"], ratelimit.AUTO_MAX_PER_WINDOW,
+                                       ratelimit.AUTO_WINDOW_SECONDS)
+    if retry:
+        raise HTTPException(
+            status_code=429,
+            detail=f"自动修图次数已达上限,请在 {max(1, retry // 60)} 分钟后重试",
+            headers={"Retry-After": str(retry)},
+        )
 
     # 3) 编排
     style_text = (style or "").strip()[:200] or None
@@ -480,6 +495,7 @@ async def auto_grade_endpoint(
     out = AutoGradeOut(
         params=LutParamsModel(**{k: v for k, v in result.params.items()
                                  if k in LutParamsModel.model_fields}),
+        before_params=parsed,
         issues=[AutoGradeIssueOut(code=i.code, severity=i.severity, evidence=i.evidence)
                 for i in result.issues],
         steps=[AutoGradeStepOut(stage=st.stage, round=st.round, diagnosis=st.diagnosis,
@@ -496,12 +512,15 @@ async def auto_grade_endpoint(
         usage=result.usage,
     )
     # 4) 落库(图片不落库,只存参数与说明摘要)
-    ratelimit.record_auto_call(user["id"])
-    _persist_auto_grade(user["id"], out)
+    try:
+        out.session_id = _persist_auto_grade(user["id"], out)
+    except Exception as exc:
+        logger.exception("auto/grade 结果保存失败")
+        raise HTTPException(status_code=503, detail="修图结果保存失败,请稍后重试") from exc
     return out
 
 
-def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> Optional[int]:
+def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> int:
     """把自动修图结果写进该用户的**唯一**自动修图会话,返回 session_id。
 
     两个设计点:
@@ -510,24 +529,20 @@ def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> Optional[int]:
       content 仍写人类可读摘要,两者并存、互不污染。
     不写 cube_text —— 避免又一次 0.9MB 落库。
     """
-    try:
-        sid = db.get_or_create_auto_session(user_id)
-        lines = [f"AI 自动修图:{len(out.steps)} 步"]
-        for st in out.steps:
-            mark = "已应用" if st.applied else "被拦下"
-            lines.append(f"  [{st.stage}] {st.diagnosis}({mark})")
-        if out.degraded:
-            lines.append("  未能完全达标,已采用保守调整")
-        if out.review:
-            lines.append(f"  视觉复核:{out.review}")
-        elif out.review_skip_reason:
-            lines.append(f"  视觉复核未执行({out.review_skip_reason})")
-        db.add_message(user_id, sid, "agent", "\n".join(lines),
-                       out.params.model_dump_json(), None, out.model_dump_json())
-        return sid
-    except Exception:
-        # 落库失败不能影响主流程
-        return None
+    sid = db.get_or_create_auto_session(user_id)
+    lines = [f"AI 自动修图:{len(out.steps)} 步"]
+    for st in out.steps:
+        mark = "已应用" if st.applied else "被拦下"
+        lines.append(f"  [{st.stage}] {st.diagnosis}({mark})")
+    if out.degraded:
+        lines.append("  未能完全达标,已采用保守调整")
+    if out.review:
+        lines.append(f"  视觉复核:{out.review}")
+    elif out.review_skip_reason:
+        lines.append(f"  视觉复核未执行({out.review_skip_reason})")
+    db.add_message(user_id, sid, "agent", "\n".join(lines),
+                   out.params.model_dump_json(), None, out.model_dump_json())
+    return sid
 
 
 @app.get("/api/auto/report", response_model=Optional[AutoGradeReportOut])
@@ -539,15 +554,39 @@ def get_auto_report(user: dict = Depends(auth.get_current_user)):
 
     没有记录时返回 null(而不是 404)—— 「还没修过图」是正常状态,不是错误。
     """
-    sid = db.get_or_create_auto_session(user["id"])
+    sid = db.find_auto_session(user["id"])
+    if sid is None:
+        return None
     rec = db.get_latest_payload_message(sid, user["id"])
     if not rec or not rec["payload_json"]:
         return None
     try:
-        return AutoGradeReportOut(session_id=sid, **json.loads(rec["payload_json"]))
+        payload = json.loads(rec["payload_json"])
+        if payload.get("undone"):
+            return None
+        payload["session_id"] = sid
+        return AutoGradeReportOut(**payload)
     except (json.JSONDecodeError, TypeError, ValueError):
         # 历史数据格式不符(例如旧版本写入的)不应报错,当作没有
         return None
+
+
+@app.post("/api/auto/undo")
+def undo_auto_grade(user: dict = Depends(auth.get_current_user)):
+    sid = db.find_auto_session(user["id"])
+    rec = db.get_latest_payload_message(sid, user["id"]) if sid is not None else None
+    if not rec:
+        raise HTTPException(status_code=404, detail="没有可撤销的修图")
+    try:
+        payload = json.loads(rec["payload_json"])
+        before = LutParamsModel(**payload["before_params"])
+        if payload.get("undone"):
+            raise ValueError("already undone")
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="没有可撤销的修图")
+    db.add_message(user["id"], sid, "agent", "已撤销自动修图", before.model_dump_json(),
+                   None, json.dumps({"undone": True}))
+    return {"params": before}
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)
@@ -555,13 +594,16 @@ def register(body: RegisterRequest, request: Request, response: Response):
     ip = request.client.host if request.client else "unknown"
     if ratelimit.is_blocked(ip):
         raise HTTPException(status_code=429, detail="尝试次数过多,请稍后再试")
+    _, retry = db.reserve_auth_event(f"register:{ip}", 5, 300)
+    if retry:
+        raise HTTPException(status_code=429, detail="注册次数过多,请稍后再试",
+                            headers={"Retry-After": str(retry)})
     if db.get_user_by_username(body.username):
         raise HTTPException(status_code=409, detail="用户名已存在")
     user_id = db.create_user(body.username, auth.hash_password(body.password))
-    ratelimit.reset(ip)
     token = auth.create_token(user_id, 0)
-    response.set_cookie(key="chroma_token", value=token, httponly=True, samesite="lax", max_age=86400, path="/")
-    return AuthResponse(token=token, user_id=user_id, username=body.username)
+    response.set_cookie(key="chroma_token", value=token, httponly=True, samesite="lax", secure=_secure_cookie(), max_age=86400, path="/")
+    return AuthResponse(user_id=user_id, username=body.username)
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
@@ -569,6 +611,10 @@ def login(body: LoginRequest, request: Request, response: Response):
     ip = request.client.host if request.client else "unknown"
     if ratelimit.is_blocked(ip):
         raise HTTPException(status_code=429, detail="尝试次数过多,请稍后再试")
+    event_id, retry = db.reserve_auth_event(f"login:{ip}", 5, 300)
+    if retry:
+        raise HTTPException(status_code=429, detail="尝试次数过多,请稍后再试",
+                            headers={"Retry-After": str(retry)})
     user = db.get_user_by_username(body.username)
     if not user:
         ratelimit.record_failure(ip)
@@ -577,10 +623,11 @@ def login(body: LoginRequest, request: Request, response: Response):
     if not auth.verify_password(body.password, user["password_hash"]):
         ratelimit.record_failure(ip)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+    db.release_auth_event(event_id)
     ratelimit.reset(ip)
     token = auth.create_token(user["id"], user.get("token_version", 0))
-    response.set_cookie(key="chroma_token", value=token, httponly=True, samesite="lax", max_age=86400, path="/")
-    return AuthResponse(token=token, user_id=user["id"], username=user["username"])
+    response.set_cookie(key="chroma_token", value=token, httponly=True, samesite="lax", secure=_secure_cookie(), max_age=86400, path="/")
+    return AuthResponse(user_id=user["id"], username=user["username"])
 
 
 @app.post("/api/auth/logout", status_code=204)

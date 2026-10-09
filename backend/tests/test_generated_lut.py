@@ -1,4 +1,5 @@
 """生成结果留档:chat 生成后 cube 文本落库,重开会话可凭 /generated 恢复参数并直接下载。"""
+from api.auth import create_token
 from unittest.mock import patch
 
 import pytest
@@ -23,7 +24,7 @@ def _clean():
 @pytest.fixture()
 def auth():
     r = client.post("/api/auth/register", json={"username": "u1", "password": "secret123"})
-    return {"Authorization": f"Bearer {r.json()['token']}"}
+    return {"Authorization": f"Bearer {create_token(r.json()['user_id'], 0)}"}
 
 
 client = TestClient(app)
@@ -79,7 +80,7 @@ def test_generated_is_user_scoped(auth):
     """别人的会话取不到生成结果。"""
     sid = _chat("确认", auth).json()["session_id"]
     other = client.post("/api/auth/register", json={"username": "u2", "password": "secret123"}).json()
-    other_headers = {"Authorization": f"Bearer {other['token']}"}
+    other_headers = {"Authorization": f"Bearer {create_token(other['user_id'], 0)}"}
     assert client.get(f"/api/sessions/{sid}/generated", headers=other_headers).status_code == 404
 
 

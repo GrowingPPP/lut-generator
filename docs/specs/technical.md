@@ -129,7 +129,7 @@ class AutoGradeResult:
     params: dict                          # 最终参数,可直接喂 LutParamsModel
     steps: list[StepReport]
     issues: list[Issue]                   # ② 的判定结果,UI 用于展示「诊断出什么」
-    style_params: dict | None             # ⑥a 抽到的风格增量,UI 用于让用户核对
+    style_params: dict | None             # ⑥a 抽到的风格目标值,UI 用于让用户核对
     review: str | None                    # ⑦ 复检意见
     degraded: bool                        # True = 未达标,已采用保守解
     usage: dict                           # 累计 token

@@ -3,6 +3,7 @@
 全部走 CHROMA_FAKE_GRADE 桩,不打真实 LLM、不消耗配额。
 重点覆盖:base_params 必填(不许默认值兜底)、体积/格式校验、降级标记、落库。
 """
+from api.auth import create_token
 import json
 import os
 
@@ -31,7 +32,7 @@ def _clean():
 @pytest.fixture()
 def auth():
     r = client.post("/api/auth/register", json={"username": "u1", "password": "secret123"})
-    return {"Authorization": f"Bearer {r.json()['token']}"}
+    return {"Authorization": f"Bearer {create_token(r.json()['user_id'], 0)}"}
 
 
 client = TestClient(app)
@@ -75,6 +76,17 @@ def test_happy_path_returns_params(auth):
     assert isinstance(body["degraded"], bool)
     # 参数必须齐全(能被 LutParamsModel 接受)
     assert set(body["params"]) >= {"base_photo_style", "temp", "exposure", "highlights", "split_balance"}
+    assert body["before_params"] == DEFAULT_PARAMS
+    assert isinstance(body["session_id"], int)
+
+
+def test_persistence_failure_does_not_report_success(auth, monkeypatch):
+    def fail(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+    monkeypatch.setattr(db, "add_message", fail)
+    r = _post(auth)
+    assert r.status_code == 503
+    assert "保存失败" in r.json()["detail"]
 
 
 def test_detects_underexposure(auth):

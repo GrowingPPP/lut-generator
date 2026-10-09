@@ -7,8 +7,8 @@ import { summarizeSteps } from '../lib/autoGrade.js'
  *
  * 设计要点(见 docs/specs/ui-design.md):
  *  - 未上传真实照片时禁用 —— 对内置合成图做分析没有意义
- *  - 滑杆在运行期间**不禁用**:用户等待时可以继续看当前效果
- *  - 视觉复核是隐私相关选择,必须有说明性 title,不能只写四个字
+ *  - 提交时固定一份参数快照,避免报告与正在编辑的参数不一致
+ *  - 视觉复核的数据用途直接显示在界面上
  */
 export default function AutoRetouchBar({
   file, params, onResult, onBeforeRun, hasRealPhoto, running, setRunning, setStatus,
@@ -78,6 +78,7 @@ export default function AutoRetouchBar({
           <span>视觉复核</span>
         </label>
       </div>
+      <p className="text-muted">开启视觉复核会将照片与调色预览发送给模型；关闭后只发送统计数据。上传的照片不会保存在本系统中。</p>
 
       {running && steps.length > 0 && (
         <div className="auto-progress" aria-live="polite">

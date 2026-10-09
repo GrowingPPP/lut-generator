@@ -48,14 +48,15 @@ export function buildAutoGradePayload({ params, style, useVision = true, maxRoun
   return payload
 }
 
-// 风格参数是增量,展示时需要一个全零基准才能算出「变化」
+// 风格提取器返回的是目标参数。gamma/gain 的中性值是 1，平衡的中性值是 0.5。
 export function styleDiff(styleParams) {
   if (!styleParams) return []
-  const zeroBase = {}
+  const neutralBase = {}
   for (const [k, v] of Object.entries(styleParams)) {
-    zeroBase[k] = Array.isArray(v) ? v.map(() => 0) : 0
+    const neutral = k === 'gamma' || k === 'gain' ? 1 : k === 'split_balance' ? 0.5 : 0
+    neutralBase[k] = Array.isArray(v) ? v.map(() => neutral) : neutral
   }
-  return diffParams(zeroBase, styleParams)
+  return diffParams(neutralBase, styleParams)
 }
 
 // 视觉复核未执行的原因 → 给用户看的措辞。

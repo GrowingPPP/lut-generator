@@ -74,10 +74,15 @@ export default function usePreview(originalRef, gradedRef, params, displayMode) 
         const url = URL.createObjectURL(file)
         const img = new Image()
         img.onload = () => {
-          imageRef.current = img
-          drawOriginal(img)
+          const side = Math.min(1, 2048 / Math.max(img.naturalWidth, img.naturalHeight))
+          const preview = document.createElement('canvas')
+          preview.width = Math.max(1, Math.round(img.naturalWidth * side))
+          preview.height = Math.max(1, Math.round(img.naturalHeight * side))
+          preview.getContext('2d').drawImage(img, 0, 0, preview.width, preview.height)
+          imageRef.current = preview
+          drawOriginal(preview)
           const renderer = rendererRef.current
-          renderer.setImage(img)
+          renderer.setImage(preview)
           const { data, size } = generateLUT(paramsRef.current, 33)
           renderer.setLUT(data, size)
           renderer.render()

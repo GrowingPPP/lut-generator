@@ -1,4 +1,5 @@
 """安全与健壮性回归:下载头净化、限流有界性与窗口、JWT 密钥校验。"""
+from api.auth import create_token
 import time
 
 import pytest
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from api import auth, ratelimit
 from storage import db
-from api.main import app, _content_disposition, _safe_stem
+from api.main import app, _content_disposition, _safe_stem, camera_file_name
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,7 @@ def _clean():
 @pytest.fixture()
 def auth_headers():
     r = client.post("/api/auth/register", json={"username": "u1", "password": "secret123"})
-    return {"Authorization": f"Bearer {r.json()['token']}"}
+    return {"Authorization": f"Bearer {create_token(r.json()['user_id'], 0)}"}
 
 
 client = TestClient(app)
@@ -47,6 +48,13 @@ def test_safe_stem_strips_dangerous_chars(raw, expect_absent):
 def test_safe_stem_fallback_on_empty():
     assert _safe_stem("") == "lut"
     assert _safe_stem("   ") == "lut"
+
+
+def test_camera_filename_is_eight_ascii_characters():
+    name = camera_file_name("日系清透")
+    assert len(name.split(".")[0]) == 8
+    assert name == "5BF4F601.cube"  # 与前端 TextEncoder/FNV-1a 的结果一致
+    assert name != camera_file_name("电影青橙")
 
 
 def test_content_disposition_no_header_break():

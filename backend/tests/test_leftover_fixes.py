@@ -6,7 +6,9 @@
   C  上游错误分类映射
   D  上传检查分段(字节 413 / 像素 413)
 """
+from api.auth import create_token
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 
 import pytest
@@ -36,16 +38,7 @@ def _clean():
 @pytest.fixture()
 def auth():
     r = client.post("/api/auth/register", json={"username": "u1", "password": "secret123"})
-    return {"Authorization": f"Bearer {r.json()['token']}"}
-
-
-@pytest.fixture(autouse=True)
-def _reset_quota():
-    """每个用例重置配额,避免相互影响。"""
-    yield
-    user = db.get_user_by_username("u1")
-    if user:
-        ratelimit.reset_auto(user["id"])
+    return {"Authorization": f"Bearer {create_token(r.json()['user_id'], 0)}"}
 
 
 client = TestClient(app)
@@ -119,6 +112,19 @@ def test_report_endpoint_returns_null_for_new_user(auth):
     r = client.get("/api/auto/report", headers=auth)
     assert r.status_code == 200
     assert r.json() is None
+    assert not db.list_sessions(db.get_user_by_username("u1")["id"])
+
+
+def test_report_can_be_undone_after_reload(auth):
+    body = _grade(auth).json()
+    report = client.get("/api/auto/report", headers=auth).json()
+    assert report["before_params"] == body["before_params"]
+    assert report["session_id"] == body["session_id"]
+    undone = client.post("/api/auto/undo", headers=auth)
+    assert undone.status_code == 200
+    assert undone.json()["params"] == body["before_params"]
+    assert client.get("/api/auto/report", headers=auth).json() is None
+    assert client.post("/api/auto/undo", headers=auth).status_code == 404
 
 
 def test_report_endpoint_requires_auth():
@@ -130,7 +136,7 @@ def test_report_is_user_scoped(auth):
     _grade(auth)
     other = client.post("/api/auth/register",
                         json={"username": "u2", "password": "secret123"}).json()
-    h2 = {"Authorization": f"Bearer {other['token']}"}
+    h2 = {"Authorization": f"Bearer {create_token(other['user_id'], 0)}"}
     assert client.get("/api/auto/report", headers=h2).json() is None
 
 
@@ -150,16 +156,22 @@ def test_report_survives_corrupt_payload(auth):
 def test_quota_blocks_after_limit(auth, monkeypatch):
     monkeypatch.setattr(ratelimit, "AUTO_MAX_PER_WINDOW", 3)
     user = db.get_user_by_username("u1")
-    ratelimit.reset_auto(user["id"])
     codes = [_grade(auth).status_code for _ in range(5)]
     assert codes[:3] == [200, 200, 200]
     assert codes[3:] == [429, 429]
 
 
+def test_quota_reservation_is_atomic_across_connections(auth):
+    user_id = db.get_user_by_username("u1")["id"]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        retries = list(pool.map(lambda _: db.reserve_auto_grade_call(user_id, 2, 3600), range(6)))
+    assert retries.count(0) == 2
+    assert all(r > 0 for r in retries if r != 0)
+
+
 def test_quota_returns_retry_after(auth, monkeypatch):
     monkeypatch.setattr(ratelimit, "AUTO_MAX_PER_WINDOW", 1)
     user = db.get_user_by_username("u1")
-    ratelimit.reset_auto(user["id"])
     _grade(auth)
     r = _grade(auth)
     assert r.status_code == 429
@@ -172,15 +184,13 @@ def test_quota_is_per_user_not_per_ip(auth, monkeypatch):
     """按 user 计数:登录用户换 IP 不该成为绕过手段。"""
     monkeypatch.setattr(ratelimit, "AUTO_MAX_PER_WINDOW", 1)
     u1 = db.get_user_by_username("u1")
-    ratelimit.reset_auto(u1["id"])
     assert _grade(auth).status_code == 200
     assert _grade(auth).status_code == 429
 
     other = client.post("/api/auth/register",
                         json={"username": "u2", "password": "secret123"}).json()
     u2 = db.get_user_by_username("u2")
-    ratelimit.reset_auto(u2["id"])
-    h2 = {"Authorization": f"Bearer {other['token']}"}
+    h2 = {"Authorization": f"Bearer {create_token(other['user_id'], 0)}"}
     assert _grade(h2).status_code == 200, "另一个用户不应受 u1 的配额影响"
 
 
@@ -188,7 +198,6 @@ def test_rejected_request_does_not_consume_quota(auth, monkeypatch):
     """校验失败的请求不该占用配额 —— 否则用户传错图也会被扣次数。"""
     monkeypatch.setattr(ratelimit, "AUTO_MAX_PER_WINDOW", 2)
     user = db.get_user_by_username("u1")
-    ratelimit.reset_auto(user["id"])
     bad = client.post("/api/auto/grade",
                       files={"file": ("p.jpg", b"not an image", "image/jpeg")},
                       data={"base_params": json.dumps(PARAMS)}, headers=auth)

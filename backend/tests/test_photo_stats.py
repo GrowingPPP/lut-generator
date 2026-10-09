@@ -5,6 +5,8 @@
 """
 import numpy as np
 import pytest
+import io
+from PIL import Image
 
 from photo import stats as S
 from photo.fixtures import ALL_KINDS, make_fixture, make_jpeg_bytes
@@ -21,6 +23,15 @@ def test_analyze_is_deterministic():
 
 def test_fixtures_are_deterministic():
     assert np.array_equal(make_fixture("noisy"), make_fixture("noisy"))
+
+
+def test_large_photo_is_downsampled_before_float_rendering():
+    source = Image.new("RGB", (2500, 1000), (80, 90, 100))
+    data = io.BytesIO()
+    source.save(data, format="JPEG")
+    img = S.load_image(data.getvalue())
+    assert max(img.shape[:2]) == S.MAX_RENDER_SIDE
+    assert img.dtype == np.float32
 
 
 @pytest.mark.parametrize("kind", ALL_KINDS)

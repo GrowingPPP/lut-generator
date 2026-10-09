@@ -46,8 +46,11 @@ export default function LibraryView({ onPreview }) {
   }, [load])
 
   const remove = async (id) => {
-    await deleteLut(id)
-    load()
+    if (!window.confirm('确定删除这个 LUT？此操作无法撤销。')) return
+    try {
+      await deleteLut(id)
+      load()
+    } catch (e) { setError(`删除失败:${e.message}`) }
   }
 
   const startEdit = (lut) => {

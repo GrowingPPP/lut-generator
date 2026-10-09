@@ -5,7 +5,7 @@ import usePreview from './hooks/usePreview.js'
 import {
   createLut, chatSession,
   listSessions, createSession, deleteSession, updateSession, listMessages,
-  getGeneratedLut, getAutoReport, saveTextFile,
+  getAutoReport, undoAutoGrade, saveTextFile, cameraFileName,
   logout as apiLogout, me,
 } from './lib/api.js'
 import { paramsToCube } from './lib/lutEngine.js'
@@ -117,11 +117,12 @@ const DISPLAY_MODES = [
 ]
 
 function groupSummary(g, params) {
+  const defaults = defaultParams()
   const keys = g.id === 'rgb' ? RGB_GROUPS.map((r) => r.key) : g.sliders.map((sl) => sl.key)
   const changed = keys.filter((k) => {
     const v = params[k]
-    if (Array.isArray(v)) return v.some((x, i) => x !== (k === 'gamma' || k === 'gain' ? 1 : 0))
-    return Math.abs(v) > 1e-9
+    if (Array.isArray(v)) return v.some((x, i) => Math.abs(x - defaults[k][i]) > 1e-9)
+    return Math.abs(v - defaults[k]) > 1e-9
   })
   return changed.length ? `${changed.length} 项已调整` : ''
 }
@@ -137,8 +138,6 @@ function GenerateView({ previewLut }) {
   const [sending, setSending] = useState(false)
   const [name, setName] = useState('')
   const [savedId, setSavedId] = useState(null)
-  // 服务端生成的 cube 文本(权威结果);参数被手动调整后置空并由前端本地重算
-  const [cubeText, setCubeText] = useState(null)
   const [groupOpen, setGroupOpen] = useState(defaultGroupOpen)
   // 自动修图:原图文件(用于提交给后端)、运行状态、结果、撤销快照
   const [photoFile, setPhotoFile] = useState(null)
@@ -154,6 +153,7 @@ function GenerateView({ previewLut }) {
   const gradedRef = useRef(null)
   const draggingRef = useRef(false)
   const fileInputRef = useRef(null)
+  const openRequestRef = useRef(0)
   const { setSplit, upload } = usePreview(originalRef, gradedRef, params, displayMode)
 
   useEffect(() => {
@@ -163,11 +163,15 @@ function GenerateView({ previewLut }) {
   useEffect(() => {
     if (previewLut) {
       setParams(previewLut.params)
+      setGradeResult(null)
+      setUndoSnapshot(null)
       setMessages((m) => [...m, { role: 'agent', text: `已载入「${previewLut.name}」,上传样张即可预览效果。` }])
     }
   }, [previewLut])
 
   const newSession = async () => {
+    if (sending || grading) return
+    openRequestRef.current += 1
     try {
       const s = await createSession('新会话')
       setSessions((prev) => [s, ...prev])
@@ -175,7 +179,8 @@ function GenerateView({ previewLut }) {
       setMessages([{ role: 'agent', text: '描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。' }])
       setParams(defaultParams())
       setSavedId(null)
-      setCubeText(null)
+      setGradeResult(null)
+      setUndoSnapshot(null)
       setStatus('')
     } catch (e) {
       setStatus(`新建会话失败:${e.message}`)
@@ -183,13 +188,17 @@ function GenerateView({ previewLut }) {
   }
 
   const openSession = async (id) => {
+    if (sending || grading) return
+    const requestId = ++openRequestRef.current
     try {
       const msgs = await listMessages(id)
+      if (requestId !== openRequestRef.current) return
       setSessionId(id)
       setSavedId(null)
       setStatus('')
       setName('')
-      setCubeText(null)
+      setGradeResult(null)
+      setUndoSnapshot(null)
       if (msgs.length === 0) {
         setMessages([{ role: 'agent', text: '描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。' }])
         setParams(defaultParams())
@@ -200,17 +209,13 @@ function GenerateView({ previewLut }) {
         // 自动修图报告:属于本会话才展示(否则在别的会话里会弹出上一份报告)
         try {
           const rep = await getAutoReport()
-          setGradeResult(rep && rep.session_id === id ? rep : null)
+          if (requestId !== openRequestRef.current) return
+          const current = rep && rep.session_id === id ? rep : null
+          setGradeResult(current)
+          setUndoSnapshot(current?.before_params || null)
         } catch {
           setGradeResult(null)
-        }
-        // 生成结果单独取:只有生成过 LUT 的会话才有,取回后可直接下载
-        try {
-          const gen = await getGeneratedLut(id)
-          if (gen.params) setParams(gen.params)
-          setCubeText(gen.cube_text)
-        } catch {
-          // 404 = 该会话还没生成过 LUT,保持默认参数即可
+          setUndoSnapshot(null)
         }
       }
     } catch (e) {
@@ -219,6 +224,8 @@ function GenerateView({ previewLut }) {
   }
 
   const removeSession = async (id) => {
+    if (sending || grading) return
+    openRequestRef.current += 1
     if (!window.confirm('删除该会话及其聊天记录?')) return
     try {
       await deleteSession(id)
@@ -228,7 +235,8 @@ function GenerateView({ previewLut }) {
         setMessages([{ role: 'agent', text: '描述你想要的风格,比如「日系清透」「电影青橙」,我来生成 LUT。' }])
         setParams(defaultParams())
         setSavedId(null)
-        setCubeText(null)
+        setGradeResult(null)
+        setUndoSnapshot(null)
         setStatus('')
         setName('')
       }
@@ -253,15 +261,15 @@ function GenerateView({ previewLut }) {
     }
   }
 
-  // 手动改参数后,服务端那份 cube 文本已不对应当前参数 → 置空,下载时由前端本地重算。
-  // 只在用户写入口清:服务端结果的 setParams 不走这里,不会被误清。
   const updateParam = (key, value) => {
-    setCubeText(null)
+    setGradeResult(null)
+    setUndoSnapshot(null)
     setParams((p) => ({ ...p, [key]: value }))
   }
 
   const updateChannel = (key, idx, value) => {
-    setCubeText(null)
+    setGradeResult(null)
+    setUndoSnapshot(null)
     setParams((p) => {
       const arr = [...p[key]]
       arr[idx] = value
@@ -279,7 +287,7 @@ function GenerateView({ previewLut }) {
 
   const send = async () => {
     const text = input.trim()
-    if (!text || sending) return
+    if (!text || sending || grading) return
     const history = messages.slice(-6).map((m) => `${m.role === 'user' ? '用户' : '助手'}:${m.text}`)
     setMessages((m) => [...m, { role: 'user', text }])
     setInput('')
@@ -287,9 +295,11 @@ function GenerateView({ previewLut }) {
     try {
       const resp = await chatSession(text, params, history, sessionId)
       setMessages((m) => [...m, { role: 'agent', text: resp.reply }])
-      if (resp.params) setParams(resp.params)
-      // 后端本次生成了 LUT → 直接持有权威 cube 文本,可立即下载,无需先保存
-      if (resp.done && resp.cube_text) setCubeText(resp.cube_text)
+      if (resp.params) {
+        setParams(resp.params)
+        setGradeResult(null)
+        setUndoSnapshot(null)
+      }
       if (resp.session_id && resp.session_id !== sessionId) {
         setSessionId(resp.session_id)
         setSessions((prev) => (prev.some((s) => s.id === resp.session_id) ? prev : [{ id: resp.session_id, title: '新会话', created_at: '' }, ...prev]))
@@ -303,7 +313,10 @@ function GenerateView({ previewLut }) {
   }
 
   const applyPreset = (preset) => {
+    if (sending || grading) return
     setParams({ ...preset.params })
+    setGradeResult(null)
+    setUndoSnapshot(null)
     setMessages((m) => [...m, { role: 'agent', text: `已应用「${preset.name}」,可在右侧微调或直接保存。` }])
   }
 
@@ -318,21 +331,14 @@ function GenerateView({ previewLut }) {
     }
   }
 
-  // 直接下载当前调色结果,无需先保存。
-  // 服务端 cube 文本可用则复用(权威结果);参数被手动改过则按当前参数本地重算。
-  // 服务端那份含 #LUMIXPHOTOSTYLE 头 → 后期版需剥掉;本地重算是按 mode 现场生成的。
+  // 下载总是取当前参数；会话里更早生成的 cube 不能覆盖后来应用的预设或基准。
   const downloadCube = (mode) => {
     try {
       const n = name.trim() || '未命名 LUT'
-      let text = cubeText || paramsToCube(params, { title: n, mode })
-      if (cubeText && mode === 'software') {
-        text = text
-          .split('\n')
-          .filter((line) => !line.startsWith('#LUMIXPHOTOSTYLE'))
-          .join('\n')
-      }
-      saveTextFile(text, `${n}_${mode}.cube`)
-      setStatus(`已下载:${n}_${mode}.cube${cubeText ? '' : '(按当前参数本地生成)'}`)
+      const text = paramsToCube(params, { title: n, mode })
+      const filename = mode === 'camera' ? cameraFileName(n) : `${n}_software.cube`
+      saveTextFile(text, filename)
+      setStatus(`已下载:${filename}`)
     } catch (e) {
       setStatus(`下载失败:${e.message}`)
     }
@@ -342,7 +348,7 @@ function GenerateView({ previewLut }) {
     <div className="gen-layout">
       <section className="chat-panel">
         <div className="session-bar">
-          <button className="btn" onClick={newSession}>＋ 新会话</button>
+          <button className="btn" onClick={newSession} disabled={sending || grading}>＋ 新会话</button>
           <div className="session-list">
             {sessions.map((s) => (
               <div key={s.id} className={s.id === sessionId ? 'session-item active' : 'session-item'}>
@@ -358,7 +364,7 @@ function GenerateView({ previewLut }) {
                 ) : (
                   <>
                     <span className="session-title" onClick={() => openSession(s.id)} onDoubleClick={() => startEditSession(s)}>{s.title}</span>
-                    <button className="session-del" onClick={() => removeSession(s.id)} title="删除会话">×</button>
+                    <button className="session-del" onClick={() => removeSession(s.id)} disabled={sending || grading} title="删除会话">×</button>
                   </>
                 )}
               </div>
@@ -375,7 +381,7 @@ function GenerateView({ previewLut }) {
         </div>
         <div className="preset-chips">
           {PRESETS.map((p) => (
-            <button key={p.name} className="chip" onClick={() => applyPreset(p)}>
+            <button key={p.name} className="chip" onClick={() => applyPreset(p)} disabled={sending || grading}>
               {p.name}
             </button>
           ))}
@@ -387,7 +393,7 @@ function GenerateView({ previewLut }) {
             onKeyDown={(e) => e.key === 'Enter' && send()}
             placeholder="描述你想要的风格…"
           />
-          <button className="btn-primary" onClick={send} disabled={sending}>
+          <button className="btn-primary" onClick={send} disabled={sending || grading}>
             发送
           </button>
         </div>
@@ -408,7 +414,7 @@ function GenerateView({ previewLut }) {
               ))}
             </select>
           </label>
-          <button type="button" className="upload-sm" onClick={() => fileInputRef.current?.click()}>
+          <button type="button" className="upload-sm" onClick={() => fileInputRef.current?.click()} disabled={grading}>
             上传样张
           </button>
           <input
@@ -419,6 +425,11 @@ function GenerateView({ previewLut }) {
             onChange={async (e) => {
               const f = e.target.files[0]
               if (!f) return
+              if (f.size > 32 * 1024 * 1024) {
+                setStatus('图片过大，请压缩到 32MB 以内')
+                e.target.value = ''
+                return
+              }
               const ok = await upload(f)
               if (!ok) {
                 setStatus('图片加载失败,请用 JPEG/PNG 格式')
@@ -430,6 +441,8 @@ function GenerateView({ previewLut }) {
             }}
           />
         </div>
+
+        <p className="text-muted">上传与所选基准 Photo Style 相同的 JPEG 样张，预览与自动修图才有参考价值。</p>
 
         {displayMode === 'slider' ? (
           <div
@@ -472,8 +485,13 @@ function GenerateView({ previewLut }) {
             // 记住报告属于哪个会话(后端把它写进固定的「自动修图」会话)
             setGradeResult(result)
             setParams(result.params)
-            setCubeText(null)        // 参数变了,服务端那份 cube 文本已失效
             setSavedId(null)
+            setUndoSnapshot(result.before_params)
+            if (result.session_id) {
+              openRequestRef.current += 1
+              setSessionId(result.session_id)
+              listSessions().then(setSessions).catch(() => {})
+            }
           }}
         />
 
@@ -481,21 +499,25 @@ function GenerateView({ previewLut }) {
           <AutoRetouchReport
             result={gradeResult}
             beforeParams={undoSnapshot}
-            onUndo={() => {
-              if (undoSnapshot) setParams(undoSnapshot)
-              setGradeResult(null)
-              setStatus('已撤销到修图前')
+            onUndo={async () => {
+              try {
+                const restored = await undoAutoGrade()
+                setParams(restored.params)
+                setGradeResult(null)
+                setUndoSnapshot(null)
+                setStatus('已撤销到修图前')
+              } catch (e) { setStatus(`撤销失败:${e.message}`) }
             }}
           />
         )}
 
-        <div className="param-groups">
+        <fieldset className="param-groups" disabled={grading || sending} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <div className="controls">
             <label className="slider ps-select">
               <span>基准</span>
               <select
                 value={params.base_photo_style}
-                onChange={(e) => setParams((p) => ({ ...p, base_photo_style: e.target.value }))}
+                onChange={(e) => updateParam('base_photo_style', e.target.value)}
               >
                 {PHOTO_STYLES.map((st) => (
                   <option key={st.value} value={st.value}>
@@ -575,7 +597,7 @@ function GenerateView({ previewLut }) {
               )}
             </section>
           ))}
-        </div>
+        </fieldset>
 
         <div className="actions">
           <input
@@ -584,17 +606,12 @@ function GenerateView({ previewLut }) {
             onChange={(e) => setName(e.target.value)}
             placeholder="LUT 名称"
           />
-          <button className="btn-primary" onClick={save}>
+          <button className="btn-primary" onClick={save} disabled={grading || sending}>
             保存到我的 LUT
           </button>
-          <button className="btn" onClick={() => downloadCube('camera')}>直接下载机内版</button>
-          <button className="btn" onClick={() => downloadCube('software')}>直接下载后期版</button>
-          {savedId && (
-            <>
-              <button className="btn" onClick={() => downloadAndSave(savedId, 'camera')}>已保存·机内版</button>
-              <button className="btn" onClick={() => downloadAndSave(savedId, 'software')}>已保存·后期版</button>
-            </>
-          )}
+          <button className="btn" onClick={() => downloadCube('camera')} disabled={grading || sending}>直接下载机内版</button>
+          <button className="btn" onClick={() => downloadCube('software')} disabled={grading || sending}>直接下载后期版</button>
+          <span className="text-muted">机内版须与相机的 Photo Style「{params.base_photo_style}」匹配；文件名为 8 位字母数字。单张样张自动修正的曝光和白平衡仅适合相近光线。</span>
           <span className="status">{status}</span>
         </div>
       </section>
@@ -636,17 +653,17 @@ export default function App() {
 
   if (checking) return null
 
-  if (view === 'landing') {
-    return <LandingView onEnter={() => setView('generate')} />
-  }
+  if (view === 'landing' && !user) return <LandingView onEnter={() => setView('generate')} />
 
   if (!user) {
     return <AuthView onAuthed={(u) => setUser(u)} />
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
+    <>
+    {view === 'landing' && <LandingView onEnter={() => setView('generate')} />}
+    <div className="app" style={{ display: view === 'landing' ? 'none' : undefined }}>
+      {view !== 'landing' && <header className="topbar">
         <div className="brand">
           <span className="logo">C</span>
           CHROMA
@@ -665,12 +682,10 @@ export default function App() {
           <span>{user}</span>
           <button className="btn" onClick={handleLogout}>退出</button>
         </div>
-      </header>
-      {view === 'generate' ? (
-        <GenerateView previewLut={previewLut} />
-      ) : (
-        <LibraryView onPreview={openPreview} />
-      )}
+      </header>}
+      <div style={{ display: view === 'generate' ? undefined : 'none' }}><GenerateView previewLut={previewLut} /></div>
+      {view === 'library' && <LibraryView onPreview={openPreview} />}
     </div>
+    </>
   )
 }

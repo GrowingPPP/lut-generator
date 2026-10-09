@@ -1,3 +1,4 @@
+from api.auth import create_token
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,7 +20,7 @@ def _clean_db():
 def auth():
     r = client.post("/api/auth/register", json={"username": "u1", "password": "*********"})
     assert r.status_code == 200
-    return {"Authorization": f"Bearer {r.json()['token']}"}
+    return {"Authorization": f"Bearer {create_token(r.json()['user_id'], 0)}"}
 
 
 client = TestClient(app)
@@ -76,8 +77,8 @@ def test_lut_requires_auth():
 def test_user_isolation():
     r1 = client.post("/api/auth/register", json={"username": "a", "password": "*********"}).json()
     r2 = client.post("/api/auth/register", json={"username": "b", "password": "*********"}).json()
-    h1 = {"Authorization": f"Bearer {r1['token']}"}
-    h2 = {"Authorization": f"Bearer {r2['token']}"}
+    h1 = {"Authorization": f"Bearer {create_token(r1['user_id'], 0)}"}
+    h2 = {"Authorization": f"Bearer {create_token(r2['user_id'], 0)}"}
 
     client.post("/api/luts", json={"name": "only-a", "params": {}}, headers=h1)
     assert len(client.get("/api/luts", headers=h1).json()) == 1

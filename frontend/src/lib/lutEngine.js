@@ -348,7 +348,7 @@ function fmt(v) {
 // 3D LUT → .cube 文本。photoStyle 非空时注入松下机内头 #LUMIXPHOTOSTYLE。
 export function lutToCube(data, size, { title, photoStyle } = {}) {
   const lines = []
-  if (title) lines.push(`TITLE "${title}"`)
+  if (title) lines.push(`TITLE "${String(title).replace(/["\r\n\x00-\x1f]/g, ' ').trim()}"`)
   if (photoStyle && PHOTO_STYLE_TAGS[photoStyle]) lines.push(`#LUMIXPHOTOSTYLE ${PHOTO_STYLE_TAGS[photoStyle]}`)
   lines.push(`LUT_3D_SIZE ${size}`)
   for (let b = 0; b < size; b++) {

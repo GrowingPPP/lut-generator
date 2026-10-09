@@ -1,3 +1,4 @@
+from api.auth import create_token
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,7 +21,7 @@ def _clean():
 @pytest.fixture()
 def auth():
     r = client.post("/api/auth/register", json={"username": "u1", "password": "*********"})
-    return {"Authorization": f"Bearer {r.json()['token']}"}
+    return {"Authorization": f"Bearer {create_token(r.json()['user_id'], 0)}"}
 
 
 client = TestClient(app)
@@ -62,8 +63,8 @@ def test_messages_list(auth):
 def test_session_isolation():
     r1 = client.post("/api/auth/register", json={"username": "a", "password": "*********"}).json()
     r2 = client.post("/api/auth/register", json={"username": "b", "password": "*********"}).json()
-    h1 = {"Authorization": f"Bearer {r1['token']}"}
-    h2 = {"Authorization": f"Bearer {r2['token']}"}
+    h1 = {"Authorization": f"Bearer {create_token(r1['user_id'], 0)}"}
+    h2 = {"Authorization": f"Bearer {create_token(r2['user_id'], 0)}"}
 
     sid = client.post("/api/sessions", json={"title": "a的会话"}, headers=h1).json()["id"]
     assert len(client.get("/api/sessions", headers=h1).json()) == 1

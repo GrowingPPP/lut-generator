@@ -100,6 +100,17 @@ def test_merge_never_touches_readonly_fields():
     assert got["tone_map"] == 1.0
 
 
+def test_style_absolute_rgb_targets_are_not_added_to_neutral_values():
+    current = A.clamp_params({"gain": [1.05, 1.0, 1.0]})
+    targets = {"gamma": [0.98, 1.0, 1.0], "gain": [1.05, 1.0, 1.0],
+               "split_balance": 0.5}
+    delta = A.style_targets_to_delta(current, targets)
+    result = A.merge_params(current, delta)
+    assert result["gamma"] == targets["gamma"]
+    assert result["gain"] == targets["gain"]
+    assert result["split_balance"] == 0.5
+
+
 def test_clamp_uses_engine_limits_not_a_second_copy():
     """clamp 必须复用引擎的 LutParams,而不是在编排层重写一套限幅(两套必然漂移)。"""
     got = A.clamp_params({"temp": 99999, "exposure": 9, "contrast": -5})
@@ -119,6 +130,23 @@ def test_output_passes_lut_params_validation():
     img = make_fixture("under_exposed")
     r = A.auto_grade(img, {}, client=stub_client([{"exposure": 0.3}]))
     LutParams(**{k: v for k, v in r.params.items() if k != "base_photo_style"})
+
+
+def test_existing_exposure_is_included_in_diagnosis_and_fallback_budget():
+    img = make_fixture("under_exposed")
+    done = A.auto_grade(img, {"exposure": 1.5}, client=None, use_vision=False)
+    assert not any(issue.code == "under_exposed" for issue in done.issues)
+    assert done.params["exposure"] == pytest.approx(1.5)
+    partial = A.auto_grade(img, {"exposure": 0.6}, client=None, use_vision=False)
+    assert 0.6 < partial.params["exposure"] <= 1.2
+
+
+def test_pipeline_rejects_out_of_range_raw_proposal_before_clamping():
+    img = make_fixture("under_exposed")
+    result = A.auto_grade(img, {"temp": 2900}, client=object(), use_vision=False,
+                          proposer=proposer_seq([{"temp": 500}]), max_rounds=1)
+    assert any("temp" in reason for step in result.steps for reason in step.rejections)
+    assert result.params["temp"] != 3000
 
 
 # --------------------------------------------------------------------------

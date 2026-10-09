@@ -58,6 +58,21 @@ def merge_params(base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def style_targets_to_delta(current: Dict[str, Any], targets: Dict[str, Any]) -> Dict[str, Any]:
+    """风格提取器给的是绝对参数；转成合并器需要的增量。"""
+    delta = {}
+    for key, value in targets.items():
+        if key in READONLY_FIELDS or key == "intent" or value is None or key not in current:
+            continue
+        old = current[key]
+        if isinstance(value, (list, tuple)) and isinstance(old, (list, tuple)):
+            if len(value) == len(old):
+                delta[key] = [v - o for v, o in zip(value, old)]
+        elif isinstance(value, (int, float)) and isinstance(old, (int, float)):
+            delta[key] = value - old
+    return delta
+
+
 def clamp_params(params: Dict[str, Any]) -> Dict[str, Any]:
     """过一遍 LutParams 的 clamp,保证落到合法区间。
 
@@ -184,7 +199,8 @@ def check_hard_rules(
 def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
                            max_rounds: int = 4,
                            stats_baseline: Optional[PhotoStats] = None,
-                           skin_mask: Optional[np.ndarray] = None) -> Tuple[Dict[str, Any], PhotoStats]:
+                           skin_mask: Optional[np.ndarray] = None,
+                           budget_origin: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], PhotoStats]:
     """迭代保守解:每轮重测,直到收敛或用尽轮数。
 
     为什么需要迭代:温标单轮预算 1200K 只能修正约 0.01 的全局色偏,
@@ -200,7 +216,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
     stats_baseline 用于限幅(见 conservative_solution);不传则用当前图的测量。
     """
     params = clamp_params(dict(base))
-    stats = S.analyze(img, skin_mask)
+    stats = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
     baseline = stats_baseline if stats_baseline is not None else stats
     best_params, best_stats = params, stats
     best_count = len(Q.diagnose(stats))
@@ -208,7 +224,8 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
         return best_params, best_stats
 
     for _ in range(max_rounds):
-        candidate = conservative_solution(best_stats, best_params, stats_ref=baseline)
+        candidate = conservative_solution(best_stats, best_params, stats_ref=baseline,
+                                          budget_origin=budget_origin)
         if candidate == best_params:
             break
         cand_stats = S.analyze(R.render_lut(R.lut_from_params(candidate), img), skin_mask)
@@ -223,7 +240,8 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
 
 def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
                           temp_budget_k: float = CONSERVATIVE_TEMP_BUDGET_K,
-                          stats_ref: Optional[PhotoStats] = None) -> Dict[str, Any]:
+                          stats_ref: Optional[PhotoStats] = None,
+                          budget_origin: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """只做高置信度修正:曝光拉向目标区间中点 + 灰世界白平衡。
 
     曝光与白平衡的修正是**可计算的**(相机自动测光就是同一原理),不需要模型判断。
@@ -238,6 +256,7 @@ def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
     """
     ref = stats_ref if stats_ref is not None else stats
     params = dict(base)
+    origin = budget_origin or {}
     lo, hi = Q.EXPOSURE_TARGET
     target = (lo + hi) / 2.0
     if stats.lum_p50 > 1e-6:
@@ -245,9 +264,9 @@ def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
         ev = float(np.log2(max(target, 1e-6) / max(stats.lum_p50, 1e-6)) * 0.8)
         ev = float(np.clip(ev, -CONSERVATIVE_MAX_EXPOSURE_EV, CONSERVATIVE_MAX_EXPOSURE_EV))
         # 限幅相对**基线**:已应用的曝光也算在这笔预算里
-        ev = float(np.clip(params.get("exposure", 0.0) + ev,
-                           -CONSERVATIVE_MAX_EXPOSURE_EV,
-                           CONSERVATIVE_MAX_EXPOSURE_EV)) - params.get("exposure", 0.0)
+        low = origin.get("exposure", 0.0) - CONSERVATIVE_MAX_EXPOSURE_EV
+        high = origin.get("exposure", 0.0) + CONSERVATIVE_MAX_EXPOSURE_EV
+        ev = float(np.clip(params.get("exposure", 0.0) + ev, low, high)) - params.get("exposure", 0.0)
         params["exposure"] = params.get("exposure", 0.0) + ev
 
     b_minus_r = stats.rgb_mean[2] - stats.rgb_mean[0]
@@ -257,7 +276,9 @@ def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
         k = (ref.rgb_mean[2] - ref.rgb_mean[0]) * CONSERVATIVE_TEMP_GAIN_PER_UNIT
         budget = abs(temp_budget_k)
         # 限幅相对基线:已应用的色温也算在这笔预算里
-        k = float(np.clip(params.get("temp", 0.0) + k, -budget, budget)) - params.get("temp", 0.0)
+        low = origin.get("temp", 0.0) - budget
+        high = origin.get("temp", 0.0) + budget
+        k = float(np.clip(params.get("temp", 0.0) + k, low, high)) - params.get("temp", 0.0)
         params["temp"] = params.get("temp", 0.0) + k
 
     return clamp_params(params)
@@ -422,10 +443,11 @@ def auto_grade(
     注入 proposer 可以绕过第一道,专门验证第二道。
     """
     base = clamp_params(dict(base_params))
+    baseline_img = R.render_lut(R.lut_from_params(base), img)
     # 肤色掩码只在基线图上取一次,之后所有轮次共用 —— 否则「肤色偏移」测的是
     # 「这次哪些像素算皮肤」,而不是「同一个人被改了多少」。详见 check_hard_rules。
-    skin_mask = S.skin_mask_of(img)
-    stats0 = S.analyze(img, skin_mask)
+    skin_mask = S.skin_mask_of(baseline_img)
+    stats0 = S.analyze(baseline_img, skin_mask)
     issues = Q.diagnose(stats0)
     limits = Q.limits_for(stats0)
 
@@ -458,8 +480,8 @@ def auto_grade(
                                         diagnosis="模型未给出有效提议", applied=False))
                 break
 
-            candidate = clamp_params(merge_params(params, delta))
-            ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
+            candidate_raw = merge_params(params, delta)
+            ok, reasons = check_hard_rules(stats_current, candidate_raw, stats0, limits, params,
                                            img, skin_mask)
             if not ok:
                 rejections.extend(reasons)
@@ -467,7 +489,7 @@ def auto_grade(
                                         proposed=delta, applied=False, rejections=reasons))
                 continue
 
-            params = candidate
+            params = clamp_params(candidate_raw)
             stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
             steps.append(StepReport(stage="optimize", round=round_no, diagnosis=diagnosis,
                                     proposed=delta, applied=True, stats_after=stats_current))
@@ -491,12 +513,13 @@ def auto_grade(
         extracted.pop("intent", None)
         if extracted:
             style_params = {k: v for k, v in extracted.items() if k not in READONLY_FIELDS}
-            candidate = clamp_params(merge_params(params, style_params))
+            style_delta = style_targets_to_delta(params, style_params)
+            candidate_raw = merge_params(params, style_delta)
             # 风格**同样**要过硬校验 —— 否则「日系清透」会成为绕过后门的通道
-            ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
+            ok, reasons = check_hard_rules(stats_current, candidate_raw, stats0, limits, params,
                                            img, skin_mask)
             if ok:
-                params = candidate
+                params = clamp_params(candidate_raw)
                 style_applied = True
                 style_applied_params = dict(style_params)
                 stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
@@ -524,14 +547,14 @@ def auto_grade(
     # 把兜底移到最后,`applied_any` 才真正反映「这一轮有没有人改过参数」。
     if client is None and issues:
         params, stats_current = conservative_iterative(
-            img, base, stats_baseline=stats0, skin_mask=skin_mask)
+            img, base, stats_baseline=stats0, skin_mask=skin_mask, budget_origin=base)
         if params != base:
             steps.append(StepReport(stage="optimize", round=1,
                                     diagnosis="未启用模型,采用规则化保守调整",
                                     applied=True, stats_after=stats_current))
     elif not any(st.applied for st in steps) and not Q.is_converged(stats_current):
         params, stats_current = conservative_iterative(
-            img, params, stats_baseline=stats0, skin_mask=skin_mask)
+            img, params, stats_baseline=stats0, skin_mask=skin_mask, budget_origin=base)
         if any(abs(params.get(k, 0) - base.get(k, 0)) > 1e-9
                for k in ("exposure", "temp") if isinstance(params.get(k), (int, float))):
             steps.append(StepReport(stage="optimize", round=0,
@@ -551,7 +574,7 @@ def auto_grade(
         review_skip_reason = "disabled"
     else:
         after_img = R.render_lut(R.lut_from_params(params), img)
-        review, usage, review_skip_reason = vision_review(client, img, after_img, style=style)
+        review, usage, review_skip_reason = vision_review(client, baseline_img, after_img, style=style)
         _accumulate_usage(usage_total, usage)
 
     return AutoGradeResult(

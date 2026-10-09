@@ -156,7 +156,7 @@ test('gradeHeadline 区分降级/无调整/已调整', () => {
 
 // ---- 阶段 G:下沉的展示逻辑 ----
 
-test('styleDiff 以全零为基准算风格增量', () => {
+test('styleDiff 以各参数中性值展示风格目标', () => {
   const out = styleDiff({ contrast: 0.1, temp: -150, lift: [-0.02, 0, 0.01] })
   const keys = out.map((o) => o.key).sort()
   assert.deepEqual(keys, ['contrast', 'lift', 'temp'])
@@ -175,6 +175,10 @@ test('styleDiff 对 null / 空对象安全', () => {
 
 test('styleDiff 不含零值字段', () => {
   assert.deepEqual(styleDiff({ contrast: 0, temp: 0 }), [])
+})
+
+test('styleDiff 不把 gamma/gain 1 和 split_balance 0.5 误报为调整', () => {
+  assert.deepEqual(styleDiff({ gamma: [1, 1, 1], gain: [1, 1, 1], split_balance: 0.5 }), [])
 })
 
 test('reviewSkipText 区分三种原因,失败不能说成「你关的」', () => {

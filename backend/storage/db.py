@@ -1,5 +1,6 @@
 """LUT 元数据存储(MySQL)。连接信息从环境变量或 .env 读取,缺省用本地默认值。"""
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -86,6 +87,33 @@ def init_db():
                     created_at VARCHAR(64) NOT NULL,
                     INDEX idx_user (user_id),
                     INDEX idx_session (session_id)
+                ) CHARACTER SET utf8mb4
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auto_grade_calls (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    called_at BIGINT NOT NULL,
+                    INDEX idx_user_time (user_id, called_at)
+                ) CHARACTER SET utf8mb4
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_rate_keys (
+                    rate_key VARCHAR(255) PRIMARY KEY
+                ) CHARACTER SET utf8mb4
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_rate_events (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    rate_key VARCHAR(255) NOT NULL,
+                    called_at BIGINT NOT NULL,
+                    INDEX idx_key_time (rate_key, called_at)
                 ) CHARACTER SET utf8mb4
                 """
             )
@@ -215,6 +243,9 @@ def clear_users():
     _assert_not_dev_database("clear_users()")
     with _connect() as conn:
         with conn.cursor() as cur:
+            cur.execute("DELETE FROM auto_grade_calls")
+            cur.execute("DELETE FROM auth_rate_events")
+            cur.execute("DELETE FROM auth_rate_keys")
             cur.execute("DELETE FROM users")
         conn.commit()
 
@@ -292,14 +323,94 @@ def get_or_create_auto_session(user_id: int, title: str = "自动修图") -> int
     """
     with _connect() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
             cur.execute(
                 "SELECT id FROM sessions WHERE user_id = %s AND is_auto = 1 ORDER BY id ASC LIMIT 1",
                 (user_id,),
             )
             row = cur.fetchone()
-        if row:
-            return row["id"]
-    return create_session(user_id, title, is_auto=True)
+            if row:
+                sid = row["id"]
+            else:
+                cur.execute(
+                    "INSERT INTO sessions (user_id, title, is_auto, created_at) VALUES (%s, %s, 1, %s)",
+                    (user_id, title, datetime.now(timezone.utc).isoformat()),
+                )
+                sid = cur.lastrowid
+        conn.commit()
+        return sid
+
+
+def find_auto_session(user_id: int):
+    """只读查询；打开报告不能凭空创建一个空会话。"""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM sessions WHERE user_id = %s AND is_auto = 1 ORDER BY id ASC LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            return row["id"] if row else None
+
+
+def reserve_auto_grade_call(user_id: int, max_calls: int, window_seconds: int) -> int:
+    """跨 worker 原子预留一次配额。返回 0 表示成功，否则返回重试秒数。"""
+    now = int(time.time())
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+            cur.execute(
+                "DELETE FROM auto_grade_calls WHERE user_id = %s AND called_at <= %s",
+                (user_id, now - window_seconds),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS n, MIN(called_at) AS oldest FROM auto_grade_calls WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if row["n"] >= max_calls:
+                retry = max(1, int(row["oldest"] + window_seconds - now))
+            else:
+                cur.execute(
+                    "INSERT INTO auto_grade_calls (user_id, called_at) VALUES (%s, %s)",
+                    (user_id, now),
+                )
+                retry = 0
+        conn.commit()
+    return retry
+
+
+def reserve_auth_event(key: str, max_calls: int, window_seconds: int) -> tuple[int | None, int]:
+    """原子预留注册或登录尝试。返回 (事件 ID, 0) 或 (None, 重试秒数)。"""
+    now = int(time.time())
+    key = key[:255]
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT IGNORE INTO auth_rate_keys (rate_key) VALUES (%s)", (key,))
+            cur.execute("SELECT rate_key FROM auth_rate_keys WHERE rate_key = %s FOR UPDATE", (key,))
+            cur.execute("DELETE FROM auth_rate_events WHERE rate_key = %s AND called_at <= %s",
+                        (key, now - window_seconds))
+            cur.execute("SELECT COUNT(*) AS n, MIN(called_at) AS oldest FROM auth_rate_events WHERE rate_key = %s",
+                        (key,))
+            row = cur.fetchone()
+            if row["n"] >= max_calls:
+                event_id = None
+                retry = max(1, int(row["oldest"] + window_seconds - now))
+            else:
+                cur.execute("INSERT INTO auth_rate_events (rate_key, called_at) VALUES (%s, %s)",
+                            (key, now))
+                event_id = cur.lastrowid
+                retry = 0
+        conn.commit()
+    return event_id, retry
+
+
+def release_auth_event(event_id: int) -> None:
+    """登录成功后只撤销本次尝试，不清除其他账号的失败记录。"""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM auth_rate_events WHERE id = %s", (event_id,))
+        conn.commit()
 
 
 def get_latest_payload_message(session_id: int, user_id: int):

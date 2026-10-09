@@ -18,7 +18,8 @@ def lut_to_cube(lut, title=None, photo_style=None):
     size = lut.shape[0]
     lines = []
     if title:
-        lines.append(f'TITLE "{title}"')
+        safe_title = "".join(" " if ch == '"' or ord(ch) < 32 else ch for ch in str(title)).strip()
+        lines.append(f'TITLE "{safe_title}"')
     if photo_style:
         tag = PHOTO_STYLE_TAGS.get(photo_style)
         if tag:

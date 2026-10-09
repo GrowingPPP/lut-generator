@@ -121,9 +121,9 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
         </div>
       )}
 
-      <div className="auto-report-actions">
+      {beforeParams && <div className="auto-report-actions">
         <button type="button" className="btn" onClick={onUndo}>撤销</button>
-      </div>
+      </div>}
     </section>
   )
 }
