@@ -88,6 +88,7 @@ def check_hard_rules(
     limits: Dict[str, float],
     base_params: Dict[str, Any],
     img: np.ndarray,
+    skin_mask: Optional[np.ndarray] = None,
 ) -> Tuple[bool, List[str]]:
     """候选参数是否可接受。返回 (是否通过, 拒绝原因列表)。
 
@@ -95,6 +96,10 @@ def check_hard_rules(
       - R1/R2(裁剪)对比 **紧邻的上一轮**:防某一轮突然造成溢出
       - R4(饱和度)对比 **最初基线**:防多轮累加逐步把饱和度推上天
     混用会让 R4 被逐轮绕过。
+
+    `skin_mask` 必须是**从基线图取的**那一个:肤色判定依赖 YCbCr 阈值,而 LUT 会
+    改颜色,每轮重算掩码等于每轮换一批像素充当「皮肤」,偏移量会虚高数倍
+    (实测色温 -800K 真实移 0.031,重算掩码后报 0.138 → 安全的修正被误拒)。
     """
     reasons: List[str] = []
 
@@ -110,7 +115,7 @@ def check_hard_rules(
     if reasons:
         return False, reasons
 
-    after = S.analyze(R.render_lut(R.lut_from_params(candidate), img))
+    after = S.analyze(R.render_lut(R.lut_from_params(candidate), img), skin_mask)
 
     # R1 / R2:裁剪不得显著增加
     clip_up = after.highlight_clip_pct - stats_before.highlight_clip_pct
@@ -126,14 +131,16 @@ def check_hard_rules(
             f"{after.shadow_clip_pct:.2f}%"
         )
 
-    # R3:肤色漂移(仅在有可测肤色时)
-    if (stats_baseline.skin_ratio > 0.02 and stats_baseline.skin_mean_rgb is not None
-            and after.skin_ratio > 0.02 and after.skin_mean_rgb is not None):
-        for i, ch in enumerate("RGB"):
-            shift = abs(after.skin_mean_rgb[i] - stats_baseline.skin_mean_rgb[i])
-            if shift > Q.MAX_SKIN_SHIFT:
-                reasons.append(f"肤色偏移过大(皮肤均值的 {ch} 通道移动 {shift:.3f})")
-                break
+    # R3:肤色保护(仅在有可测肤色时)。两个亮度无关的指标,详见 quality.skin_shift:
+    # 色相/饱和度用严格阈值(真把肤色调坏了),明度用宽松阈值(只挡洗白/压死)。
+    if stats_baseline.skin_ratio > 0.02 and stats_baseline.skin_mean_rgb is not None:
+        chroma, luma = Q.skin_shift(stats_baseline, after)
+        if chroma > Q.SKIN_CHROMA_LIMIT:
+            reasons.append(
+                f"肤色色相或饱和度偏移过大({chroma:.3f},上限 {Q.SKIN_CHROMA_LIMIT})"
+            )
+        if luma > Q.SKIN_LUMA_LIMIT:
+            reasons.append(f"肤色明度漂移过大({luma:.3f},上限 {Q.SKIN_LUMA_LIMIT})")
 
     # R4:饱和度相对**最初基线**的倍率(防逐轮累加绕过)
     if stats_baseline.saturation_mean > 1e-6:
@@ -176,7 +183,8 @@ def check_hard_rules(
 
 def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
                            max_rounds: int = 4,
-                           stats_baseline: Optional[PhotoStats] = None) -> Tuple[Dict[str, Any], PhotoStats]:
+                           stats_baseline: Optional[PhotoStats] = None,
+                           skin_mask: Optional[np.ndarray] = None) -> Tuple[Dict[str, Any], PhotoStats]:
     """迭代保守解:每轮重测,直到收敛或用尽轮数。
 
     为什么需要迭代:温标单轮预算 1200K 只能修正约 0.01 的全局色偏,
@@ -192,7 +200,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
     stats_baseline 用于限幅(见 conservative_solution);不传则用当前图的测量。
     """
     params = clamp_params(dict(base))
-    stats = S.analyze(img)
+    stats = S.analyze(img, skin_mask)
     baseline = stats_baseline if stats_baseline is not None else stats
     best_params, best_stats = params, stats
     best_count = len(Q.diagnose(stats))
@@ -203,7 +211,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
         candidate = conservative_solution(best_stats, best_params, stats_ref=baseline)
         if candidate == best_params:
             break
-        cand_stats = S.analyze(R.render_lut(R.lut_from_params(candidate), img))
+        cand_stats = S.analyze(R.render_lut(R.lut_from_params(candidate), img), skin_mask)
         cand_count = len(Q.diagnose(cand_stats))
         if cand_count > best_count:
             break                      # 这一步会制造新问题,停下并保留当前最好结果
@@ -414,7 +422,10 @@ def auto_grade(
     注入 proposer 可以绕过第一道,专门验证第二道。
     """
     base = clamp_params(dict(base_params))
-    stats0 = S.analyze(img)
+    # 肤色掩码只在基线图上取一次,之后所有轮次共用 —— 否则「肤色偏移」测的是
+    # 「这次哪些像素算皮肤」,而不是「同一个人被改了多少」。详见 check_hard_rules。
+    skin_mask = S.skin_mask_of(img)
+    stats0 = S.analyze(img, skin_mask)
     issues = Q.diagnose(stats0)
     limits = Q.limits_for(stats0)
 
@@ -448,7 +459,8 @@ def auto_grade(
                 break
 
             candidate = clamp_params(merge_params(params, delta))
-            ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params, img)
+            ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
+                                           img, skin_mask)
             if not ok:
                 rejections.extend(reasons)
                 steps.append(StepReport(stage="optimize", round=round_no, diagnosis=diagnosis,
@@ -456,31 +468,15 @@ def auto_grade(
                 continue
 
             params = candidate
-            stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img))
+            stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
             steps.append(StepReport(stage="optimize", round=round_no, diagnosis=diagnosis,
                                     proposed=delta, applied=True, stats_after=stats_current))
             if Q.is_converged(stats_current):
                 break
 
-        # 循环退出后仍未收敛 → 决定是否兜底。
-        #
-        # 关键:**保守解只在 LLM 一步都没应用时启用**。它自己就是一套完整的
-        # 「曝光拉向目标 + 灰世界白平衡」修正;若在 LLM 已经应用过的基础上再跑一遍,
-        # 会对同一个目标重复补偿(实测把 0.3EV 的成果推到 0.6EV),
-        # 既与「曝光相对基线 ≤1EV」的硬校验口径冲突,也会过冲。
-        # 本轮由 LLM 做过实质性修正但没修完 → 保留成果,标记未完全达标即可。
-        applied_any = any(st.stage == "optimize" and st.applied for st in steps)
-        if not applied_any:
-            params, stats_current = conservative_iterative(img, params, stats_baseline=stats0)
-        degraded = not Q.is_converged(stats_current)
     elif issues:
-        # 无 LLM:直接迭代保守解
-        params, stats_current = conservative_iterative(img, base, stats_baseline=stats0)
-        degraded = not Q.is_converged(stats_current)
-        if params != base:
-            steps.append(StepReport(stage="optimize", round=1,
-                                    diagnosis="未启用模型,采用规则化保守调整",
-                                    applied=True, stats_after=stats_current))
+        # 无 LLM:连提议都做不了,直接进入兜底(阶段 C)。这里不重复调用。
+        pass
 
     # ---------- 阶段 B:风格 ----------
     style_params: Optional[Dict[str, Any]] = None
@@ -497,12 +493,13 @@ def auto_grade(
             style_params = {k: v for k, v in extracted.items() if k not in READONLY_FIELDS}
             candidate = clamp_params(merge_params(params, style_params))
             # 风格**同样**要过硬校验 —— 否则「日系清透」会成为绕过后门的通道
-            ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params, img)
+            ok, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
+                                           img, skin_mask)
             if ok:
                 params = candidate
                 style_applied = True
                 style_applied_params = dict(style_params)
-                stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img))
+                stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
                 steps.append(StepReport(stage="style", round=1,
                                         diagnosis=f"风格:{style}", proposed=style_params,
                                         applied=True, stats_after=stats_current))
@@ -513,6 +510,34 @@ def auto_grade(
                 steps.append(StepReport(stage="style", round=1,
                                         diagnosis=f"风格:{style}", proposed=style_params,
                                         applied=False, rejections=reasons))
+
+    # ---------- 阶段 C:兜底 ----------
+    #
+    # **必须放在所有阶段之后**。保守解自己就是一套完整的「曝光拉向目标 + 灰世界
+    # 白平衡」修正,若在还有阶段没跑完时就启用,它会对同一个目标重复补偿。
+    #
+    # 这里踩过两次,都是同一种错的形状:
+    #   1. 只看 optimize 阶段是否应用过 → 「优化全被拒 + 风格随后应用」时重复补偿
+    #   2. 即使改成看全部 steps,只要兜底仍发生在**风格之前**,它看到的 steps 里
+    #      就没有风格那一步 —— 实测风格给 exposure 0.15,兜底又加 0.6,最终 0.75,
+    #      与「已应用 0.15」的标注自相矛盾。
+    # 把兜底移到最后,`applied_any` 才真正反映「这一轮有没有人改过参数」。
+    if client is None and issues:
+        params, stats_current = conservative_iterative(
+            img, base, stats_baseline=stats0, skin_mask=skin_mask)
+        if params != base:
+            steps.append(StepReport(stage="optimize", round=1,
+                                    diagnosis="未启用模型,采用规则化保守调整",
+                                    applied=True, stats_after=stats_current))
+    elif not any(st.applied for st in steps) and not Q.is_converged(stats_current):
+        params, stats_current = conservative_iterative(
+            img, params, stats_baseline=stats0, skin_mask=skin_mask)
+        if any(abs(params.get(k, 0) - base.get(k, 0)) > 1e-9
+               for k in ("exposure", "temp") if isinstance(params.get(k), (int, float))):
+            steps.append(StepReport(stage="optimize", round=0,
+                                    diagnosis="模型提议均未通过校验,采用规则化保守调整",
+                                    applied=True, stats_after=stats_current))
+    degraded = not Q.is_converged(stats_current)
 
     # ---------- 视觉复检 ----------
     review: Optional[str] = None

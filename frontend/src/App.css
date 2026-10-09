@@ -1212,3 +1212,57 @@ input[type='range']::-webkit-slider-thumb {
 .auto-style-blocked .chip {
   margin: 4px 6px 0 0;
 }
+
+/* ---- 生成页窄屏布局 ----
+   桌面版是固定两列(grid-template-columns: 380px 1fr)。那在窄屏上必然失败:
+   380 + 两侧 24px padding = 428px,一旦视口小于它,1fr 会被压成 **0 宽** ——
+   预览区直接消失(实测 390px 下 .right-col 宽度为 0)。
+   所以窄屏改为单列堆叠,并把 chat-panel 的高度限制解除。 */
+@media (max-width: 900px) {
+  .gen-layout {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 16px;
+    /* 单列时不应再撑满视口高度,否则内容被压在首屏之外 */
+    min-height: 0;
+  }
+
+  .chat-panel {
+    /* 桌面版靠 grid 行高约束,单列后需要一个明确的高度上限 */
+    max-height: 60vh;
+  }
+
+  .right-col {
+    /* 桌面版是 overflow-y: auto 的内滚容器;单列后交给页面滚动,
+       否则会出现「页内还有一截滚动区」的双滚动条 */
+    overflow-y: visible;
+  }
+
+  .previews {
+    grid-template-columns: 1fr;      /* 独立展示模式的两张图改为上下排列 */
+  }
+}
+
+@media (max-width: 560px) {
+  .gen-layout {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .preview-toolbar {
+    /* 工具栏在窄屏会超出视口(实测 390px 下 right=539),改为换行 */
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .param-groups,
+  .param-group > .controls {
+    /* 220px 的最小列宽在 390px 下只剩一列,收紧一点让滑杆不被压太窄 */
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    padding: 14px;
+    gap: 12px;
+  }
+}

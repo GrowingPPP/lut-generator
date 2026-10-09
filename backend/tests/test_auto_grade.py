@@ -152,8 +152,11 @@ def _mk(**kw) -> PhotoStats:
 
 
 def _fake_stats_after(monkeypatch, stats: PhotoStats):
-    """把 S.analyze 替换成固定返回值 —— 让规则判断完全确定。"""
-    monkeypatch.setattr(A.S, "analyze", lambda _img: stats)
+    """把 S.analyze 替换成固定返回值 —— 让规则判断完全确定。
+
+    签名要跟上 analyze(img, skin_mask=None):多出的位置参数不能漏。
+    """
+    monkeypatch.setattr(A.S, "analyze", lambda _img, _mask=None: stats)
 
 
 def test_r1_rejects_highlight_clipping_increase():
@@ -753,3 +756,112 @@ def test_style_extraction_failure_leaves_fields_empty():
     assert r.style_params is None
     assert r.style_applied is False
     assert r.style_applied_params is None
+
+
+# --------------------------------------------------------------------------
+# 肤色规则:必须亮度无关(真 bug 回归)
+# --------------------------------------------------------------------------
+#
+# 原实现用「三大通道绝对偏移」判定肤色是否被改坏。绝对值随画面变亮而变大,
+# 于是**纯曝光 +0.3EV 就能触发「肤色偏移过大」** —— 它测的是亮度,不是肤色。
+# 实测把风格应用率压到 33%。
+#
+# 现在拆成两个亮度无关的指标(见 quality.skin_shift):
+#   chroma  三通道比例的偏移(纯亮度缩放会约掉)→ 严格阈值,管色相/饱和度
+#   luma    明度漂移                            → 宽松阈值,只管洗白/压死
+
+def test_pure_exposure_does_not_trigger_skin_rule():
+    """纯曝光调整绝不能触发肤色规则 —— 它没有改变肤色的色相。"""
+    img = make_fixture("skin_tone")
+    mask = A.S.skin_mask_of(img)
+    base = A.S.analyze(img, mask)
+    for ev in (0.2, 0.3, 0.5, 0.6):
+        ok, reasons = A.check_hard_rules(
+            base, A.clamp_params({"exposure": ev}), base, Q.limits_for(base), {}, img, mask)
+        assert not any("肤色色相" in r for r in reasons), \
+            f"纯曝光 +{ev}EV 被误判为肤色色相偏移:{reasons}"
+
+
+def test_skin_hue_damage_is_still_blocked():
+    """反向:真的把肤色色相调坏时必须拦住,否则这条规则就形同虚设。"""
+    img = make_fixture("skin_tone")
+    mask = A.S.skin_mask_of(img)
+    base = A.S.analyze(img, mask)
+    for delta in ({"saturation": 0.9}, {"hue": 40}, {"hue": -60}):
+        ok, reasons = A.check_hard_rules(
+            base, A.clamp_params(delta), base, Q.limits_for(base), {}, img, mask)
+        assert not ok, f"{delta} 应被拦下"
+        assert any("肤色" in r for r in reasons), reasons
+
+
+def test_skin_shift_is_luminance_independent():
+    """skin_shift 的色相分量对纯亮度缩放应几乎为 0。"""
+    img = make_fixture("skin_tone")
+    mask = A.S.skin_mask_of(img)
+    base = A.S.analyze(img, mask)
+    bright = A.S.analyze(R.render_lut(R.lut_from_params({"exposure": 0.6}), img), mask)
+    chroma, luma = Q.skin_shift(base, bright)
+    assert chroma < 0.01, f"纯提亮的色相偏移应接近 0,实际 {chroma:.4f}"
+    assert luma > 0.05, f"明度分量应如实反映提亮,实际 {luma:.4f}"
+
+
+def test_skin_mask_must_be_reused_across_rounds():
+    """掩码每轮重算会让偏移虚高 —— 同一批像素才有可比性。"""
+    img = make_fixture("skin_tone")
+    mask = A.S.skin_mask_of(img)
+    base = A.S.analyze(img, mask)
+    lut = R.lut_from_params({"temp": -800})
+    graded = R.render_lut(lut, img)
+    fixed = A.S.analyze(graded, mask)          # 固定基线掩码
+    recomputed = A.S.analyze(graded)           # 每轮重算(旧行为)
+    c_fixed, _ = Q.skin_shift(base, fixed)
+    c_recomp, _ = Q.skin_shift(base, recomputed)
+    assert c_fixed <= c_recomp + 1e-9, \
+        f"固定掩码不应比重算更大(固定 {c_fixed:.4f} vs 重算 {c_recomp:.4f})"
+
+
+# --------------------------------------------------------------------------
+# 兜底必须在所有阶段之后(真 bug 回归 ×2)
+# --------------------------------------------------------------------------
+#
+# 同一个错误的两种形状:
+#   1. 只看 optimize 是否应用过 → 「优化全被拒 + 风格随后应用」重复补偿
+#   2. 兜底发生在风格**之前** → 它看到的 steps 里根本没有风格那一步
+
+def test_fallback_does_not_compound_style_result():
+    """风格应用了 exposure 0.15,最终就必须是 0.15 —— 兜底不能再加一笔。
+
+    这是最容易出错的一处:兜底自己就是「曝光拉向目标」的完整修正,
+    在任何已有成果之上再跑一遍都会过冲(实测曾变成 0.75)。
+    """
+    img = make_fixture("under_exposed")
+    r = A.auto_grade(img, {}, "提亮", client=object(), use_vision=False,
+                     style_extractor=_style_extractor({"exposure": 0.15, "shadows": 0.1}))
+    assert r.style_applied is True
+    assert r.params["exposure"] == pytest.approx(0.15, abs=1e-6), \
+        f"兜底与风格结果叠加了:{r.params['exposure']}"
+
+
+def test_fallback_still_runs_when_nothing_applied():
+    """反向:所有提议都被拒时,兜底必须照常工作,否则功能退化。"""
+    img = make_fixture("under_exposed")
+    r = A.auto_grade(img, {}, client=None)      # 无 LLM → 直接兜底
+    assert r.params["exposure"] > 0, "欠曝图应有兜底提亮"
+
+
+def test_fallback_after_all_rejected_proposals():
+    """提议全被拒(没人改过参数)→ 兜底应接手。"""
+    img = make_fixture("under_exposed")
+    r = A.auto_grade(img, {}, client=object(), use_vision=False,
+                     proposer=proposer_seq([{"exposure": 2.5}, {"exposure": 2.5}]))
+    assert r.params["exposure"] > 0, "全被拒后应有兜底产出"
+
+
+def test_style_only_run_reports_degraded_honestly():
+    """风格修了一部分但没收敛 → 保留成果并标记 degraded,不假装达标。"""
+    img = make_fixture("under_exposed")
+    r = A.auto_grade(img, {}, "微微提亮", client=object(), use_vision=False,
+                     style_extractor=_style_extractor({"exposure": 0.1}))
+    if not Q.is_converged(A.S.analyze(
+            R.render_lut(R.lut_from_params(r.params), img), A.S.skin_mask_of(img))):
+        assert r.degraded is True

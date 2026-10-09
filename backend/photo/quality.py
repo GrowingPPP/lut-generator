@@ -8,7 +8,9 @@
 
 阈值全部集中在本模块顶部,每个都有边界测试(`test_photo_quality.py`)。
 """
-from typing import Dict, List
+from typing import Dict, List, Tuple
+
+import numpy as np
 
 from .types import Issue, PhotoStats
 
@@ -45,7 +47,28 @@ NOISE_SIGMA_WARN = 0.030         # 超过则收紧 contrast/saturation 上限
 
 # ---- 硬校验上限(供 agent/auto.py 的 check_hard_rules 使用)----
 MAX_CLIP_INCREASE_PCT = 0.5      # 高光/阴影裁剪增幅上限
-MAX_SKIN_SHIFT = 0.06            # 有肤色时,单通道漂移上限
+# 肤色保护拆成两个**亮度无关**的指标。
+#
+# 原先只有一个「三大通道绝对偏移的上限」,而绝对值会随画面变亮而变大 ——
+# 实测纯曝光 +0.3EV 就能把 R 通道推 0.082 超过阈值,即**任何提亮都被误判成
+# 「肤色偏移」**。那测的是亮度,不是肤色。
+#
+# 现在:
+#   SKIN_CHROMA_LIMIT  三通道比例的最大偏移。纯亮度缩放会约掉,所以它只反映
+#                      色相与饱和度的真实改变 —— 这才是「肤色被调坏」的定义。
+#   SKIN_LUMA_LIMIT    明度漂移的宽松上限,只用来挡「洗白/压死」这种极端情况,
+#                      不参与「色相是否偏了」的判断。
+#
+# 实测标定(skin_tone 合成图):
+#   纯曝光 ±0.3~0.6 → chroma 0.0003~0.0037(几乎为 0,应当放行)
+#   色温 -800~-1500K → chroma 0.0102~0.0162(正常白平衡,应当放行)
+#   饱和度 +0.9      → chroma 0.0678(肤色被调坏,应拦)
+#   色相 ±40~60°     → chroma 0.0455~0.0616(应拦)
+# 取 0.045:放过「复古胶片感」这类正常风格(实测 0.0418),拦住 0.0455 以上的色相损伤。
+_SKIN_LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float64)
+
+SKIN_CHROMA_LIMIT = 0.045
+SKIN_LUMA_LIMIT = 0.20            # 有肤色时,单通道漂移上限
 MAX_SATURATION_GROWTH = 1.6      # 饱和度相对最初基线的倍率上限
 MAX_EXPOSURE_STEP_EV = 1.0       # 单轮曝光调整上限
 NOISY_MAX_CONTRAST_DELTA = 0.25  # 噪点高时的对比度增幅上限
@@ -186,3 +209,26 @@ def limits_for(stats: PhotoStats) -> Dict[str, float]:
 def is_converged(stats: PhotoStats) -> bool:
     """所有已诊断问题是否都已缓解到阈值内。用于提前结束,省一轮 LLM 调用。"""
     return len(diagnose(stats)) == 0
+
+
+def skin_shift(base: PhotoStats, after: PhotoStats) -> Tuple[float, float]:
+    """肤色变化量,返回 (色相/饱和偏移, 明度漂移)。
+
+    两者都必须用**同一批像素**测量 —— 掩码要在基线图上取一次并固定,否则
+    「肤色偏移」测的是「这次哪些像素算皮肤」(实测能让偏移虚高 4 倍)。
+    调用方负责把基线掩码传给 analyze。
+
+    任一测不了(基线或当前没有足够肤色)时返回 (0.0, 0.0),即「不构成风险」。
+    """
+    b = base.skin_mean_rgb
+    a = after.skin_mean_rgb
+    if b is None or a is None:
+        return 0.0, 0.0
+    bv = np.asarray(b, dtype=np.float64)
+    av = np.asarray(a, dtype=np.float64)
+    # 三通道比例:纯亮度缩放会被约掉,剩下的才是色相/饱和度的真实改变
+    br = bv / max(float(bv.sum()), 1e-6)
+    ar = av / max(float(av.sum()), 1e-6)
+    chroma = float(np.abs(ar - br).max())
+    luma = abs(float(av @ _SKIN_LUMA) - float(bv @ _SKIN_LUMA))
+    return chroma, luma

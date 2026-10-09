@@ -132,10 +132,19 @@ def _noise_sigma(lum: np.ndarray) -> float:
     return mad * 1.4826
 
 
-def analyze(img: np.ndarray) -> PhotoStats:
+def analyze(img: np.ndarray, skin_mask: Optional[np.ndarray] = None) -> PhotoStats:
     """完整测量。img 为 float32 HxWx3,值域 0..1。
 
     不裁剪输入:允许超界值,这样「已经很亮/很暗」的信息不会在测量前就被抹掉。
+
+    `skin_mask`:可选的**降采样尺寸**布尔掩码。传入时肤色统计固定在这批像素上,
+    而不是按当前图像重算。
+
+    为什么需要它:肤色判定是按 YCbCr 阈值做的,而 LUT 会改变颜色 —— 于是每轮
+    重算掩码就等于每轮换了「哪些像素算皮肤」。实测这会让肤色均值偏移虚高 4 倍
+    (色温 -800K 真实只移 0.031,重算掩码后报 0.138),把本来安全的修正误判为
+    「肤色偏移过大」。硬校验要判断的是「同一个人被改了多少」,不是「这次谁被
+    算成了皮肤」,所以必须把像素集合锁在基线上。
     """
     if img.ndim != 3 or img.shape[2] < 3:
         raise ValueError(f"期望 HxWx3 的 RGB 图,收到 shape={img.shape}")
@@ -171,7 +180,11 @@ def analyze(img: np.ndarray) -> PhotoStats:
     saturation_mean = float(sat.mean())
     saturation_p95 = float(np.percentile(sat, 95))
 
-    skin = _ycbcr_mask(flat * 255.0)
+    # 优先用外部传入的基线掩码 —— 见 analyze 的 docstring
+    if skin_mask is not None and skin_mask.shape == (n,):
+        skin = skin_mask
+    else:
+        skin = _ycbcr_mask(flat * 255.0)
     skin_ratio = float(skin.mean())
     skin_mean_rgb: Optional[Tuple[float, float, float]] = None
     skin_lum_p50: Optional[float] = None
@@ -195,6 +208,16 @@ def analyze(img: np.ndarray) -> PhotoStats:
         skin_ratio=skin_ratio, skin_mean_rgb=skin_mean_rgb, skin_lum_p50=skin_lum_p50,
         noise_sigma=_noise_sigma(lum.reshape(h, w).astype(np.float32)),
     )
+
+
+def skin_mask_of(img: np.ndarray) -> np.ndarray:
+    """取图像的降采样肤色掩码(扁平 bool 数组),供后续各轮固定使用。
+
+    与 analyze 内部走同一条降采样与阈值路径,保证形状与判定一致。
+    """
+    small = downsample(img[:, :, :3])
+    flat = small.reshape(-1, 3).astype(np.float32)
+    return _ycbcr_mask(flat * 255.0)
 
 
 def to_prompt_dict(stats: PhotoStats) -> Dict[str, float]:
