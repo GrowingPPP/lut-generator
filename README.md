@@ -74,7 +74,11 @@ cp .env.example .env
 #     CHROMA_LLM_API_KEY=<你的 DeepSeek key>
 #     CHROMA_JWT_SECRET=<上一步生成的随机串>
 
-# 4. 启动前后端
+# 4. 创建一个本地账号(默认 admin / 12345678)
+make admin
+#   自定义:make admin NAME=me PW=mysecret123
+
+# 5. 启动前后端
 make dev
 # 访问 http://localhost:5173
 ```
@@ -194,7 +198,19 @@ make test-frontend  # 前端展示层纯函数测试(Node 内置 runner,零依�
 make test-parity    # 前后端一致性校验(引擎数学 + .cube 序列化)
 make check          # 上面三个一起跑(提交前应全绿)
 make build          # 构建前端产物到 frontend/dist
+make admin          # 创建/重置本地账号
 ```
+
+> **测试跑在独立数据库 `chroma_test` 上,不会碰你的开发库。**
+>
+> 这不是可有可无的整洁习惯:测试里有多个 `autouse` fixture 会执行
+> `DELETE FROM users` / 清空 LUT 与会话。此前它们直接作用在开发库上 ——
+> 跑一次 `make check` 就会把你的账号删掉,再登录自然失败。
+> 现在 `backend/conftest.py` 会在**导入 storage.db 之前**把库名覆盖成
+> `chroma_test`,并在不匹配时直接拒绝启动测试。
+>
+> 想改测试库名:`CHROMA_TEST_DATABASE=别的名字 make test`。
+> 若把它配成 `chroma`,conftest 会报错退出而不是照常删数据。
 
 后端测试覆盖:LUT 引擎数学正确性、`.cube` 序列化、API CRUD、认证与限流、生成结果留档、会话流程与参数契约、tool calling 提取(含预算耗尽/入参非法等异常路径)、影调分区与分离色调、自动修图(测量/判定/渲染/编排/硬校验/API),以及**架构约束**的自动检查(分层依赖、参数集三方一致)。LLM 路径全部用桩,不打真实 API。
 

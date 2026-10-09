@@ -204,6 +204,22 @@ def create_user(username: str, password_hash: str) -> int:
         return last_id
 
 
+def set_user_password(user_id: int, password_hash: str) -> None:
+    """改密码,并递增 token_version 让该用户已签发的 token 全部失效。
+
+    只改哈希不递增版本的话,改完密码旧 token 仍然有效 —— 那正是「改了密码
+    却还是被登出/或被冒用」这类问题的来源。
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET password_hash = %s, token_version = token_version + 1"
+                " WHERE id = %s",
+                (password_hash, user_id),
+            )
+        conn.commit()
+
+
 def get_user_by_username(username: str):
     with _connect() as conn:
         with conn.cursor() as cur:

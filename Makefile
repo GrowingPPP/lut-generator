@@ -11,7 +11,7 @@ MYSQL_DATABASE ?= chroma
 BACKEND_PID := .backend.pid
 FRONTEND_PID := .frontend.pid
 
-.PHONY: help install db-init backend frontend dev stop restart test test-frontend test-parity check build clean
+.PHONY: help install db-init admin backend frontend dev stop restart test test-frontend test-parity check build clean
 
 help: ## 显示所有可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -22,6 +22,11 @@ install: ## 安装前后端依赖
 	@$(VENV)/bin/pip install -r $(BACKEND)/requirements.txt
 	@echo "安装前端依赖..."
 	@cd $(FRONTEND) && npm install
+
+# 注意变量名:不要用 USER / PASS —— USER 是 shell 的标准环境变量(Make 会原样
+# 导入),直接引用 $(USER) 会静默变成当前系统用户名,而不是「未指定」。
+admin: ## 创建/重置本地账号(默认 admin / 12345678,可 NAME=xxx PW=yyy 覆盖)
+	@cd $(BACKEND) && ../$(VENV)/bin/python scripts/create_user.py "$(NAME)" "$(PW)"
 
 db-init: ## 创建 MySQL 数据库
 	@mysql -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) -e "CREATE DATABASE IF NOT EXISTS $(MYSQL_DATABASE) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
