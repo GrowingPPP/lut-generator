@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { defaultParams } from './lib/lutEngine.js'
+import { defaultParams, normalizeParams } from './lib/lutEngine.js'
 import { makeThumb } from './lib/preview.js'
 import usePreview from './hooks/usePreview.js'
 import {
@@ -146,7 +146,10 @@ function groupSummary(g, params) {
 }
 
 function GenerateView({ previewLut }) {
-  const [params, setParams] = useState(defaultParams())
+  const [params, setRawParams] = useState(defaultParams)
+  const setParams = useCallback((next) => {
+    setRawParams((prev) => normalizeParams(typeof next === 'function' ? next(prev) : next))
+  }, [])
   const [displayMode, setDisplayMode] = useState('slider')
   const [split, setSplitState] = useState(0.5)
   const [messages, setMessages] = useState([

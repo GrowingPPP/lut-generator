@@ -37,6 +37,23 @@ export function defaultParams() {
   }
 }
 
+// 历史会话和未重启的旧版 API 可能缺少新参数；预览、控件和导出共用同一套补全规则。
+export function normalizeParams(params) {
+  const normalized = defaultParams()
+  if (!params || typeof params !== 'object') return normalized
+  for (const [key, fallback] of Object.entries(normalized)) {
+    const value = params[key]
+    if (Array.isArray(fallback)) {
+      normalized[key] = fallback.map((item, i) => Number.isFinite(value?.[i]) ? value[i] : item)
+    } else if (typeof fallback === 'number' && Number.isFinite(value)) {
+      normalized[key] = value
+    } else if (typeof fallback === 'string' && typeof value === 'string') {
+      normalized[key] = value
+    }
+  }
+  return normalized
+}
+
 function clamp01(v) {
   return v < 0 ? 0 : v > 1 ? 1 : v
 }
@@ -356,6 +373,7 @@ function applyEncodedOps(r, g, b, p) {
 // ---- 生成 ----
 
 export function generateLUT(params = defaultParams(), size = 33) {
+  params = normalizeParams(params)
   const n = size * size * size
   const data = new Float32Array(n * 4)
   const step = 1 / (size - 1)
@@ -429,6 +447,7 @@ export function lutToCube(data, size, { title, photoStyle } = {}) {
 
 // 参数 → .cube 文本(前端本地生成,用于未保存时直接下载)
 export function paramsToCube(params, { title, mode = 'camera', size = 33 } = {}) {
+  params = normalizeParams(params)
   const { data } = generateLUT(params, size)
   const photoStyle = mode === 'camera' ? params.base_photo_style : undefined
   const inputSignal = params.base_photo_style === 'VLOG' ? 'VLOG/V-Gamut' : `${params.base_photo_style}/sRGB`

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { defaultParams, generateLUT, paramsToCube } from '../src/lib/lutEngine.js'
+import { defaultParams, generateLUT, normalizeParams, paramsToCube } from '../src/lib/lutEngine.js'
 
 function sample(params, r, g, b, size = 17) {
   const { data } = generateLUT({ ...defaultParams(), ...params }, size)
@@ -30,4 +30,33 @@ test('后期版标题写明输入输出信号', () => {
     { title: '测试', mode: 'software', size: 3 })
   assert.match(cube, /^TITLE "测试 \[VLOG\/V-Gamut -> Rec709\]"/)
   assert.doesNotMatch(cube, /#LUMIXPHOTOSTYLE/)
+})
+
+test('旧版会话参数补全后预览 LUT 与导出保持有效', () => {
+  // 当前旧版 API 实际只返回这些字段；新增的风格强度、对比中心等字段会缺席。
+  const legacy = {
+    base_photo_style: 'STD', temp: -100, tint: 0, exposure: 0,
+    contrast: 0.15, saturation: -0.25, hue: 0, vibrance: -0.05, tone_map: 1,
+    highlights: -0.15, shadows: -0.1, whites: 0, blacks: 0, curve: 0.15,
+    split_shadow_hue: 200, split_shadow_sat: 0.15,
+    split_highlight_hue: 40, split_highlight_sat: 0.08, split_balance: 0.5,
+    lift: [0, 0, 0], gamma: [1, 1, 1], gain: [1, 1, 1],
+  }
+  const normalized = normalizeParams(legacy)
+  assert.equal(normalized.look_strength, 1)
+  assert.equal(normalized.contrast_pivot, 0.462)
+  assert.equal(normalized.split_mid_sat, 0)
+  const { data } = generateLUT(legacy, 17)
+  assert.ok(data.every(Number.isFinite))
+  const middle = (8 * 17 * 17 + 8 * 17 + 8) * 4
+  assert.ok(data[middle] > 0.1 && data[middle] < 0.9)
+  const cube = paramsToCube(legacy, { title: '旧版会话', size: 3 })
+  assert.doesNotMatch(cube, /NaN|Infinity/)
+})
+
+test('无效的可选数值回退到默认值', () => {
+  const normalized = normalizeParams({ look_strength: null, contrast_pivot: NaN, gain: [1.1, Infinity] })
+  assert.equal(normalized.look_strength, 1)
+  assert.equal(normalized.contrast_pivot, 0.462)
+  assert.deepEqual(normalized.gain, [1.1, 1, 1])
 })
