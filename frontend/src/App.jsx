@@ -555,6 +555,7 @@ function GenerateView({ previewLut }) {
                 <span>V-Log 显示映射</span>
                 <input
                   type="range"
+                  aria-label="V-Log 显示映射"
                   min={0}
                   max={1}
                   step={0.01}
@@ -590,6 +591,7 @@ function GenerateView({ previewLut }) {
                               <span>{c}</span>
                               <input
                                 type="range"
+                                aria-label={`${rg.label} ${c}`}
                                 min={rg.min}
                                 max={rg.max}
                                 step={rg.step}
@@ -606,6 +608,7 @@ function GenerateView({ previewLut }) {
                           <span>{sl.label}</span>
                           <input
                             type="range"
+                            aria-label={sl.label}
                             min={sl.min}
                             max={sl.max}
                             step={sl.step}

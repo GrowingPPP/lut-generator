@@ -253,8 +253,8 @@ body {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 20px 24px;
   padding: 20px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -263,58 +263,81 @@ body {
 
 .slider {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) 76px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'label value' 'control control';
   align-items: center;
-  gap: 12px;
-  font-size: 13px;
+  gap: 8px 12px;
+  font-size: 14px;
+  line-height: 1.5;
   min-width: 0;
 }
 
 .slider input[type='range'] {
+  grid-area: control;
   min-width: 0;
   width: 100%;
+  margin: 0;
 }
 
-.slider span {
-  color: var(--muted);
+.slider > span {
+  grid-area: label;
+  color: var(--param-label, var(--text));
+  font-weight: 500;
 }
 
-.slider em {
+.slider > em {
+  grid-area: value;
   font-style: normal;
-  color: var(--accent);
+  font-weight: 600;
+  color: var(--param-value, var(--accent));
   text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
+.ps-select {
+  grid-template-areas: 'label label' 'control control';
+}
+
 .ps-select select {
+  grid-area: control;
   width: 100%;
   background: var(--panel2);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
-  padding: 6px 10px;
+  font-size: 14px;
+  min-height: 36px;
+  padding: 7px 10px;
   outline: none;
+}
+
+.ps-select select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .rgb-group {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 64px repeat(3, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 20px;
   align-items: center;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  border-top: 1px solid var(--param-line, var(--line));
 }
 
 .rgb-group-label {
-  color: var(--muted);
-  font-size: 13px;
+  grid-column: 1 / -1;
+  color: var(--param-label, var(--text));
+  font-size: 14px;
+  font-weight: 500;
 }
 
-.rgb-slider {
-  grid-template-columns: 20px 1fr 56px;
+.rgb-group:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 input[type='range'] {
@@ -819,29 +842,102 @@ input[type='range']::-webkit-slider-thumb {
    参数较多,按校正与风格算子分组折叠。
    .controls 仍是每组的滑杆栅格。 */
 
-/* 关键:.controls 原来写死 repeat(3, 1fr),在窄容器里每列会被压到 0 宽
-   (原型上实测复现:滑杆不可见、文字重叠)。改为按最小列宽自动降列。
-   220px 是「标签 52 + 滑杆 + 数值 64 + 两处 gap」仍可用的下限。 */
 .param-groups {
+  --param-surface: #1b1b20;
+  --param-line: #383842;
+  --param-label: #d6d6de;
+  --param-value: #f0c68d;
+  --param-muted: #b3b3bd;
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .param-group {
-  border: 1px solid var(--line);
+  border: 1px solid var(--param-line);
   border-radius: 14px;
-  background: var(--panel);
+  background: var(--param-surface);
   overflow: hidden;
 }
 
-/* 组内的滑杆区:去掉自身边框(外壳已提供),只留一条分隔线。
-   :first-child 覆盖「基础」组 —— 它是 .param-groups 的直接子元素,没有折叠外壳。 */
-.param-group > .controls,
-.param-groups > .controls {
+/* 参数组外壳提供边框,组内控件仅保留标题下的分隔线。 */
+.param-group > .controls {
   border: 0;
   border-radius: 0;
   background: transparent;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--param-line);
+}
+
+.param-groups > .controls {
+  border-color: var(--param-line);
+  background: var(--param-surface);
+}
+
+.param-groups > .text-muted {
+  margin: 2px 4px 6px;
+  color: var(--param-muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.param-groups input[type='range'] {
+  height: 24px;
+  background: transparent;
+  border-radius: 4px;
+  opacity: 1;
+}
+
+.param-groups input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 4px;
+  background: #686875;
+}
+
+.param-groups input[type='range']::-moz-range-track {
+  height: 6px;
+  border-radius: 4px;
+  background: #686875;
+}
+
+.param-groups input[type='range']::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  background: var(--text);
+  border: 2px solid var(--accent);
+}
+
+.param-groups input[type='range']::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 2px solid var(--accent);
+}
+
+.param-groups input[type='range']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.param-groups input[type='range']:disabled,
+.param-groups select:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.param-groups input[type='range']:disabled::-webkit-slider-thumb {
+  background: var(--param-surface);
+  border-color: var(--param-muted);
+}
+
+.param-groups input[type='range']:disabled::-moz-range-thumb {
+  background: var(--param-surface);
+  border-color: var(--param-muted);
+}
+
+.param-groups select:disabled {
+  color: var(--param-label);
 }
 
 .param-group-head {
@@ -849,12 +945,12 @@ input[type='range']::-webkit-slider-thumb {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 11px 20px;
+  padding: 14px 20px;
   background: none;
   border: 0;
   color: var(--text);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   text-align: left;
@@ -870,8 +966,8 @@ input[type='range']::-webkit-slider-thumb {
 }
 
 .param-group-arrow {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--param-muted);
+  font-size: 12px;
   width: 10px;
 }
 
@@ -882,9 +978,14 @@ input[type='range']::-webkit-slider-thumb {
 /* 折叠时提示「有几项被改过」——否则参数藏起来后用户找不到自己调过什么 */
 .param-group-hint {
   margin-left: auto;
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--param-value);
+}
+
+.param-group-head:disabled {
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 /* ---- AI 自动修图 ----
@@ -1261,14 +1362,16 @@ input[type='range']::-webkit-slider-thumb {
     gap: 8px;
   }
 
-  .param-groups,
-  .param-group > .controls {
-    /* 220px 的最小列宽在 390px 下只剩一列,收紧一点让滑杆不被压太窄 */
+  .param-groups .controls {
     grid-template-columns: 1fr;
   }
 
   .controls {
     padding: 14px;
-    gap: 12px;
+    gap: 18px;
+  }
+
+  .rgb-group {
+    grid-template-columns: 1fr;
   }
 }
