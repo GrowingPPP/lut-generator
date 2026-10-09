@@ -28,7 +28,21 @@ export const register = (username, password) =>
   jsonFetch(`${BASE}/auth/register`, { method: 'POST', body: JSON.stringify({ username, password }), skip401Redirect: true })
 export const login = (username, password) =>
   jsonFetch(`${BASE}/auth/login`, { method: 'POST', body: JSON.stringify({ username, password }), skip401Redirect: true })
-export const me = () => jsonFetch(`${BASE}/auth/me`)
+// 「我是谁」是一次探测:未登录时后端返回 401 是正常结果,不是错误。
+// 这里把 401 当作「未登录」(返回 null),并且**不派发 chroma:unauthorized** ——
+// 后者会清空刚建立的登录态。
+//
+// 已知的良性噪音:浏览器 DevTools 会把这次 401 记成一条 error 级
+// "Failed to load resource: 401"。那是**网络层的原生记录**,与代码怎么处理无关,
+// 也让 status code 保持应有的语义(未认证就是 401)。
+// 曾试过「没有 cookie 就不发这次请求」来消除它,但会话 cookie 是 **httpOnly**,
+// document.cookie 根本读不到 —— 那个改动会让所有人刷新后掉登录态,已回退。
+export const me = async () => {
+  const res = await fetch(`${BASE}/auth/me`, { credentials: 'include' })
+  if (res.status === 401) return null
+  if (!res.ok) throw new Error(`请求失败: ${res.status}`)
+  return res.json()
+}
 export const logout = () => jsonFetch(`${BASE}/auth/logout`, { method: 'POST' })
 
 // LUT

@@ -616,7 +616,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    me().then((u) => setUser(u.username)).catch(() => setUser(null)).finally(() => setChecking(false))
+    // me() 未登录时返回 null(不是抛错)—— 见 lib/api.js 的说明
+    me().then((u) => setUser(u ? u.username : null)).catch(() => setUser(null)).finally(() => setChecking(false))
   }, [])
 
   const openPreview = (lut) => {
@@ -651,13 +652,14 @@ export default function App() {
           CHROMA
         </div>
         <nav className="nav">
+          {/* 首页是入口,排在两个子页之前;用一条分隔线与应用内导航区分开 */}
+          <button className="nav-home" onClick={() => setView('landing')}>首页</button>
           <button className={view === 'generate' ? 'active' : ''} onClick={() => setView('generate')}>
             生成
           </button>
           <button className={view === 'library' ? 'active' : ''} onClick={() => setView('library')}>
             我的 LUT
           </button>
-          <button onClick={() => setView('landing')}>首页</button>
         </nav>
         <div className="topbar-user">
           <span>{user}</span>
