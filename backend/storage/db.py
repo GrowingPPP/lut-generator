@@ -175,8 +175,35 @@ def delete_lut(lut_id: int, user_id: int) -> bool:
         return deleted > 0
 
 
+# 破坏性操作(仅供测试使用)。这些函数会**无条件清表**,因此必须挡住「不小心
+# 作用在开发库上」的情况 —— 只需写个临时脚本调一次,开发者自己的账号、LUT、
+# 会话就全没了。
+#
+# 为什么防护放在这一层而不是只放 conftest:pytest 有 conftest 兜底,但**临时
+# 脚本、REPL、一次性验证代码都不经过 pytest** —— 本项目开发中这两种用法都很
+# 常见(实测就因为探针脚本把开发库的用户删掉过)。把闸门放在真正执行删除的
+# 地方,才不依赖「你恰好是用 pytest 跑的」。
+DEV_DATABASE = "chroma"
+_ENV_OVERRIDE = "CHROMA_ALLOW_CLEAR_DEV_DB"
+
+
+def _assert_not_dev_database(what: str) -> None:
+    name = _CONFIG["database"]
+    if name != DEV_DATABASE:
+        return
+    if os.environ.get(_ENV_OVERRIDE) == "1":
+        return
+    raise RuntimeError(
+        f"拒绝在开发库 {DEV_DATABASE!r} 上执行 {what} —— 它会清空该表。\n"
+        f"  如果这确实是你要的(例如在重置本地环境),显式设置:\n"
+        f"      {_ENV_OVERRIDE}=1 <你的命令>\n"
+        f"  跑测试不需要这个:测试会自动使用独立的 chroma_test 库(见 conftest.py)。"
+    )
+
+
 def clear_all():
-    """清空表(测试用)。"""
+    """清空表(测试用)。在开发库上调用会被拒绝,见 _assert_not_dev_database。"""
+    _assert_not_dev_database("clear_all()")
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM luts")
@@ -184,7 +211,8 @@ def clear_all():
 
 
 def clear_users():
-    """清空用户表(测试用)。"""
+    """清空用户表(测试用)。在开发库上调用会被拒绝。"""
+    _assert_not_dev_database("clear_users()")
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM users")
@@ -379,7 +407,8 @@ def get_latest_generated_message(session_id: int, user_id: int):
 
 
 def clear_sessions():
-    """清空会话与消息表(测试用)。"""
+    """清空会话与消息表(测试用)。在开发库上调用会被拒绝。"""
+    _assert_not_dev_database("clear_sessions()")
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM messages")

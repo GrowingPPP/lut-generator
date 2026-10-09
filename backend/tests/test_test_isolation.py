@@ -161,3 +161,43 @@ def test_makefile_admin_target_avoids_shell_env_collision():
     recipe = "\n".join(block)
     assert "$(USER)" not in recipe, "不要用 $(USER) —— 会撞上 shell 环境变量"
     assert "$(NAME)" in recipe and "$(PW)" in recipe
+
+
+# ---- db 层防护:临时脚本也不该能删开发库 ----
+#
+# conftest 只保护 pytest。开发中大量使用临时脚本 / REPL 验证,那些路径不经过
+# pytest,曾经真的把开发库的用户删掉过。所以闸门必须放在真正执行删除的地方。
+
+def test_clear_helpers_refuse_on_dev_database(monkeypatch):
+    """在开发库上调用 clear_users/clear_all/clear_sessions 必须被拒绝。"""
+    from storage import db
+
+    monkeypatch.setitem(db._CONFIG, "database", DEV_DATABASE)
+    monkeypatch.delenv("CHROMA_ALLOW_CLEAR_DEV_DB", raising=False)
+    for fn in (db.clear_users, db.clear_all, db.clear_sessions):
+        with pytest.raises(RuntimeError, match="拒绝在开发库"):
+            fn()
+
+
+def test_clear_helpers_allow_explicit_override(monkeypatch):
+    """确实需要重置本地环境时,显式开关应放行(而不是完全堵死)。"""
+    from storage import db
+
+    monkeypatch.setitem(db._CONFIG, "database", DEV_DATABASE)
+    monkeypatch.setenv("CHROMA_ALLOW_CLEAR_DEV_DB", "1")
+    calls = []
+    monkeypatch.setattr(db, "_connect", lambda: (_ for _ in ()).throw(
+        RuntimeError("reached-db")))
+    for fn in (db.clear_users, db.clear_all, db.clear_sessions):
+        with pytest.raises(RuntimeError, match="reached-db"):
+            fn()          # 抛的是「已连到数据库」→ 说明没被闸门拦下
+        calls.append(fn.__name__)
+    assert len(calls) == 3
+
+
+def test_clear_helpers_work_on_test_database():
+    """测试库上必须照常工作,否则所有测试都跑不了。"""
+    from storage import db
+
+    assert db._CONFIG["database"] != DEV_DATABASE
+    db.clear_users()          # 不应抛错

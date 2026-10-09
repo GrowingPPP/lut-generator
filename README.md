@@ -211,6 +211,11 @@ make admin          # 创建/重置本地账号
 >
 > 想改测试库名:`CHROMA_TEST_DATABASE=别的名字 make test`。
 > 若把它配成 `chroma`,conftest 会报错退出而不是照常删数据。
+>
+> 另外 `db.clear_users()` / `clear_all()` / `clear_sessions()` 在开发库上会**直接
+> 拒绝执行**(抛 `RuntimeError`)—— 因为临时脚本、REPL 这些路径不经过 pytest,
+> 光靠 conftest 挡不住。确实需要重置本地环境时显式放行:
+> `CHROMA_ALLOW_CLEAR_DEV_DB=1 <你的命令>`。
 
 后端测试覆盖:LUT 引擎数学正确性、`.cube` 序列化、API CRUD、认证与限流、生成结果留档、会话流程与参数契约、tool calling 提取(含预算耗尽/入参非法等异常路径)、影调分区与分离色调、自动修图(测量/判定/渲染/编排/硬校验/API),以及**架构约束**的自动检查(分层依赖、参数集三方一致)。LLM 路径全部用桩,不打真实 API。
 
