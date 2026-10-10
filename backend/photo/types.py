@@ -98,6 +98,9 @@ class StepReport:
     stats_after: Optional[PhotoStats] = None
     rejections: List[str] = field(default_factory=list)
     usage: Dict[str, Any] = field(default_factory=dict)
+    params_before: Dict[str, Any] = field(default_factory=dict)
+    params_after: Dict[str, Any] = field(default_factory=dict)
+    purpose: Literal["correction", "style"] = "correction"
 
 
 @dataclass(slots=True)
@@ -109,7 +112,7 @@ class AutoGradeResult:
     issues: List[Issue] = field(default_factory=list)
     # 风格阶段:必须把「理解到什么」和「实际应用了什么」分开,否则用户会看到
     # 一个从未落到参数上的数字(风格被硬校验拒绝时曾出现这种情况)。
-    style_params: Optional[Dict[str, Any]] = None     # 模型从风格描述抽到的**提议**增量
+    style_params: Optional[Dict[str, Any]] = None     # 模型从风格描述抽到的绝对目标值
     style_applied: bool = False                       # 该提议是否通过硬校验并被应用
     style_applied_params: Optional[Dict[str, Any]] = None  # 真正生效的部分
     style_rejections: List[str] = field(default_factory=list)   # 被拒原因
@@ -119,3 +122,7 @@ class AutoGradeResult:
     review_skip_reason: Optional[str] = None
     degraded: bool = False                           # 未达标,已采用保守解
     usage: Dict[str, Any] = field(default_factory=dict)
+    goal_status: Literal["met", "partially_met", "unchanged", "not_evaluated"] = "not_evaluated"
+    execution_status: Literal["model", "rules_only", "failed", "skipped"] = "skipped"
+    blocked_reasons: List[str] = field(default_factory=list)
+    observations: List[Issue] = field(default_factory=list)

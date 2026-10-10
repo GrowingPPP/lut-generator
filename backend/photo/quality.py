@@ -211,6 +211,21 @@ def is_converged(stats: PhotoStats) -> bool:
     return len(diagnose(stats)) == 0
 
 
+def diagnose_for_goal(stats: PhotoStats, goal_mode: str = "natural") -> List[Issue]:
+    """观察是否与创作目标冲突;保留氛围不把全局亮度和冷暖归为缺陷。"""
+    if goal_mode == "style_only":
+        return []
+    issues = diagnose(stats)
+    if goal_mode == "preserve":
+        observations = {"under_exposed", "over_exposed", "color_cast_warm", "color_cast_cool"}
+        return [issue for issue in issues if issue.code not in observations]
+    return issues
+
+
+def is_goal_met(stats: PhotoStats, goal_mode: str = "natural") -> bool:
+    return not diagnose_for_goal(stats, goal_mode)
+
+
 def skin_shift(base: PhotoStats, after: PhotoStats) -> Tuple[float, float]:
     """肤色变化量,返回 (色相/饱和偏移, 明度漂移)。
 

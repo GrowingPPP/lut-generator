@@ -13,7 +13,8 @@ async function jsonFetch(url, opts = {}) {
     let detail = `请求失败: ${res.status}`
     try {
       const data = await res.json()
-      if (data.detail) detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+      if (data.detail)
+        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
     } catch {
       // 忽略非 JSON 错误体
     }
@@ -25,9 +26,17 @@ async function jsonFetch(url, opts = {}) {
 
 // 认证
 export const register = (username, password) =>
-  jsonFetch(`${BASE}/auth/register`, { method: 'POST', body: JSON.stringify({ username, password }), skip401Redirect: true })
+  jsonFetch(`${BASE}/auth/register`, {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+    skip401Redirect: true,
+  })
 export const login = (username, password) =>
-  jsonFetch(`${BASE}/auth/login`, { method: 'POST', body: JSON.stringify({ username, password }), skip401Redirect: true })
+  jsonFetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+    skip401Redirect: true,
+  })
 // 「我是谁」是一次探测:未登录时后端返回 401 是正常结果,不是错误。
 // 这里把 401 当作「未登录」(返回 null),并且**不派发 chroma:unauthorized** ——
 // 后者会清空刚建立的登录态。
@@ -56,15 +65,31 @@ export function cameraFileName(name) {
 
 // LUT
 export const listLuts = () => jsonFetch(`${BASE}/luts`)
-export const createLut = (name, description, params) =>
-  jsonFetch(`${BASE}/luts`, { method: 'POST', body: JSON.stringify({ name, description, params }) })
+export const createLut = (name, description, params, metadata = {}) =>
+  jsonFetch(`${BASE}/luts`, {
+    method: 'POST',
+    body: JSON.stringify({ name, description, params, ...metadata }),
+  })
 export const updateLut = (id, data) =>
   jsonFetch(`${BASE}/luts/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteLut = (id) => jsonFetch(`${BASE}/luts/${id}`, { method: 'DELETE' })
+export const listLutRevisions = (id) => jsonFetch(`${BASE}/luts/${id}/revisions`)
 
 // 下载 .cube(带 cookie)
-export async function downloadLut(id, mode = 'camera') {
-  const res = await fetch(`${BASE}/luts/${id}/download?mode=${mode}`, { credentials: 'include' })
+export async function downloadLut(id, mode = 'camera', target = 'neutral', params, revisionId) {
+  const res = await fetch(
+    `${BASE}/luts/${id}/download?mode=${mode}&target=${target}${revisionId ? `&revision_id=${revisionId}` : ''}`,
+    {
+      credentials: 'include',
+      ...(params
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode, target, params }),
+          }
+        : {}),
+    },
+  )
   if (res.status === 401) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
     throw new Error('登录已过期,请重新登录')
@@ -109,15 +134,18 @@ export const listMessages = (sessionId) => jsonFetch(`${BASE}/sessions/${session
 export const getGeneratedLut = (sessionId) => jsonFetch(`${BASE}/sessions/${sessionId}/generated`)
 
 // 聊天
-export const chatSession = (message, params, history, sessionId) =>
+export const chatSession = (message, params, history, sessionId, editing = {}) =>
   jsonFetch(`${BASE}/session/chat`, {
     method: 'POST',
-    body: JSON.stringify({ message, params, history, session_id: sessionId }),
+    body: JSON.stringify({ message, params, history, session_id: sessionId, ...editing }),
   })
 
 // 取最近一次自动修图报告(刷新或重开会话后重建面板用)。没有记录时返回 null。
-export async function getAutoReport() {
-  const res = await fetch(`${BASE}/auto/report`, { credentials: 'include' })
+export async function getAutoReport(workspaceId) {
+  const res = await fetch(
+    `${BASE}/auto/report${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`,
+    { credentials: 'include' },
+  )
   if (res.status === 401) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
     return null
@@ -129,16 +157,32 @@ export async function getAutoReport() {
 export const undoAutoGrade = () => jsonFetch(`${BASE}/auto/undo`, { method: 'POST' })
 
 // 自动修图。multipart 提交,base_params 必填(服务端拒绝默认值兜底)。
-export async function autoGrade({ file, params, style, useVision = true, maxRounds }) {
+export async function autoGrade({
+  file,
+  params,
+  style,
+  useVision = true,
+  maxRounds,
+  context,
+  workspace_id,
+  source_digest,
+  main_sample_id,
+}) {
   const fd = new FormData()
   fd.append('file', file)
   fd.append('base_params', JSON.stringify(params))
   if (style && style.trim()) fd.append('style', style.trim())
   fd.append('use_vision', String(useVision))
   if (maxRounds) fd.append('max_rounds', String(maxRounds))
+  if (context) fd.append('context', JSON.stringify(context))
+  if (workspace_id) fd.append('workspace_id', workspace_id)
+  if (source_digest) fd.append('source_digest', source_digest)
+  if (main_sample_id) fd.append('main_sample_id', main_sample_id)
   // 不要手写 Content-Type:让浏览器带上 multipart boundary
   const res = await fetch(`${BASE}/auto/grade`, {
-    method: 'POST', body: fd, credentials: 'include',
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
   })
   if (res.status === 401) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
@@ -148,11 +192,72 @@ export async function autoGrade({ file, params, style, useVision = true, maxRoun
     let detail = `修图失败: ${res.status}`
     try {
       const data = await res.json()
-      if (data.detail) detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+      if (data.detail)
+        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
     } catch {
       // 忽略非 JSON 错误体
     }
     throw new Error(detail)
+  }
+  return res.json()
+}
+
+export const listWorkspaces = () => jsonFetch(`${BASE}/workspaces`)
+export const createWorkspace = (data) =>
+  jsonFetch(`${BASE}/workspaces`, { method: 'POST', body: JSON.stringify(data) })
+export const updateWorkspace = (id, data) =>
+  jsonFetch(`${BASE}/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const listVersions = (id) => jsonFetch(`${BASE}/workspaces/${id}/versions`)
+export const createVersion = (id, data) =>
+  jsonFetch(`${BASE}/workspaces/${id}/versions`, { method: 'POST', body: JSON.stringify(data) })
+export const renameVersion = (workspaceId, id, name) =>
+  jsonFetch(`${BASE}/workspaces/${workspaceId}/versions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+export const deleteVersion = (workspaceId, id) =>
+  jsonFetch(`${BASE}/workspaces/${workspaceId}/versions/${id}`, { method: 'DELETE' })
+export async function applyLut(id, data, file) {
+  if (!file)
+    return jsonFetch(`${BASE}/luts/${id}/apply`, { method: 'POST', body: JSON.stringify(data) })
+  const fd = new FormData()
+  fd.append('body', JSON.stringify(data))
+  fd.append('file', file, 'main-preview.jpg')
+  const res = await fetch(`${BASE}/luts/${id}/apply-validated`, {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
+  })
+  if (res.status === 401) window.dispatchEvent(new Event('chroma:unauthorized'))
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}))
+    throw new Error(
+      typeof error.detail === 'string'
+        ? error.detail
+        : error.detail?.message || JSON.stringify(error.detail || `应用失败：${res.status}`),
+    )
+  }
+  return res.json()
+}
+
+export async function validateWorkspace(id, params, samples, files) {
+  const fd = new FormData()
+  fd.append('params', JSON.stringify(params))
+  fd.append('samples', JSON.stringify(samples))
+  files.forEach((file, i) => fd.append('files', file, `${samples[i].id}.jpg`))
+  const res = await fetch(`${BASE}/workspaces/${id}/validate`, {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
+  })
+  if (res.status === 401) window.dispatchEvent(new Event('chroma:unauthorized'))
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(
+      typeof data.detail === 'string'
+        ? data.detail
+        : JSON.stringify(data.detail || `验证失败：${res.status}`),
+    )
   }
   return res.json()
 }

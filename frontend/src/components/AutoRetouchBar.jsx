@@ -11,29 +11,71 @@ import { summarizeSteps } from '../lib/autoGrade.js'
  *  - 视觉复核的数据用途直接显示在界面上
  */
 export default function AutoRetouchBar({
-  file, params, onResult, onBeforeRun, hasRealPhoto, running, setRunning, setStatus,
+  file,
+  params,
+  onResult,
+  onBeforeRun,
+  hasRealPhoto,
+  running,
+  setRunning,
+  setStatus,
+  context,
+  workspaceId,
+  sourceDigest,
+  mainSampleId,
+  sampleName,
+  disabled,
 }) {
   const [style, setStyle] = useState('')
   const [useVision, setUseVision] = useState(true)
   const [steps, setSteps] = useState([])
 
-  const canRun = hasRealPhoto && !!file && !running
+  const canRun =
+    hasRealPhoto &&
+    !!file &&
+    !running &&
+    !disabled &&
+    (context?.goal_mode !== 'style_only' || !!style.trim())
 
   const run = async () => {
     if (!canRun) return
-    if (onBeforeRun) onBeforeRun(params)      // 保存快照供撤销
     setRunning(true)
     setStatus('')
     // 先摆出四步骨架,再随结果填充 —— 固定顺序让用户能预期
-    setSteps(summarizeSteps([], { hasStyle: !!style.trim(), hasVision: useVision }))
-    try {
-      const result = await autoGrade({ file, params, style, useVision })
-      setSteps(summarizeSteps(result.steps, {
+    setSteps(
+      summarizeSteps([], {
         hasStyle: !!style.trim(),
-        hasVision: useVision && !!result.review,
-      }))
-      onResult(result)
-      setStatus(result.degraded ? '已采用保守调整(未能完全达标)' : '已应用自动修图,可继续微调')
+        hasVision: useVision,
+        goalMode: context?.goal_mode,
+      }),
+    )
+    try {
+      const request = onBeforeRun ? await onBeforeRun(params) : null
+      if (request === false) return
+      const result = await autoGrade({
+        file,
+        params,
+        style,
+        useVision,
+        context,
+        workspace_id: workspaceId,
+        source_digest: sourceDigest,
+        main_sample_id: mainSampleId,
+      })
+      setSteps(
+        summarizeSteps(result.steps, {
+          hasStyle: !!style.trim(),
+          hasVision: useVision && !!result.review,
+          goalMode: context?.goal_mode,
+        }),
+      )
+      const applied = await onResult(result, request)
+      if (applied !== false)
+        setStatus(
+          result.blocked_reasons?.length
+            ? `已完成本次分析：${result.blocked_reasons.join('；')}`
+            : '已完成本次调整，可查看报告与撤销',
+        )
     } catch (e) {
       setStatus(e.message)
       setSteps([])
@@ -45,15 +87,23 @@ export default function AutoRetouchBar({
   return (
     <>
       <div className="auto-bar">
-        <span className="auto-bar-icon" aria-hidden="true">✦</span>
+        <span className="auto-bar-icon" aria-hidden="true">
+          ✦
+        </span>
         <input
           className="auto-style-input"
           value={style}
           onChange={(e) => setStyle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && canRun) run() }}
-          placeholder="风格(可选):日系清透一点"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && canRun) run()
+          }}
+          placeholder={
+            context?.goal_mode === 'style_only'
+              ? '请输入风格描述，例如日系清透一点'
+              : '风格(可选):日系清透一点'
+          }
           maxLength={200}
-          disabled={running}
+          disabled={running || disabled}
           aria-label="风格描述"
         />
         <button
@@ -78,7 +128,13 @@ export default function AutoRetouchBar({
           <span>视觉复核</span>
         </label>
       </div>
-      <p className="text-muted">开启视觉复核会将照片与调色预览发送给模型；关闭后只发送统计数据。上传的照片不会保存在本系统中。</p>
+      <p className="text-muted">
+        开启视觉复核会将照片与调色预览发送给模型；关闭后只发送统计数据。上传的照片不会保存在本系统中。
+      </p>
+      <p className="workspace-note">
+        AI 分析主样张：{sampleName || '尚未选择'}
+        {hasRealPhoto ? '' : ' · 请确认输入并绑定原文件'}
+      </p>
 
       {running && steps.length > 0 && (
         <div className="auto-progress" aria-live="polite">
@@ -86,17 +142,20 @@ export default function AutoRetouchBar({
               一直标成「进行中」),不如坦白说「正在分析,还不知道到哪一步」。
               四步清单仍有信息量:它告诉用户**将要**发生什么。 */}
           <div className="auto-progress-head">
-            <span className="auto-spinner" aria-hidden="true">◐</span>
+            <span className="auto-spinner" aria-hidden="true">
+              ◐
+            </span>
             <span>正在分析照片…</span>
           </div>
           <ol className="auto-progress-plan">
             {steps.map((s) => (
-              <li key={s.key} className={`auto-step ${s.state === 'skipped' ? 'skipped' : 'pending'}`}>
+              <li
+                key={s.key}
+                className={`auto-step ${s.state === 'skipped' ? 'skipped' : 'pending'}`}
+              >
                 <span className="auto-step-mark">{s.state === 'skipped' ? '–' : '·'}</span>
                 <span className="auto-step-title">{s.title}</span>
-                <span className="auto-step-detail">
-                  {s.state === 'skipped' ? s.detail : ''}
-                </span>
+                <span className="auto-step-detail">{s.state === 'skipped' ? s.detail : ''}</span>
               </li>
             ))}
           </ol>

@@ -17,9 +17,11 @@ from photo import quality as Q
 from photo import render as R
 from photo import stats as S
 from photo.types import AutoGradeResult, Issue, PhotoStats, StepReport
+from .editing import (application_reasons, context_prompt, normalize_context,
+                      parameter_snapshot, writable_fields)
 
 MAX_OPTIMIZE_ROUNDS = 2
-MAX_STYLE_ROUNDS = 1
+MAX_STYLE_ROUNDS = 2
 # 单次自动修图最多产出几轮 —— 防止 LLM 反复给出被拒提议时打转
 MAX_TOTAL_STEPS = 6
 
@@ -200,7 +202,9 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
                            max_rounds: int = 4,
                            stats_baseline: Optional[PhotoStats] = None,
                            skin_mask: Optional[np.ndarray] = None,
-                           budget_origin: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], PhotoStats]:
+                           budget_origin: Optional[Dict[str, Any]] = None,
+                           context: Optional[Dict[str, Any]] = None,
+                           blocked_reasons: Optional[List[str]] = None) -> Tuple[Dict[str, Any], PhotoStats]:
     """迭代保守解:每轮重测,直到收敛或用尽轮数。
 
     为什么需要迭代:温标单轮预算 1200K 只能修正约 0.01 的全局色偏,
@@ -216,20 +220,29 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
     stats_baseline 用于限幅(见 conservative_solution);不传则用当前图的测量。
     """
     params = clamp_params(dict(base))
+    ctx = normalize_context(context)
     stats = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
     baseline = stats_baseline if stats_baseline is not None else stats
     best_params, best_stats = params, stats
-    best_count = len(Q.diagnose(stats))
-    if best_count == 0:
+    best_count = len(Q.diagnose_for_goal(stats, ctx.goal_mode))
+    if best_count == 0 or not writable_fields(ctx, "rules"):
         return best_params, best_stats
 
     for _ in range(max_rounds):
         candidate = conservative_solution(best_stats, best_params, stats_ref=baseline,
-                                          budget_origin=budget_origin)
+                                          budget_origin=budget_origin, context=ctx)
         if candidate == best_params:
             break
+        reasons = application_reasons(params, candidate, ctx, "rules")
+        if not reasons:
+            _, reasons = check_hard_rules(best_stats, candidate, baseline, Q.limits_for(baseline),
+                                          best_params, img, skin_mask)
+        if reasons:
+            if blocked_reasons is not None:
+                blocked_reasons.extend(reasons)
+            break
         cand_stats = S.analyze(R.render_lut(R.lut_from_params(candidate), img), skin_mask)
-        cand_count = len(Q.diagnose(cand_stats))
+        cand_count = len(Q.diagnose_for_goal(cand_stats, ctx.goal_mode))
         if cand_count > best_count:
             break                      # 这一步会制造新问题,停下并保留当前最好结果
         best_params, best_stats, best_count = candidate, cand_stats, cand_count
@@ -241,7 +254,8 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
 def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
                           temp_budget_k: float = CONSERVATIVE_TEMP_BUDGET_K,
                           stats_ref: Optional[PhotoStats] = None,
-                          budget_origin: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          budget_origin: Optional[Dict[str, Any]] = None,
+                          context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """只做高置信度修正:曝光拉向目标区间中点 + 灰世界白平衡。
 
     曝光与白平衡的修正是**可计算的**(相机自动测光就是同一原理),不需要模型判断。
@@ -256,10 +270,13 @@ def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
     """
     ref = stats_ref if stats_ref is not None else stats
     params = dict(base)
+    allowed = writable_fields(context, "rules")
+    if not allowed:
+        return clamp_params(params)
     origin = budget_origin or {}
     lo, hi = Q.EXPOSURE_TARGET
     target = (lo + hi) / 2.0
-    if stats.lum_p50 > 1e-6:
+    if "exposure" in allowed and stats.lum_p50 > 1e-6:
         # p50 与线性域的曝光大致满足 p50' ≈ p50 * 2^ev → ev = log2(target/p50)
         ev = float(np.log2(max(target, 1e-6) / max(stats.lum_p50, 1e-6)) * 0.8)
         ev = float(np.clip(ev, -CONSERVATIVE_MAX_EXPOSURE_EV, CONSERVATIVE_MAX_EXPOSURE_EV))
@@ -270,7 +287,7 @@ def conservative_solution(stats: PhotoStats, base: Dict[str, Any],
         params["exposure"] = params.get("exposure", 0.0) + ev
 
     b_minus_r = stats.rgb_mean[2] - stats.rgb_mean[0]
-    if abs(b_minus_r) > Q.CAST_MIN_GLOBAL and stats.gray_world_dev > Q.GRAY_WORLD_WARN:
+    if "temp" in allowed and abs(b_minus_r) > Q.CAST_MIN_GLOBAL and stats.gray_world_dev > Q.GRAY_WORLD_WARN:
         # 符号:**正 temp = 更暖**(已实测确认),所以偏暖(B−R<0)必须给负 temp 降温。
         # 早期版本写成 +b_minus_r,把「更暖」当成修正,方向完全反了。
         k = (ref.rgb_mean[2] - ref.rgb_mean[0]) * CONSERVATIVE_TEMP_GAIN_PER_UNIT
@@ -304,8 +321,9 @@ CORRECTION_SYSTEM_PROMPT = (
 
 
 def _correction_prompt(stats: PhotoStats, issues: List[Issue], params: Dict[str, Any],
-                       rejections: List[str]) -> str:
-    parts = [f"照片统计:{json.dumps(S.to_prompt_dict(stats), ensure_ascii=False)}"]
+                       rejections: List[str], context: Optional[Dict[str, Any]] = None) -> str:
+    parts = [context_prompt(context, "correction"),
+             f"照片统计:{json.dumps(S.to_prompt_dict(stats), ensure_ascii=False)}"]
     if issues:
         parts.append("诊断出的问题:")
         parts.extend(f"  - {i.evidence}" for i in issues)
@@ -324,6 +342,8 @@ def propose_correction(
     rejections: Optional[List[str]] = None,
     model: Optional[str] = None,
     max_tokens: int = 2000,
+    *,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
     """让模型给出增量提议。返回 (增量字典, 诊断原话, usage)。
 
@@ -331,12 +351,14 @@ def propose_correction(
     """
     from .schemas import CORRECTION_TOOL_NAME, CorrectionProposal, build_correction_tool
 
+    if not writable_fields(context, "correction"):
+        return {}, "", {}
     resp = client.chat.completions.create(
         model=model or _default_model(),
         max_tokens=max_tokens,
         messages=[
             {"role": "system", "content": CORRECTION_SYSTEM_PROMPT},
-            {"role": "user", "content": _correction_prompt(stats, issues, params, rejections or [])},
+            {"role": "user", "content": _correction_prompt(stats, issues, params, rejections or [], context)},
         ],
         tools=[build_correction_tool()],
     )
@@ -383,7 +405,8 @@ VISION_REVIEW_PROMPT = (
 
 def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
                   style: Optional[str] = None,
-                  model: Optional[str] = None, max_tokens: int = 1200
+                  model: Optional[str] = None, max_tokens: int = 1200,
+                  *, context: Optional[Dict[str, Any]] = None,
                   ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
     """把原图与渲染图拼成一张发给模型做主观复检。
 
@@ -401,7 +424,7 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
     try:
         panel = R.side_by_side(before, after)
         url = R.to_data_url(panel)
-        text = VISION_REVIEW_PROMPT
+        text = VISION_REVIEW_PROMPT + "\n" + context_prompt(context, "review")
         if style:
             text += f"\n(用户指定的风格是「{style}」,请一并判断是否贴合)"
         resp = client.chat.completions.create(
@@ -436,169 +459,210 @@ def auto_grade(
     max_rounds: int = MAX_OPTIMIZE_ROUNDS,
     style_extractor: Optional[Callable[[Any, str, Dict[str, Any]], Dict[str, Any]]] = None,
     proposer: Optional[Callable[..., Tuple[Dict[str, Any], str, Dict[str, Any]]]] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> AutoGradeResult:
-    """跑完整的自动修图。
+    """基于当前参数执行目标允许的校正与风格,每个候选整体校验。
 
-    img: float32 HxWx3(0..1)
-    base_params: 增量基准(前端传当前参数)
-    style: 自然语言风格描述,None = 只优化
-    client: LLM 客户端;为 None 时跳过所有 LLM 步骤(只用保守解)
-    style_extractor: 接收客户端、风格描述及优化后的当前参数,返回绝对目标参数。
-    proposer: 可注入的提议函数(签名同 propose_correction),用于测试直接构造增量。
-
-    注意「两道闸门」的区别,测试时要分清:
-      - CorrectionProposal 的 schema 范围(如 exposure ±1)在**解析时**就拒掉越界提议,
-        表现为「模型未给出有效提议」;
-      - check_hard_rules 在**应用前**按图像实际效果拒绝,表现为 rejections 有内容。
-    注入 proposer 可以绕过第一道,专门验证第二道。
+    style_extractor 接收客户端、风格描述和当前参数,返回绝对目标值。
+    proposer 可注入提议,上下文与硬校验仍由编排层执行。
+    缺省上下文沿用自然校正;阶段来源保存真实生效的前后参数。
     """
-    base = clamp_params(dict(base_params))
+    from .schemas import ExtractResult
+
+    ctx = normalize_context(context)
+    base = clamp_params(parameter_snapshot(base_params))
     baseline_img = R.render_lut(R.lut_from_params(base), img)
-    # 肤色掩码只在基线图上取一次,之后所有轮次共用 —— 否则「肤色偏移」测的是
-    # 「这次哪些像素算皮肤」,而不是「同一个人被改了多少」。详见 check_hard_rules。
     skin_mask = S.skin_mask_of(baseline_img)
     stats0 = S.analyze(baseline_img, skin_mask)
-    issues = Q.diagnose(stats0)
+    observations = Q.diagnose(stats0)
+    issues = Q.diagnose_for_goal(stats0, ctx.goal_mode)
     limits = Q.limits_for(stats0)
-
-    steps: List[StepReport] = []
-    usage_total: Dict[str, Any] = {}
-    params = dict(base)
+    params = parameter_snapshot(base)
     stats_current = stats0
+    steps: List[StepReport] = []
+    blocked: List[str] = []
     rejections: List[str] = []
-    degraded = False
+    usage_total: Dict[str, Any] = {}
+    model_attempted = False
+    model_succeeded = False
+    model_failed = False
+    rules_applied = False
 
-    # ---------- 阶段 A:优化 ----------
-    if client is not None and issues:
+    def report(stage, round_no, diagnosis, proposed=None, applied=False,
+               reasons=None, before=None):
+        snapshot = parameter_snapshot(before if before is not None else params)
+        steps.append(StepReport(
+            stage=stage, round=round_no, diagnosis=diagnosis, proposed=proposed or {},
+            applied=applied, rejections=list(reasons or []),
+            stats_after=stats_current if applied else None,
+            params_before=snapshot, params_after=parameter_snapshot(params),
+            purpose="style" if stage == "style" else "correction",
+        ))
+
+    can_correct = bool(writable_fields(ctx, "correction"))
+    if issues and ctx.goal_mode != "style_only" and not can_correct:
+        blocked.append("基础校正的可调参数全部已锁定")
+    if client is not None and issues and can_correct:
         for round_no in range(1, max_rounds + 1):
             if len(steps) >= MAX_TOTAL_STEPS:
                 break
-            propose_fn = proposer or propose_correction
+            model_attempted = True
             try:
-                delta, diagnosis, usage = propose_fn(
-                    client, stats_current, Q.diagnose(stats_current), params, rejections)
+                if proposer is None:
+                    delta, diagnosis, usage = propose_correction(
+                        client, stats_current, Q.diagnose_for_goal(stats_current, ctx.goal_mode),
+                        parameter_snapshot(params), rejections, context=ctx)
+                else:
+                    delta, diagnosis, usage = proposer(
+                        client, stats_current, Q.diagnose_for_goal(stats_current, ctx.goal_mode),
+                        parameter_snapshot(params), list(rejections))
+                model_succeeded = True
             except Exception as exc:
-                # LLM 中途失败(超时 / 预算耗尽 / 5xx)不能让整个请求崩:
-                # 记录原因后退出优化循环,由下面的保守解兜底。
-                steps.append(StepReport(stage="optimize", round=round_no,
-                                        diagnosis=f"模型调用失败,已改用规则化保守调整({type(exc).__name__})",
-                                        applied=False))
+                model_failed = True
+                reason = f"模型调用失败({type(exc).__name__})"
+                blocked.append(reason)
+                report("optimize", round_no, reason)
                 break
             _accumulate_usage(usage_total, usage)
             if not delta:
-                steps.append(StepReport(stage="optimize", round=round_no,
-                                        diagnosis="模型未给出有效提议", applied=False))
+                report("optimize", round_no, "模型未给出有效提议")
                 break
-
-            candidate_raw = merge_params(params, delta)
-            ok, reasons = check_hard_rules(stats_current, candidate_raw, stats0, limits, params,
-                                           img, skin_mask)
-            if not ok:
+            before = parameter_snapshot(params)
+            candidate = merge_params(params, delta)
+            reasons = application_reasons(base, candidate, ctx, "correction")
+            if not reasons:
+                _, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
+                                              img, skin_mask)
+            if reasons:
                 rejections.extend(reasons)
-                steps.append(StepReport(stage="optimize", round=round_no, diagnosis=diagnosis,
-                                        proposed=delta, applied=False, rejections=reasons))
+                blocked.extend(reasons)
+                report("optimize", round_no, diagnosis, delta, reasons=reasons, before=before)
                 continue
-
-            params = clamp_params(candidate_raw)
+            params = clamp_params(candidate)
             stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
-            steps.append(StepReport(stage="optimize", round=round_no, diagnosis=diagnosis,
-                                    proposed=delta, applied=True, stats_after=stats_current))
-            if Q.is_converged(stats_current):
+            report("optimize", round_no, diagnosis, delta, params != before, before=before)
+            if Q.is_goal_met(stats_current, ctx.goal_mode):
                 break
 
-    elif issues:
-        # 无 LLM:连提议都做不了,直接进入兜底(阶段 C)。这里不重复调用。
-        pass
-
-    # ---------- 阶段 B:风格 ----------
-    style_params: Optional[Dict[str, Any]] = None
+    style_params = None
     style_applied = False
-    style_applied_params: Optional[Dict[str, Any]] = None
+    style_applied_params = None
     style_rejections: List[str] = []
-    if style and client is not None and style_extractor is not None:
-        try:
-            extracted = style_extractor(client, style, dict(params)) or {}
-        except Exception:
-            extracted = {}
-        extracted.pop("intent", None)
-        if extracted:
-            style_params = {k: v for k, v in extracted.items() if k not in READONLY_FIELDS}
-            style_delta = style_targets_to_delta(params, style_params)
-            candidate_raw = merge_params(params, style_delta)
-            # 风格**同样**要过硬校验 —— 否则「日系清透」会成为绕过后门的通道
-            ok, reasons = check_hard_rules(stats_current, candidate_raw, stats0, limits, params,
-                                           img, skin_mask)
-            if ok:
-                params = clamp_params(candidate_raw)
-                style_applied = True
-                style_applied_params = dict(style_params)
+    can_style = bool(writable_fields(ctx, "style"))
+    if ctx.goal_mode == "style_only" and not style:
+        blocked.append("只调整风格模式需要提供风格描述")
+    if style and not can_style:
+        blocked.append("风格阶段的可调参数全部已锁定")
+    if style and client is not None and style_extractor is not None and can_style:
+        for round_no in range(1, MAX_STYLE_ROUNDS + 1):
+            if len(steps) >= MAX_TOTAL_STEPS:
+                break
+            model_attempted = True
+            text = style
+            if style_rejections:
+                text += "\n上一轮未应用的原因:" + ";".join(style_rejections) + "。请重新提出合法目标。"
+            try:
+                extracted = dict(style_extractor(client, text, parameter_snapshot(params)) or {})
+                if not extracted:
+                    report("style", round_no, "模型未给出有效风格提议")
+                    break
+                extracted = ExtractResult.model_validate(
+                    {"intent": "describe", **extracted}).model_dump(exclude_none=True)
+                extracted.pop("intent", None)
+                model_succeeded = True
+            except Exception as exc:
+                model_failed = True
+                reason = f"风格提取失败({type(exc).__name__})"
+                style_rejections = [reason]
+                blocked.append(reason)
+                report("style", round_no, reason, reasons=style_rejections)
+                continue
+            if not extracted:
+                break
+            style_params = {key: value for key, value in extracted.items()
+                            if key not in READONLY_FIELDS}
+            before = parameter_snapshot(params)
+            candidate = {**params, **extracted}
+            reasons = application_reasons(base, candidate, ctx, "style")
+            if not reasons:
+                _, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
+                                              img, skin_mask)
+            if reasons:
+                style_rejections = reasons
+                blocked.extend(reasons)
+                report("style", round_no, f"风格:{style}", style_params,
+                       reasons=reasons, before=before)
+                continue
+            params = clamp_params(candidate)
+            style_applied = True
+            style_applied_params = dict(style_params)
+            style_rejections = []
+            stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
+            report("style", round_no, f"风格:{style}", style_params,
+                   params != before, before=before)
+            break
+
+    # 仅在没有生效提议时应用规则,避免在风格成果上再次补偿。
+    needs_rules = not any(step.applied for step in steps) and not Q.is_goal_met(stats_current, ctx.goal_mode)
+    if ctx.goal_mode == "natural" and needs_rules:
+        if writable_fields(ctx, "rules"):
+            before = parameter_snapshot(params)
+            params, stats_current = conservative_iterative(
+                img, params, stats_baseline=stats0, skin_mask=skin_mask,
+                budget_origin=base, context=ctx, blocked_reasons=blocked)
+            reasons = application_reasons(base, params, ctx, "rules")
+            if reasons:
+                blocked.extend(reasons)
+                params = before
                 stats_current = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
-                steps.append(StepReport(stage="style", round=1,
-                                        diagnosis=f"风格:{style}", proposed=style_params,
-                                        applied=True, stats_after=stats_current))
-            else:
-                # 被拒时**不能**把提议当成结果:style_applied 保持 False、
-                # style_applied_params 保持空,让前端如实呈现「没应用」。
-                style_rejections = list(reasons)
-                steps.append(StepReport(stage="style", round=1,
-                                        diagnosis=f"风格:{style}", proposed=style_params,
-                                        applied=False, rejections=reasons))
+            rules_applied = params != before
+            if rules_applied:
+                diagnosis = "未启用模型,采用规则化保守调整" if client is None else "模型提议未生效,采用规则化保守调整"
+                report("optimize", 1 if client is None else 0, diagnosis, applied=True, before=before)
+        elif set(ctx.locked_fields) & {"exposure", "temp"}:
+            blocked.append("规则兜底的可调参数已锁定")
 
-    # ---------- 阶段 C:兜底 ----------
-    #
-    # **必须放在所有阶段之后**。保守解自己就是一套完整的「曝光拉向目标 + 灰世界
-    # 白平衡」修正,若在还有阶段没跑完时就启用,它会对同一个目标重复补偿。
-    #
-    # 这里踩过两次,都是同一种错的形状:
-    #   1. 只看 optimize 阶段是否应用过 → 「优化全被拒 + 风格随后应用」时重复补偿
-    #   2. 即使改成看全部 steps,只要兜底仍发生在**风格之前**,它看到的 steps 里
-    #      就没有风格那一步 —— 实测风格给 exposure 0.15,兜底又加 0.6,最终 0.75,
-    #      与「已应用 0.15」的标注自相矛盾。
-    # 把兜底移到最后,`applied_any` 才真正反映「这一轮有没有人改过参数」。
-    if client is None and issues:
-        params, stats_current = conservative_iterative(
-            img, base, stats_baseline=stats0, skin_mask=skin_mask, budget_origin=base)
-        if params != base:
-            steps.append(StepReport(stage="optimize", round=1,
-                                    diagnosis="未启用模型,采用规则化保守调整",
-                                    applied=True, stats_after=stats_current))
-    elif not any(st.applied for st in steps) and not Q.is_converged(stats_current):
-        params, stats_current = conservative_iterative(
-            img, params, stats_baseline=stats0, skin_mask=skin_mask, budget_origin=base)
-        if any(abs(params.get(k, 0) - base.get(k, 0)) > 1e-9
-               for k in ("exposure", "temp") if isinstance(params.get(k), (int, float))):
-            steps.append(StepReport(stage="optimize", round=0,
-                                    diagnosis="模型提议均未通过校验,采用规则化保守调整",
-                                    applied=True, stats_after=stats_current))
-    degraded = not Q.is_converged(stats_current)
-
-    # ---------- 视觉复检 ----------
-    review: Optional[str] = None
-    review_skip_reason: Optional[str] = None
-    # 原因语义必须精确,顺序也有讲究:
-    #   no_client 是「没配置模型」,disabled 是「用户主动关闭」—— 两者不能混,
-    #   否则用户会以为是自己关的。所以先判 no_client,再判 use_vision。
+    review = None
+    review_skip_reason = None
     if client is None:
         review_skip_reason = "no_client"
     elif not use_vision:
         review_skip_reason = "disabled"
+    elif ctx.goal_mode == "style_only" and not style:
+        review_skip_reason = "not_requested"
+    elif not can_correct and not (style and can_style):
+        review_skip_reason = "locked"
     else:
         after_img = R.render_lut(R.lut_from_params(params), img)
-        review, usage, review_skip_reason = vision_review(client, baseline_img, after_img, style=style)
+        review, usage, review_skip_reason = vision_review(
+            client, baseline_img, after_img, style=style, context=ctx)
         _accumulate_usage(usage_total, usage)
 
+    changed = params != base
+    if ctx.goal_mode == "style_only":
+        goal_status = "met" if style_applied else "unchanged" if style else "not_evaluated"
+    elif Q.is_goal_met(stats_current, ctx.goal_mode) and (not style or style_applied):
+        goal_status = "met"
+    else:
+        goal_status = "partially_met" if changed else "unchanged"
+    if rules_applied:
+        execution_status = "rules_only"
+    elif model_succeeded:
+        execution_status = "model"
+    elif model_failed:
+        execution_status = "failed"
+    elif model_attempted:
+        execution_status = "model"
+    else:
+        execution_status = "skipped"
     return AutoGradeResult(
-        params=params,
-        steps=steps,
-        issues=issues,
-        style_params=style_params,
-        style_applied=style_applied,
-        style_applied_params=style_applied_params,
-        style_rejections=style_rejections,
-        review=review,
-        review_skip_reason=review_skip_reason,
-        degraded=degraded,
-        usage=usage_total,
+        params=params, steps=steps, issues=issues, observations=observations,
+        style_params=style_params, style_applied=style_applied,
+        style_applied_params=style_applied_params, style_rejections=style_rejections,
+        review=review, review_skip_reason=review_skip_reason,
+        degraded=goal_status in {"partially_met", "unchanged"}, usage=usage_total,
+        goal_status=goal_status, execution_status=execution_status,
+        blocked_reasons=list(dict.fromkeys(blocked)),
     )
 
 

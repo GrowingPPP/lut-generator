@@ -1,12 +1,19 @@
 // 「我的 LUT」:列表、缩略图、预览、改名、下载、删除。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { deleteLut, downloadLut, listLuts, updateLut } from '../lib/api.js'
+import { deleteLut, downloadLut, listLuts, updateLut, listLutRevisions } from '../lib/api.js'
 import { makeThumb } from '../lib/preview.js'
 
-async function downloadAndSave(id, mode) {
+async function downloadAndSave(id, mode, portable) {
   try {
-    const { blob, name } = await downloadLut(id, mode)
+    if (
+      portable &&
+      !window.confirm(
+        '将风格应用于相同输入基准的中性参数并导出一个 LUT？若要叠加当前校正，请先载入工作区，再直接下载当前完整效果。',
+      )
+    )
+      return
+    const { blob, name } = await downloadLut(id, mode, portable ? 'neutral' : 'saved')
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -23,6 +30,8 @@ export default function LibraryView({ onPreview }) {
   const [error, setError] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editName, setEditName] = useState('')
+  const [revisionAsset, setRevisionAsset] = useState(null)
+  const [revisions, setRevisions] = useState([])
 
   const thumbs = useMemo(() => {
     const map = {}
@@ -50,7 +59,9 @@ export default function LibraryView({ onPreview }) {
     try {
       await deleteLut(id)
       load()
-    } catch (e) { setError(`删除失败:${e.message}`) }
+    } catch (e) {
+      setError(`删除失败:${e.message}`)
+    }
   }
 
   const startEdit = (lut) => {
@@ -59,9 +70,21 @@ export default function LibraryView({ onPreview }) {
   }
 
   const saveEdit = async (id) => {
-    await updateLut(id, { name: editName.trim() || '未命名 LUT' })
-    setEditingId(null)
-    load()
+    try {
+      await updateLut(id, { name: editName.trim() || '未命名 LUT' })
+      setEditingId(null)
+      load()
+    } catch (e) {
+      setError(`改名失败:${e.message}`)
+    }
+  }
+  const openRevisions = async (lut) => {
+    try {
+      setRevisions(await listLutRevisions(lut.id))
+      setRevisionAsset(lut)
+    } catch (e) {
+      setError(`加载修订失败:${e.message}`)
+    }
   }
 
   return (
@@ -91,15 +114,32 @@ export default function LibraryView({ onPreview }) {
               ) : (
                 <h3>{lut.name}</h3>
               )}
-              <p className="card-desc">{lut.description || '—'}</p>
+              <p className="card-desc">
+                {lut.kind === 'portable_style' ? '可复用风格 · 相对追加' : '完整效果 · 替换参数'}
+                {lut.revision_id ? ` · 修订 ${lut.revision_id}` : ''}
+              </p>
+              {lut.description && <p className="card-desc">{lut.description}</p>}
               <div className="card-actions">
                 <button className="btn-primary" onClick={() => onPreview(lut)}>
-                  预览
+                  {lut.kind === 'portable_style' ? '预览并追加风格' : '预览并载入完整效果'}
                 </button>
-                <button className="btn" onClick={() => downloadAndSave(lut.id, 'camera')}>机内版</button>
-                <button className="btn" onClick={() => downloadAndSave(lut.id, 'software')}>后期版</button>
+                <button
+                  className="btn"
+                  onClick={() => downloadAndSave(lut.id, 'camera', lut.kind === 'portable_style')}
+                >
+                  机内版
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => downloadAndSave(lut.id, 'software', lut.kind === 'portable_style')}
+                >
+                  后期版
+                </button>
                 <button className="btn" onClick={() => startEdit(lut)}>
                   编辑
+                </button>
+                <button className="btn" onClick={() => openRevisions(lut)}>
+                  修订历史
                 </button>
                 <button className="btn-danger" onClick={() => remove(lut.id)}>
                   删除
@@ -112,6 +152,48 @@ export default function LibraryView({ onPreview }) {
           <div className="empty">还没有 LUT,去「生成」页创建一个。</div>
         )}
       </div>
+      {revisionAsset && (
+        <div className="modal-backdrop">
+          <section
+            className="workspace-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="资产修订历史"
+          >
+            <div className="section-heading">
+              <h2>「{revisionAsset.name}」的修订</h2>
+              <button className="btn" onClick={() => setRevisionAsset(null)}>
+                关闭
+              </button>
+            </div>
+            <p className="workspace-note">
+              查看历史修订不会覆盖资产或当前草稿；载入前会显示候选预览。
+            </p>
+            {revisions.map((revision) => (
+              <div className="version-row" key={revision.revision_id}>
+                <div>
+                  <strong>{revision.name}</strong>
+                  <small>
+                    修订 {revision.revision_number} · {revision.created_at}
+                  </small>
+                </div>
+                <button
+                  className="btn"
+                  onClick={() =>
+                    onPreview({
+                      ...revision,
+                      id: revisionAsset.id,
+                      revision_id: revision.revision_id,
+                    })
+                  }
+                >
+                  预览此修订
+                </button>
+              </div>
+            ))}
+          </section>
+        </div>
+      )}
     </div>
   )
 }

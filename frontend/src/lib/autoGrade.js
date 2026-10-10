@@ -85,7 +85,7 @@ export function reviewSkipText(reason) {
 }
 
 // 服务端返回的 steps → UI 的中文步骤列表(顺序固定为 4 步)
-export function summarizeSteps(steps, { hasStyle, hasVision }) {
+export function summarizeSteps(steps, { hasStyle, hasVision, goalMode }) {
   const out = []
   const list = steps || []
 
@@ -105,8 +105,8 @@ export function summarizeSteps(steps, { hasStyle, hasVision }) {
   out.push({
     key: 'optimize',
     title: '修正影调与色彩',
-    detail: parts.join(' · ') || (measure ? '无需修正' : ''),
-    state: 'done',
+    detail: goalMode === 'style_only' ? '只调整风格，跳过基础校正' : parts.join(' · ') || (measure ? '无需修正' : ''),
+    state: goalMode === 'style_only' ? 'skipped' : 'done',
   })
 
   const styleStep = list.find((s) => s.stage === 'style')
@@ -162,6 +162,12 @@ export function diffParams(before, after) {
 export function gradeHeadline(result) {
   if (!result) return ''
   const n = (result.steps || []).filter((s) => s.applied).length
+  if (result.goal_status) {
+    if (result.execution_status === 'failed') return n ? `已应用 ${n} 步调整，本次执行未完全完成` : '本次执行未完成，参数保持原状'
+    if (result.goal_status === 'partially_met') return n ? `已应用 ${n} 步调整，目标部分完成` : '目标尚未完全完成，本次未改变参数'
+    if (result.goal_status === 'met') return n ? `已应用 ${n} 步调整，满足本次可测目标` : '当前参数已满足本次可测目标'
+    return n ? `已应用 ${n} 步调整` : '本次未改变参数'
+  }
   // 降级时**不重复**警示条的措辞(否则同一句话在报告里出现两遍),
   // 这里只说「做了多少」,「没完全达标」交给上方警示条表达。
   if (result.degraded) {

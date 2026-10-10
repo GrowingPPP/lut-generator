@@ -13,6 +13,7 @@ from openai import OpenAI
 from pydantic import ValidationError
 
 from .schemas import TOOL_NAME, ExtractResult, build_tool_schema
+from .editing import context_prompt, normalize_context, writable_fields
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
@@ -117,8 +118,9 @@ class BudgetExhaustedError(RuntimeError):
     """thinking 阶段耗尽 max_tokens,模型没来得及产出 tool_call。"""
 
 
-def _user_prompt(message: str, params: dict | None, history: list | None) -> str:
-    parts = []
+def _user_prompt(message: str, params: dict | None, history: list | None,
+                 context: dict | None = None) -> str:
+    parts = [context_prompt(context, "chat")]
     if params:
         parts.append(f"当前参数:{params}")
     if history:
@@ -132,6 +134,8 @@ def extract_result(
     message: str,
     params: dict | None = None,
     history: list | None = None,
+    *,
+    context: dict | None = None,
 ) -> dict:
     """分析用户消息:判断意图 + 提取调色参数。返回非空字段的 dict(含 intent)。
 
@@ -140,12 +144,15 @@ def extract_result(
 
     params 为当前参数,history 为最近几轮对话。
     """
+    ctx = normalize_context(context)
+    if not writable_fields(ctx, "chat"):
+        return {}
     resp = client.chat.completions.create(
         model=_model_name(),
         max_tokens=_max_tokens(),
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _user_prompt(message, params, history)},
+            {"role": "user", "content": _user_prompt(message, params, history, ctx)},
         ],
         # 注意:不要传 tool_choice。服务端对 "required"/指定函数一律 400:
         #   "Thinking mode does not support this tool_choice"

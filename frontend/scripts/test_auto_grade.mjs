@@ -199,3 +199,14 @@ test('REVIEW_SKIP_TEXT 覆盖后端会返回的全部原因', () => {
   // 与 agent/auto.py 的 review_skip_reason 取值保持同步
   assert.deepEqual(Object.keys(REVIEW_SKIP_TEXT).sort(), ['disabled', 'failed', 'no_client'])
 })
+
+test('goal-aware headline does not call blocked or skipped adjustments good photo quality', () => {
+  assert.equal(gradeHeadline({ goal_status: 'partially_met', execution_status: 'skipped', steps: [] }), '目标尚未完全完成，本次未改变参数')
+  assert.equal(gradeHeadline({ goal_status: 'not_evaluated', execution_status: 'skipped', steps: [] }), '本次未改变参数')
+  assert.equal(gradeHeadline({ goal_status: 'unchanged', execution_status: 'failed', steps: [] }), '本次执行未完成，参数保持原状')
+})
+
+test('style-only progress explicitly skips basic correction', () => {
+  const items = summarizeSteps([], { hasStyle: true, hasVision: false, goalMode: 'style_only' })
+  assert.equal(items.find(item => item.key === 'optimize').state, 'skipped')
+})

@@ -8,10 +8,18 @@ import { generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
 import { makeTestImage } from '../lib/preview.js'
 
-export default function usePreview(originalRef, gradedRef, params, displayMode) {
+export default function usePreview(
+  originalRef,
+  gradedRef,
+  params,
+  displayMode,
+  sourceImage,
+  enabled = true,
+) {
   const rendererRef = useRef(null)
   const imageRef = useRef(null)
   const paramsRef = useRef(params)
+  const splitRef = useRef(0.5)
   paramsRef.current = params
 
   const drawOriginal = useCallback(
@@ -32,12 +40,13 @@ export default function usePreview(originalRef, gradedRef, params, displayMode) 
 
   // 重建 renderer:挂载 + 展示形式切换(canvas 会重挂载)
   useEffect(() => {
-    const img = imageRef.current
+    const img = sourceImage || imageRef.current
     const canvas = gradedRef.current
-    if (!img || !canvas) return
+    if (!img || !canvas || !enabled) return
     const renderer = new LUTRenderer(canvas)
     renderer.setImage(img)
     renderer.setSplitMode(displayMode === 'slider')
+    renderer.setSplit(splitRef.current)
     const { data, size } = generateLUT(paramsRef.current, 33)
     renderer.setLUT(data, size)
     renderer.render()
@@ -47,7 +56,7 @@ export default function usePreview(originalRef, gradedRef, params, displayMode) 
       renderer.dispose()
       rendererRef.current = null
     }
-  }, [displayMode, gradedRef, drawOriginal])
+  }, [displayMode, gradedRef, drawOriginal, sourceImage, enabled])
 
   // 参数变化 → 重新生成 LUT(rAF 合并,拖滑杆同一帧只烘一次)
   useEffect(() => {
@@ -62,6 +71,7 @@ export default function usePreview(originalRef, gradedRef, params, displayMode) 
   }, [params])
 
   const setSplit = useCallback((x) => {
+    splitRef.current = x
     const renderer = rendererRef.current
     if (!renderer) return
     renderer.setSplit(x)

@@ -8,6 +8,7 @@ from typing import Callable, TypedDict
 
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from .schemas import STYLE_FIELDS
+from .editing import application_reasons, complete_params, normalize_context, writable_fields
 
 CLARIFY_REPLY = "先说说想要什么效果吧,比如色调(暖/冷)、对比强弱、饱和度、有没有胶片感。"
 
@@ -80,12 +81,14 @@ _NODES: dict[str, Callable[[AgentState], dict]] = {
 }
 
 
-def run_agent(extract_fn: Callable[[str], dict], message: str, params: dict | None = None) -> dict:
+def run_agent(extract_fn: Callable[[str], dict], message: str, params: dict | None = None,
+              *, context: dict | None = None) -> dict:
     """跑一轮:提取意图与参数 → 路由 → 执行对应节点。
 
     extract_fn 负责「消息 → 结构化参数」,由调用方注入(真实 LLM 或测试桩)。
     返回值含 reply / done / params / route / cube_text,与重构前保持一致。
     """
+    ctx = normalize_context(context)
     initial: AgentState = {
         "message": message,
         "params": params or {},
@@ -94,11 +97,28 @@ def run_agent(extract_fn: Callable[[str], dict], message: str, params: dict | No
         "cube_text": "",
         "done": False,
     }
-    extracted = extract_fn(message) or {}
+    metadata = {"goal_status": "not_evaluated", "execution_status": "skipped",
+                "blocked_reasons": [], "observations": [], "steps": []}
+    if not writable_fields(ctx, "chat"):
+        return {**initial, **metadata, "route": "blocked",
+                "reply": "全部参数已锁定,请解除需要调整项目的保护后再试。",
+                "goal_status": "unchanged", "blocked_reasons": ["全部参数已锁定"]}
+    extracted = dict(extract_fn(message) or {})
     intent = extracted.pop("intent", "describe")
     # 本轮提取的参数叠加在已有参数之上,未提及的字段保持不动
     merged = {**initial["params"], **extracted}
+    reasons = application_reasons(initial["params"], merged, ctx, "chat")
+    if reasons:
+        return {**initial, **metadata, "route": "blocked", "goal_status": "unchanged",
+                "execution_status": "model", "blocked_reasons": reasons,
+                "reply": "本次参数提议未应用:" + ";".join(reasons)}
     route = route_of(intent, merged)
     state: AgentState = {**initial, "params": merged, "route": route}
     state.update(_NODES[route](state))
+    before, after = complete_params(initial["params"]), complete_params(merged)
+    metadata["execution_status"] = "model"
+    if before != after:
+        metadata["steps"] = [{"stage": "chat", "purpose": "unclassified", "applied": True,
+                              "params_before": before, "params_after": after}]
+    state.update(metadata)
     return state

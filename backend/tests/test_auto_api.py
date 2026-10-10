@@ -195,7 +195,7 @@ def test_style_extraction_prompt_uses_optimized_params(auth, monkeypatch):
     monkeypatch.setattr(auto, "check_hard_rules", lambda *args, **kwargs: (True, []))
     captured = {}
 
-    def extract_result(client, message, params=None, history=None):
+    def extract_result(client, message, params=None, history=None, *, context=None):
         assert client is llm_client
         assert message == "曝光再增加 0.1 EV"
         captured.update(params)
@@ -265,6 +265,20 @@ def test_result_is_persisted_as_message(auth):
     assert msgs, "应有留存消息"
     assert "自动修图" in msgs[-1]["content"]
     assert msgs[-1]["params_json"]
+
+
+def test_locked_auto_message_reports_skip_without_claiming_adjustment(auth):
+    context = {"goal_mode": "preserve", "locked_fields": list(DEFAULT_PARAMS)}
+    response = _post(auth, context=json.dumps(context), use_vision=False)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["params"] == DEFAULT_PARAMS
+    assert body["execution_status"] == "skipped"
+    user = db.get_user_by_username("u1")
+    content = db.list_messages(body["session_id"], user["id"])[-1]["content"]
+    assert "已跳过" in content
+    assert "保留原参数" in content
+    assert "已采用保守调整" not in content
 
 
 def test_image_bytes_are_never_persisted(auth):

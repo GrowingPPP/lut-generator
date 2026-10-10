@@ -1,5 +1,7 @@
 """LUT 元数据存储(MySQL)。连接信息从环境变量或 .env 读取,缺省用本地默认值。"""
 import os
+import json
+from uuid import uuid4
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,6 +151,41 @@ def init_db():
             except pymysql.err.OperationalError as e:
                 if e.args[0] not in (1060,):
                     raise
+            for ddl in (
+                "ALTER TABLE luts ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT 'full_snapshot'",
+                "ALTER TABLE luts ADD COLUMN recipe_json MEDIUMTEXT",
+                "ALTER TABLE luts ADD COLUMN input_contract_json TEXT",
+                "ALTER TABLE luts ADD COLUMN source_json MEDIUMTEXT",
+                "ALTER TABLE luts ADD COLUMN workspace_id CHAR(36)",
+                "ALTER TABLE luts ADD COLUMN revision_id BIGINT",
+            ):
+                try:
+                    cur.execute(ddl)
+                except pymysql.err.OperationalError as exc:
+                    if exc.args[0] != 1060:
+                        raise
+            cur.execute("""CREATE TABLE IF NOT EXISTS workspaces (
+                id CHAR(36) PRIMARY KEY, user_id INT NOT NULL, session_id INT,
+                name VARCHAR(255) NOT NULL, created_at VARCHAR(64) NOT NULL,
+                updated_at VARCHAR(64) NOT NULL, INDEX idx_workspace_user (user_id),
+                INDEX idx_workspace_session (session_id)
+            ) CHARACTER SET utf8mb4""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS workspace_versions (
+                id CHAR(36) PRIMARY KEY, user_id INT NOT NULL, workspace_id CHAR(36) NOT NULL,
+                name VARCHAR(255) NOT NULL, snapshot_json MEDIUMTEXT NOT NULL,
+                created_at VARCHAR(64) NOT NULL, INDEX idx_version_workspace (workspace_id, user_id)
+            ) CHARACTER SET utf8mb4""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS lut_revisions (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, lut_id INT NOT NULL,
+                revision_number INT NOT NULL, snapshot_json MEDIUMTEXT NOT NULL,
+                created_at VARCHAR(64) NOT NULL, UNIQUE KEY idx_lut_revision (lut_id, revision_number),
+                INDEX idx_revision_user (user_id)
+            ) CHARACTER SET utf8mb4""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS workspace_reports (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, workspace_id CHAR(36) NOT NULL,
+                kind VARCHAR(32) NOT NULL, payload_json MEDIUMTEXT NOT NULL,
+                created_at VARCHAR(64) NOT NULL, INDEX idx_report_workspace (workspace_id, user_id, kind)
+            ) CHARACTER SET utf8mb4""")
             cur.execute(
                 "UPDATE messages m JOIN sessions s ON m.session_id = s.id "
                 "SET m.user_id = s.user_id WHERE m.user_id = 0"
@@ -156,17 +193,41 @@ def init_db():
         conn.commit()
 
 
-def create_lut(user_id: int, name: str, description: str, params_json: str) -> int:
+def _lut_snapshot(record):
+    return {"name": record["name"], "description": record["description"],
+            "params": json.loads(record["params_json"]),
+            "kind": record.get("kind") or "full_snapshot",
+            "recipe": json.loads(record["recipe_json"]) if record.get("recipe_json") else None,
+            "input_contract": json.loads(record["input_contract_json"]) if record.get("input_contract_json") else None,
+            "source": json.loads(record["source_json"]) if record.get("source_json") else None,
+            "workspace_id": record.get("workspace_id")}
+
+
+def _append_lut_revision(cur, record, number):
+    cur.execute("INSERT INTO lut_revisions (user_id,lut_id,revision_number,snapshot_json,created_at) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (record["user_id"], record["id"], number,
+                 json.dumps(_lut_snapshot(record), ensure_ascii=False, allow_nan=False),
+                 datetime.now(timezone.utc).isoformat()))
+    return cur.lastrowid
+
+
+def create_lut(user_id: int, name: str, description: str, params_json: str, *,
+               kind="full_snapshot", recipe_json=None, input_contract_json=None,
+               source_json=None, workspace_id=None) -> int:
     created_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO luts (user_id, name, description, params_json, created_at) VALUES (%s, %s, %s, %s, %s)",
-                (user_id, name, description, params_json, created_at),
-            )
+            cur.execute("INSERT INTO luts (user_id,name,description,params_json,created_at,kind,recipe_json,"
+                        "input_contract_json,source_json,workspace_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (user_id,name,description,params_json,created_at,kind,recipe_json,
+                         input_contract_json,source_json,workspace_id))
             last_id = cur.lastrowid
+            cur.execute("SELECT * FROM luts WHERE id=%s", (last_id,))
+            revision_id = _append_lut_revision(cur, cur.fetchone(), 1)
+            cur.execute("UPDATE luts SET revision_id=%s WHERE id=%s", (revision_id,last_id))
         conn.commit()
-        return last_id
+    return last_id
 
 
 def list_luts(user_id: int):
@@ -183,15 +244,60 @@ def get_lut(lut_id: int, user_id: int):
             return cur.fetchone()
 
 
-def update_lut(lut_id: int, user_id: int, name: str, description: str, params_json: str):
+class RevisionConflictError(ValueError):
+    def __init__(self,current_revision_id):
+        super().__init__("资产已被更新,请重新读取当前修订")
+        self.current_revision_id = current_revision_id
+
+
+def update_lut(lut_id: int,user_id: int,name=None,description=None,params_json=None,*,
+               build_content=None,expected_revision_id=None,**metadata):
+    """行锁内合并缺省字段并生成不可变修订,返回本事务的快照。"""
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE luts SET name = %s, description = %s, params_json = %s WHERE id = %s AND user_id = %s",
-                (name, description, params_json, lut_id, user_id),
-            )
+            cur.execute("SELECT * FROM luts WHERE id=%s AND user_id=%s FOR UPDATE",(lut_id,user_id))
+            record = cur.fetchone()
+            if not record:
+                return None
+            if expected_revision_id is not None and record["revision_id"] != expected_revision_id:
+                raise RevisionConflictError(record["revision_id"])
+            if build_content is not None:
+                params_json,metadata = build_content(dict(record))
+            changes = {key:value for key,value in {"name":name,"description":description,
+                       "params_json":params_json}.items() if value is not None}
+            changes.update({key:value for key,value in metadata.items()
+                            if key in {"kind","recipe_json","input_contract_json","source_json","workspace_id"}})
+            cur.execute("SELECT MAX(revision_number) AS n FROM lut_revisions WHERE lut_id=%s",(lut_id,))
+            number = cur.fetchone()["n"] or 0
+            if not number:
+                _append_lut_revision(cur,record,1)
+                number = 1
+            record.update(changes)
+            cur.execute("UPDATE luts SET name=%s,description=%s,params_json=%s,kind=%s,recipe_json=%s,"
+                        "input_contract_json=%s,source_json=%s,workspace_id=%s WHERE id=%s AND user_id=%s",
+                        (record["name"],record["description"],record["params_json"],record["kind"],record["recipe_json"],
+                         record["input_contract_json"],record["source_json"],record["workspace_id"],lut_id,user_id))
+            revision_id = _append_lut_revision(cur,record,number+1)
+            cur.execute("UPDATE luts SET revision_id=%s WHERE id=%s",(revision_id,lut_id))
+            record["revision_id"] = revision_id
         conn.commit()
-    return get_lut(lut_id, user_id)
+    return record
+
+
+def list_lut_revisions(lut_id, user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM lut_revisions WHERE lut_id=%s AND user_id=%s ORDER BY revision_number DESC",
+                        (lut_id,user_id))
+            return cur.fetchall()
+
+
+def get_lut_revision(lut_id, revision_id, user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM lut_revisions WHERE lut_id=%s AND id=%s AND user_id=%s",
+                        (lut_id,revision_id,user_id))
+            return cur.fetchone()
 
 
 def delete_lut(lut_id: int, user_id: int) -> bool:
@@ -199,6 +305,8 @@ def delete_lut(lut_id: int, user_id: int) -> bool:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM luts WHERE id = %s AND user_id = %s", (lut_id, user_id))
             deleted = cur.rowcount
+            if deleted:
+                cur.execute("DELETE FROM lut_revisions WHERE lut_id=%s AND user_id=%s", (lut_id,user_id))
         conn.commit()
         return deleted > 0
 
@@ -234,6 +342,7 @@ def clear_all():
     _assert_not_dev_database("clear_all()")
     with _connect() as conn:
         with conn.cursor() as cur:
+            cur.execute("DELETE FROM lut_revisions")
             cur.execute("DELETE FROM luts")
         conn.commit()
 
@@ -246,6 +355,9 @@ def clear_users():
             cur.execute("DELETE FROM auto_grade_calls")
             cur.execute("DELETE FROM auth_rate_events")
             cur.execute("DELETE FROM auth_rate_keys")
+            cur.execute("DELETE FROM workspace_reports")
+            cur.execute("DELETE FROM workspace_versions")
+            cur.execute("DELETE FROM workspaces")
             cur.execute("DELETE FROM users")
         conn.commit()
 
@@ -440,13 +552,18 @@ def get_session(session_id: int, user_id: int):
             return cur.fetchone()
 
 
-def delete_session(session_id: int, user_id: int) -> bool:
+def delete_session(session_id: int, user_id: int, *, delete_workspace_versions=False) -> bool:
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
             deleted = cur.rowcount
             if deleted:
                 cur.execute("DELETE FROM messages WHERE session_id = %s", (session_id,))
+                if delete_workspace_versions:
+                    cur.execute("DELETE v FROM workspace_versions v JOIN workspaces w ON v.workspace_id=w.id "
+                                "WHERE w.session_id=%s AND w.user_id=%s", (session_id,user_id))
+                cur.execute("UPDATE workspaces SET session_id=NULL WHERE session_id=%s AND user_id=%s",
+                            (session_id,user_id))
         conn.commit()
         return deleted > 0
 
@@ -523,5 +640,152 @@ def clear_sessions():
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM messages")
+            cur.execute("UPDATE workspaces SET session_id=NULL")
             cur.execute("DELETE FROM sessions")
         conn.commit()
+
+
+def create_workspace(user_id, workspace_id=None, session_id=None, name="创作工作区"):
+    workspace_id = workspace_id or str(uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO workspaces (id,user_id,session_id,name,created_at,updated_at) "
+                        "VALUES (%s,%s,%s,%s,%s,%s)", (workspace_id,user_id,session_id,name,now,now))
+        conn.commit()
+    return get_workspace(workspace_id,user_id)
+
+
+def get_workspace(workspace_id, user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workspaces WHERE id=%s AND user_id=%s", (workspace_id,user_id))
+            return cur.fetchone()
+
+
+def list_workspaces(user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workspaces WHERE user_id=%s ORDER BY updated_at DESC", (user_id,))
+            return cur.fetchall()
+
+
+def update_workspace(workspace_id,user_id,**fields):
+    allowed = {key:value for key,value in fields.items() if key in {"name","session_id"}}
+    allowed["updated_at"] = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE workspaces SET " + ",".join(key+"=%s" for key in allowed) +
+                        " WHERE id=%s AND user_id=%s", (*allowed.values(),workspace_id,user_id))
+        conn.commit()
+    return get_workspace(workspace_id,user_id)
+
+
+def workspace_session(workspace_id,user_id):
+    """在工作区行锁内创建独立会话,避免并发请求分裂链接。"""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workspaces WHERE id=%s AND user_id=%s FOR UPDATE", (workspace_id,user_id))
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("workspace_not_found")
+            sid = row["session_id"]
+            if sid:
+                cur.execute("SELECT id FROM sessions WHERE id=%s AND user_id=%s", (sid,user_id))
+                if not cur.fetchone():
+                    sid = None
+            if not sid:
+                cur.execute("INSERT INTO sessions (user_id,title,is_auto,created_at) VALUES (%s,%s,0,%s)",
+                            (user_id,row["name"],datetime.now(timezone.utc).isoformat()))
+                sid = cur.lastrowid
+                cur.execute("UPDATE workspaces SET session_id=%s WHERE id=%s", (sid,workspace_id))
+        conn.commit()
+    return sid
+
+
+def delete_workspace(workspace_id,user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM workspaces WHERE id=%s AND user_id=%s", (workspace_id,user_id))
+            deleted = cur.rowcount
+            if deleted:
+                cur.execute("DELETE FROM workspace_versions WHERE workspace_id=%s AND user_id=%s", (workspace_id,user_id))
+                cur.execute("DELETE FROM workspace_reports WHERE workspace_id=%s AND user_id=%s", (workspace_id,user_id))
+                cur.execute("UPDATE luts SET workspace_id=NULL WHERE workspace_id=%s AND user_id=%s", (workspace_id,user_id))
+        conn.commit()
+    return bool(deleted)
+
+
+def create_workspace_version(workspace_id,user_id,name,snapshot_json):
+    version_id = str(uuid4())
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM workspaces WHERE id=%s AND user_id=%s FOR UPDATE", (workspace_id,user_id))
+            if not cur.fetchone():
+                raise ValueError("workspace_not_found")
+            cur.execute("SELECT COUNT(*) AS n FROM workspace_versions WHERE workspace_id=%s AND user_id=%s", (workspace_id,user_id))
+            if cur.fetchone()["n"] >= 20:
+                raise ValueError("version_limit")
+            cur.execute("INSERT INTO workspace_versions (id,user_id,workspace_id,name,snapshot_json,created_at) "
+                        "VALUES (%s,%s,%s,%s,%s,%s)",
+                        (version_id,user_id,workspace_id,name,snapshot_json,datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    return get_workspace_version(workspace_id,version_id,user_id)
+
+
+def list_workspace_versions(workspace_id,user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workspace_versions WHERE workspace_id=%s AND user_id=%s ORDER BY created_at DESC",
+                        (workspace_id,user_id))
+            return cur.fetchall()
+
+
+def get_workspace_version(workspace_id,version_id,user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workspace_versions WHERE id=%s AND workspace_id=%s AND user_id=%s",
+                        (version_id,workspace_id,user_id))
+            return cur.fetchone()
+
+
+def rename_workspace_version(workspace_id,version_id,user_id,name):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE workspace_versions SET name=%s WHERE id=%s AND workspace_id=%s AND user_id=%s",
+                        (name,version_id,workspace_id,user_id))
+        conn.commit()
+    return get_workspace_version(workspace_id,version_id,user_id)
+
+
+def delete_workspace_version(workspace_id,version_id,user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM workspace_versions WHERE id=%s AND workspace_id=%s AND user_id=%s",
+                        (version_id,workspace_id,user_id))
+            deleted = cur.rowcount
+        conn.commit()
+    return bool(deleted)
+
+
+def add_workspace_report(workspace_id,user_id,kind,payload_json):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO workspace_reports (user_id,workspace_id,kind,payload_json,created_at) VALUES (%s,%s,%s,%s,%s)",
+                        (user_id,workspace_id,kind,payload_json,datetime.now(timezone.utc).isoformat()))
+            report_id = cur.lastrowid
+            cur.execute("SELECT id FROM workspace_reports WHERE user_id=%s AND workspace_id=%s AND kind=%s "
+                        "ORDER BY id DESC LIMIT 50,1000", (user_id,workspace_id,kind))
+            old = [row["id"] for row in cur.fetchall()]
+            if old:
+                cur.execute("DELETE FROM workspace_reports WHERE id IN ("+",".join(["%s"]*len(old))+")", old)
+        conn.commit()
+    return report_id
+
+
+def latest_workspace_report(workspace_id,user_id,kind="auto"):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workspace_reports WHERE user_id=%s AND workspace_id=%s AND kind=%s "
+                        "ORDER BY id DESC LIMIT 1", (user_id,workspace_id,kind))
+            return cur.fetchone()

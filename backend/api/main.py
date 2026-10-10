@@ -7,65 +7,48 @@ from typing import List, Literal, Optional
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from openai import APIConnectionError, APIStatusError, APITimeoutError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api import auth, ratelimit
-from agent.schemas import RGBOffsetValue, RGBScaleValue
+from api.models import LutParamsModel, checked_metadata
+from agent.editing import EditingContext
+from lut_engine import RecipeError, apply_recipe, input_contract, neutral_recipe_params, validate_recipe, validate_input_contract
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
+from api.workspaces import router as workspace_router, require_workspace, recipe_http_error, ENGINE_VERSION, validation_slot
 
 logger = logging.getLogger("chroma.api")
 
 
-class LutParamsModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+class AssetMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recipe: Optional[dict] = None
+    input_contract: Optional[dict] = None
+    source: Optional[dict] = None
+    workspace_id: Optional[str] = Field(None, max_length=36)
 
-    base_photo_style: Literal["STD", "NAT", "VIVD", "VLOG"] = "STD"
-    temp: float = Field(0.0, ge=-3000, le=3000)
-    tint: float = Field(0.0, ge=-500, le=500)
-    exposure: float = Field(0.0, ge=-3, le=3)
-    contrast: float = Field(0.0, ge=-1, le=1)
-    contrast_pivot: float = Field(0.462, ge=0.1, le=0.9)
-    saturation: float = Field(0.0, ge=-1, le=1)
-    hue: float = Field(0.0, ge=-180, le=180)
-    vibrance: float = Field(0.0, ge=-1, le=1)
-    tone_map: float = Field(1.0, ge=0, le=1)
-    look_strength: float = Field(1.0, ge=0, le=1)
-    # 影调分区(逐点,可烘进 33³ LUT)
-    highlights: float = Field(0.0, ge=-1, le=1)
-    shadows: float = Field(0.0, ge=-1, le=1)
-    whites: float = Field(0.0, ge=-1, le=1)
-    blacks: float = Field(0.0, ge=-1, le=1)
-    curve: float = Field(0.0, ge=-1, le=1)
-    # 分离色调
-    split_shadow_hue: float = Field(0.0, ge=0, le=360)
-    split_shadow_sat: float = Field(0.0, ge=0, le=1)
-    split_highlight_hue: float = Field(0.0, ge=0, le=360)
-    split_highlight_sat: float = Field(0.0, ge=0, le=1)
-    split_balance: float = Field(0.5, ge=0, le=1)
-    split_mid_hue: float = Field(0.0, ge=0, le=360)
-    split_mid_sat: float = Field(0.0, ge=0, le=1)
-    selective_hue_center: float = Field(30.0, ge=0, le=360)
-    selective_hue_width: float = Field(45.0, ge=1, le=180)
-    selective_hue_shift: float = Field(0.0, ge=-180, le=180)
-    selective_saturation: float = Field(0.0, ge=-1, le=1)
-    lift: List[RGBOffsetValue] = Field([0.0, 0.0, 0.0], min_length=3, max_length=3)
-    gamma: List[RGBScaleValue] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
-    gain: List[RGBScaleValue] = Field([1.0, 1.0, 1.0], min_length=3, max_length=3)
+    @field_validator("recipe", "input_contract", "source")
+    @classmethod
+    def metadata_only(cls, value):
+        return checked_metadata(value)
 
 
-class LutCreate(BaseModel):
+class LutCreate(AssetMetadata):
     name: str = Field(min_length=1, max_length=255)
     description: str = Field("", max_length=4000)
-    params: LutParamsModel
+    params: Optional[LutParamsModel] = None
+    kind: Literal["full_snapshot", "portable_style"] = "full_snapshot"
 
 
-class LutUpdate(BaseModel):
+class LutUpdate(AssetMetadata):
+    revision_id: Optional[int] = Field(None,ge=1)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=4000)
     params: Optional[LutParamsModel] = None
+    kind: Optional[Literal["full_snapshot", "portable_style"]] = None
 
 
 class LutOut(BaseModel):
@@ -74,6 +57,30 @@ class LutOut(BaseModel):
     description: str
     params: LutParamsModel
     created_at: str
+    kind: Literal["full_snapshot", "portable_style"] = "full_snapshot"
+    recipe: Optional[dict] = None
+    input_contract: Optional[dict] = None
+    source: Optional[dict] = None
+    workspace_id: Optional[str] = None
+    revision_id: Optional[int] = None
+
+
+class AssetApply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    params: LutParamsModel
+    context: EditingContext = Field(default_factory=EditingContext)
+    revision_id: Optional[int] = None
+    applied_revision_ids: List[int] = Field(default_factory=list, max_length=100)
+    allow_repeat: bool = False
+    allow_input_change: bool = False
+
+
+class AssetDownload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["camera", "software"] = "camera"
+    target: Literal["current"]
+    params: LutParamsModel
+    revision_id: Optional[int] = None
 
 
 class ChatRequest(BaseModel):
@@ -81,6 +88,10 @@ class ChatRequest(BaseModel):
     params: Optional[LutParamsModel] = None
     history: Optional[List[str]] = Field(None, max_length=12)
     session_id: Optional[int] = None
+    workspace_id: Optional[str] = Field(None,max_length=36)
+    context: Optional[EditingContext] = None
+    source_digest: Optional[str] = Field(None,max_length=128)
+    main_sample_id: Optional[str] = Field(None,max_length=128)
 
 
 class ChatResponse(BaseModel):
@@ -90,6 +101,14 @@ class ChatResponse(BaseModel):
     cube_text: Optional[str] = None
     error: Optional[str] = None
     session_id: Optional[int] = None
+    workspace_id: Optional[str] = None
+    source_digest: Optional[str] = None
+    main_sample_id: Optional[str] = None
+    goal_status: str = "not_evaluated"
+    execution_status: str = "skipped"
+    blocked_reasons: List[str] = Field(default_factory=list)
+    observations: List[dict] = Field(default_factory=list)
+    steps: List[dict] = Field(default_factory=list)
 
 
 class SessionCreate(BaseModel):
@@ -129,11 +148,25 @@ def _record_to_out(rec: dict) -> LutOut:
         description=rec["description"],
         params=LutParamsModel(**json.loads(rec["params_json"])),
         created_at=rec["created_at"],
+        kind=rec.get("kind") or "full_snapshot", workspace_id=rec.get("workspace_id"),
+        revision_id=rec.get("revision_id"),
+        recipe=json.loads(rec["recipe_json"]) if rec.get("recipe_json") else None,
+        input_contract=json.loads(rec["input_contract_json"]) if rec.get("input_contract_json") else None,
+        source=json.loads(rec["source_json"]) if rec.get("source_json") else None,
     )
 
 
 app = FastAPI(title="CHROMA LUT API")
 db.init_db()
+app.include_router(workspace_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request, exc):
+    """错误摘要不回显非法数值或请求中的敏感内容。"""
+    return JSONResponse(status_code=422,content={"detail":[
+        {"type":error["type"],"loc":error["loc"],"msg":error["msg"]}
+        for error in exc.errors()]})
 
 
 def _secure_cookie() -> bool:
@@ -163,11 +196,50 @@ def camera_file_name(name: str) -> str:
     return f"{h:08X}.cube"
 
 
+def _asset_content(body, existing=None):
+    values = body.model_dump(exclude_unset=True)
+    if existing:
+        for field in ("params","kind"):
+            if values.get(field) is None:
+                values.pop(field,None)
+    current = _record_to_out(existing).model_dump() if existing else {}
+    current.update(values)
+    kind = current.get("kind") or "full_snapshot"
+    recipe = current.get("recipe")
+    try:
+        if recipe is not None:
+            recipe = validate_recipe(recipe)
+        if kind == "portable_style":
+            if recipe is None:
+                raise RecipeError("missing_recipe", "可复用风格必须提供配方")
+            params = neutral_recipe_params(recipe)
+            contract = recipe["input_contract"]
+        else:
+            raw_params = current.get("params")
+            if raw_params is None:
+                raise RecipeError("missing_params", "完整效果必须提供参数")
+            params = LutParamsModel(**raw_params).model_dump()
+            contract = input_contract(params)
+        supplied_contract = values.get("input_contract") if {"params","recipe","kind"} & set(values) else current.get("input_contract")
+        if supplied_contract is not None and validate_input_contract(supplied_contract) != contract:
+            raise RecipeError("input_conflict", "资产声明与实际输入契约不一致")
+        if recipe and recipe["input_contract"] != contract:
+            raise RecipeError("input_conflict", "配方与资产输入契约不一致")
+    except RecipeError as exc:
+        raise recipe_http_error(exc) from exc
+    encode = lambda value: json.dumps(value,ensure_ascii=False,allow_nan=False) if value is not None else None
+    return json.dumps(params,allow_nan=False), {
+        "kind":kind,"recipe_json":encode(recipe),"input_contract_json":encode(contract),
+        "source_json":encode(current.get("source")),"workspace_id":current.get("workspace_id")}
+
+
 @app.post("/api/luts", response_model=LutOut)
 def create_lut(body: LutCreate, user: dict = Depends(auth.get_current_user)):
-    params_json = body.params.model_dump_json()
-    lut_id = db.create_lut(user["id"], body.name, body.description, params_json)
-    return _record_to_out(db.get_lut(lut_id, user["id"]))
+    if body.workspace_id:
+        require_workspace(body.workspace_id,user["id"])
+    params_json,metadata = _asset_content(body)
+    lut_id = db.create_lut(user["id"],body.name,body.description,params_json,**metadata)
+    return _record_to_out(db.get_lut(lut_id,user["id"]))
 
 
 @app.get("/api/luts", response_model=List[LutOut])
@@ -184,15 +256,19 @@ def get_lut(lut_id: int, user: dict = Depends(auth.get_current_user)):
 
 
 @app.put("/api/luts/{lut_id}", response_model=LutOut)
-def update_lut(lut_id: int, body: LutUpdate, user: dict = Depends(auth.get_current_user)):
-    rec = db.get_lut(lut_id, user["id"])
+def update_lut(lut_id: int,body: LutUpdate,user: dict=Depends(auth.get_current_user)):
+    if body.workspace_id:
+        require_workspace(body.workspace_id,user["id"])
+    try:
+        rec = db.update_lut(lut_id,user["id"],name=body.name,description=body.description,
+                            build_content=lambda locked: _asset_content(body,locked),
+                            expected_revision_id=body.revision_id)
+    except db.RevisionConflictError as exc:
+        raise HTTPException(409,{"code":"revision_conflict","message":str(exc),
+                                 "current_revision_id":exc.current_revision_id}) from exc
     if not rec:
-        raise HTTPException(status_code=404, detail="LUT not found")
-    name = body.name if body.name is not None else rec["name"]
-    description = body.description if body.description is not None else rec["description"]
-    params_json = body.params.model_dump_json() if body.params is not None else rec["params_json"]
-    db.update_lut(lut_id, user["id"], name, description, params_json)
-    return _record_to_out(db.get_lut(lut_id, user["id"]))
+        raise HTTPException(404,"LUT not found")
+    return _record_to_out(rec)
 
 
 @app.delete("/api/luts/{lut_id}", status_code=204)
@@ -201,29 +277,134 @@ def delete_lut(lut_id: int, user: dict = Depends(auth.get_current_user)):
         raise HTTPException(status_code=404, detail="LUT not found")
 
 
-@app.get("/api/luts/{lut_id}/download")
-def download_lut(
-    lut_id: int,
-    mode: Literal["camera", "software"] = "camera",
-    user: dict = Depends(auth.get_current_user),
-):
-    """下载 .cube。mode=camera 注入松下机内头,mode=software 输出标准 .cube。"""
-    rec = db.get_lut(lut_id, user["id"])
-    if not rec:
-        raise HTTPException(status_code=404, detail="LUT not found")
-    engine_params = lut_params_from_dict(json.loads(rec["params_json"]))
-    lut = generate_lut(engine_params, size=33)
+def _selected_asset(lut_id,user_id,revision_id=None):
+    if revision_id is not None:
+        revision = db.get_lut_revision(lut_id,revision_id,user_id)
+        if not revision:
+            raise HTTPException(404,"资产修订不存在")
+        return {**json.loads(revision["snapshot_json"]),"revision_id":revision_id,"id":lut_id}
+    record = db.get_lut(lut_id,user_id)
+    if not record:
+        raise HTTPException(404,"LUT not found")
+    return _record_to_out(record).model_dump()
+
+
+@app.get("/api/luts/{lut_id}/revisions")
+def asset_revisions(lut_id: int,user: dict=Depends(auth.get_current_user)):
+    if not db.get_lut(lut_id,user["id"]):
+        raise HTTPException(404,"LUT not found")
+    return [{"id":row["id"],"revision_id":row["id"],"revision_number":row["revision_number"],
+             "created_at":row["created_at"],**json.loads(row["snapshot_json"])}
+            for row in db.list_lut_revisions(lut_id,user["id"])]
+
+
+@app.post("/api/luts/{lut_id}/apply")
+def apply_asset(lut_id: int,body: AssetApply,user: dict=Depends(auth.get_current_user)):
+    asset = _selected_asset(lut_id,user["id"],body.revision_id)
+    revision_id = asset.get("revision_id")
+    if asset["kind"] == "portable_style" and revision_id in body.applied_revision_ids and not body.allow_repeat:
+        raise HTTPException(409,{"code":"repeat_application","message":"此修订已应用,请确认是否再次叠加"})
+    current = body.params.model_dump()
+    try:
+        if asset["kind"] == "portable_style":
+            candidate,changes = apply_recipe(asset["recipe"],current,body.context.locked_fields)
+        else:
+            candidate = LutParamsModel(**asset["params"]).model_dump()
+            changes = {key:{"before":current[key],"after":value}
+                       for key,value in candidate.items() if current[key] != value}
+            conflicts = set(changes) & set(body.context.locked_fields)
+            if conflicts:
+                raise RecipeError("lock_conflict","完整效果会修改受保护参数",conflicts)
+            if input_contract(current) != input_contract(candidate) and not body.allow_input_change:
+                raise RecipeError("input_conflict","载入完整效果需要确认输入切换")
+    except RecipeError as exc:
+        raise recipe_http_error(exc) from exc
+    return {"params":candidate,"changes":changes,"kind":asset["kind"],"recipe":asset.get("recipe"),
+            "revision_id":revision_id,"source":asset.get("source"),"validation_status":"not_verified"}
+
+
+@app.post("/api/luts/{lut_id}/apply-validated")
+def apply_asset_with_image(lut_id: int,request: Request,body: str=Form(...,max_length=32768),
+                           file: UploadFile=File(...),user: dict=Depends(auth.get_current_user)):
+    """有主样张时,对候选沿用确定性图像风险检查,图片不留存。"""
+    from agent.auto import check_hard_rules
+    from photo import stats as S,render as R,quality as Q
+    from photo.types import PhotoError,ImageTooLargeError
+    try:
+        parsed = AssetApply.model_validate(json.loads(body))
+    except (ValueError,TypeError) as exc:
+        raise HTTPException(422,str(exc)) from exc
+    out = apply_asset(lut_id,parsed,user)
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_AUTO_IMAGE_BYTES+1024*1024:
+        raise HTTPException(413,"图片不能超过 32MB")
+    raw = file.file.read(MAX_AUTO_IMAGE_BYTES+1)
+    if len(raw) > MAX_AUTO_IMAGE_BYTES:
+        raise HTTPException(413,"图片不能超过 32MB")
+    _,retry = db.reserve_auth_event(f"validation:{user['id']}",10,60)
+    if retry:
+        raise HTTPException(429,"验证请求过于频繁",headers={"Retry-After":str(retry)})
+    with validation_slot():
+        try:
+            image = S.load_image(raw)
+        except ImageTooLargeError as exc:
+            raise HTTPException(413,str(exc)) from exc
+        except PhotoError as exc:
+            raise HTTPException(400,str(exc)) from exc
+        current = parsed.params.model_dump()
+        neutral = {"base_photo_style":current["base_photo_style"],"tone_map":current["tone_map"]}
+        baseline_image = R.render_lut(R.lut_from_params(neutral),image)
+        mask = S.skin_mask_of(baseline_image)
+        baseline = S.analyze(baseline_image,skin_mask=mask)
+        before = S.analyze(R.render_lut(R.lut_from_params(current),image),skin_mask=mask)
+        allowed,reasons = check_hard_rules(before,out["params"],baseline,Q.limits_for(before),current,image,mask)
+        if not allowed:
+            raise HTTPException(409,{"code":"image_risk","message":"图像风险检查未通过,候选未应用","reasons":reasons})
+        out["validation_status"] = "measured"
+        out["validation"] = {"engine_version":ENGINE_VERSION,"input_contract":input_contract(current),
+                             "preview_dimensions":{"width":image.shape[1],"height":image.shape[0]},
+                             "sampled_pixels":before.sampled_px}
+        return out
+
+
+def _cube_response(asset,params,mode):
+    engine_params = lut_params_from_dict(params)
+    lut = generate_lut(engine_params,size=33)
     photo_style = engine_params.base_photo_style if mode == "camera" else None
     input_signal = "VLOG/V-Gamut" if engine_params.base_photo_style == "VLOG" else f"{engine_params.base_photo_style}/sRGB"
     output_signal = "Rec709" if engine_params.base_photo_style == "VLOG" else "sRGB"
-    title = rec["name"] if mode == "camera" else f"{rec['name']} [{input_signal} -> {output_signal}]"
-    text = lut_to_cube(lut, title=title, photo_style=photo_style)
-    return Response(
-        content=text,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": _content_disposition(
-            _safe_stem(rec["name"]), mode, engine_params.base_photo_style)},
-    )
+    title = asset["name"] if mode == "camera" else f"{asset['name']} [{input_signal} -> {output_signal}]"
+    text = lut_to_cube(lut,title=title,photo_style=photo_style)
+    return Response(content=text,media_type="text/plain; charset=utf-8",headers={
+        "Content-Disposition":_content_disposition(_safe_stem(asset["name"]),mode,engine_params.base_photo_style)})
+
+
+@app.get("/api/luts/{lut_id}/download")
+def download_lut(lut_id: int,mode: Literal["camera","software"]="camera",
+                 target: Optional[Literal["neutral","saved"]]=None,revision_id: Optional[int]=None,
+                 user: dict=Depends(auth.get_current_user)):
+    asset = _selected_asset(lut_id,user["id"],revision_id)
+    if asset["kind"] == "portable_style":
+        if target != "neutral":
+            raise HTTPException(422,"可复用风格下载必须明确选择 neutral,或提交 current 完整参数")
+        try:
+            params = neutral_recipe_params(asset["recipe"])
+        except RecipeError as exc:
+            raise recipe_http_error(exc) from exc
+    else:
+        if target == "neutral":
+            raise HTTPException(422,"完整效果只能下载已保存参数或 current 完整参数")
+        params = asset["params"]
+    return _cube_response(asset,params,mode)
+
+
+@app.post("/api/luts/{lut_id}/download")
+def download_current_lut(lut_id: int,body: AssetDownload,user: dict=Depends(auth.get_current_user)):
+    asset = _selected_asset(lut_id,user["id"],body.revision_id)
+    params = body.params.model_dump()
+    if input_contract(params) != (asset.get("input_contract") or input_contract(asset["params"])):
+        raise HTTPException(409,{"code":"input_conflict","message":"当前完整参数与资产输入契约不一致"})
+    return _cube_response(asset,params,body.mode)
 
 
 def _build_extract_fn(body: "ChatRequest", full_params: dict | None):
@@ -238,7 +419,7 @@ def _build_extract_fn(body: "ChatRequest", full_params: dict | None):
     from agent.llm import get_llm, extract_result
 
     client = get_llm()
-    return lambda msg: extract_result(client, msg, params=full_params, history=body.history)
+    return lambda msg: extract_result(client,msg,params=full_params,history=body.history,context=body.context)
 
 
 @app.post("/api/session/chat", response_model=ChatResponse)
@@ -248,10 +429,20 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
     from agent.llm import BudgetExhaustedError
 
     session_id = body.session_id
-    if session_id is None:
-        session_id = db.create_session(user["id"], "新会话")
-    elif not db.get_session(session_id, user["id"]):
-        raise HTTPException(status_code=404, detail="会话不存在")
+    if body.workspace_id:
+        workspace = require_workspace(body.workspace_id,user["id"])
+        if session_id is not None:
+            if not db.get_session(session_id,user["id"]):
+                raise HTTPException(404,"会话不存在")
+            if workspace["session_id"] not in (None,session_id):
+                raise HTTPException(409,"工作区与会话关联不一致")
+            db.update_workspace(body.workspace_id,user["id"],session_id=session_id)
+        else:
+            session_id = db.workspace_session(body.workspace_id,user["id"])
+    elif session_id is None:
+        session_id = db.create_session(user["id"],"新会话")
+    elif not db.get_session(session_id,user["id"]):
+        raise HTTPException(404,"会话不存在")
 
     full_params = body.params.model_dump() if body.params else None
     initial = None
@@ -264,8 +455,11 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
     error = None
     done = False
     cube_text = None
+    result = {}
     try:
-        result = run_agent(_build_extract_fn(body, full_params), body.message, params=initial)
+        kwargs = {"context":body.context} if body.context is not None else {}
+        result = run_agent(_build_extract_fn(body,full_params),body.message,
+                           params=full_params if (body.context is not None or body.workspace_id) else initial,**kwargs)
         reply = result.get("reply", "")
         done = result.get("done", False)
         cube_text = result.get("cube_text")
@@ -283,24 +477,21 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
         reply = "生成服务暂时不可用,请稍后重试"
         error = "generation_failed"
 
-    db.add_message(user["id"], session_id, "user", body.message, None)
-    db.add_message(
-        user["id"],
-        session_id,
-        "agent",
-        reply,
-        params_out.model_dump_json() if params_out else None,
-        cube_text,
-    )
+    out = ChatResponse(reply=reply,params=params_out,done=done,cube_text=cube_text,error=error,
+                       session_id=session_id,workspace_id=body.workspace_id,
+                       source_digest=body.source_digest,main_sample_id=body.main_sample_id,
+                       goal_status=result.get("goal_status","not_evaluated"),
+                       execution_status=result.get("execution_status","failed" if error else "skipped"),
+                       blocked_reasons=result.get("blocked_reasons",[]),
+                       observations=result.get("observations",[]),steps=result.get("steps",[]))
+    db.add_message(user["id"],session_id,"user",body.message,None)
+    db.add_message(user["id"],session_id,"agent",reply,
+                   params_out.model_dump_json() if params_out else None,cube_text,
+                   out.model_dump_json() if body.workspace_id else None)
+    if body.workspace_id:
+        db.add_workspace_report(body.workspace_id,user["id"],"chat",out.model_dump_json())
+    return out
 
-    return ChatResponse(
-        reply=reply,
-        params=params_out,
-        done=done,
-        cube_text=cube_text,
-        error=error,
-        session_id=session_id,
-    )
 
 
 @app.post("/api/sessions", response_model=SessionOut)
@@ -316,8 +507,8 @@ def list_sessions(user: dict = Depends(auth.get_current_user)):
 
 
 @app.delete("/api/sessions/{session_id}", status_code=204)
-def delete_session(session_id: int, user: dict = Depends(auth.get_current_user)):
-    if not db.delete_session(session_id, user["id"]):
+def delete_session(session_id: int, delete_workspace_versions: bool=False, user: dict=Depends(auth.get_current_user)):
+    if not db.delete_session(session_id,user["id"],delete_workspace_versions=delete_workspace_versions):
         raise HTTPException(status_code=404, detail="会话不存在")
 
 
@@ -360,6 +551,10 @@ class AutoGradeStepOut(BaseModel):
     proposed: dict = Field(default_factory=dict)
     applied: bool = False
     rejections: List[str] = Field(default_factory=list)
+    params_before: dict = Field(default_factory=dict)
+    params_after: dict = Field(default_factory=dict)
+    purpose: Literal["correction","style"] = "correction"
+    stats_after: Optional[dict] = None
 
 
 class AutoGradeIssueOut(BaseModel):
@@ -383,12 +578,21 @@ class AutoGradeOut(BaseModel):
     review_skip_reason: Optional[str] = None
     degraded: bool = False
     usage: dict = Field(default_factory=dict)
+    workspace_id: Optional[str] = None
+    source_digest: Optional[str] = None
+    main_sample_id: Optional[str] = None
+    context: Optional[EditingContext] = None
+    engine_version: str = ENGINE_VERSION
+    goal_status: str = "not_evaluated"
+    execution_status: str = "skipped"
+    blocked_reasons: List[str] = Field(default_factory=list)
+    observations: List[AutoGradeIssueOut] = Field(default_factory=list)
 
 
 class AutoGradeReportOut(AutoGradeOut):
     """报告查询的响应:比生成时的输出多一个 session_id,
     前端据此判断「这份报告是不是属于我正打开的会话」。"""
-    session_id: int
+    session_id: Optional[int] = None
 
 
 class RegisterRequest(BaseModel):
@@ -417,6 +621,11 @@ def auto_grade_endpoint(
     style: Optional[str] = Form(None),
     use_vision: bool = Form(True),
     max_rounds: int = Form(2),
+    workspace_id: Optional[str] = Form(None,max_length=36),
+    context: Optional[str] = Form(None,max_length=8192),
+    source_digest: Optional[str] = Form(None,max_length=128),
+    main_sample_id: Optional[str] = Form(None,max_length=128),
+    sample_origin: Literal["source","restored_preview"] = Form("source"),
     user: dict = Depends(auth.get_current_user),
 ):
     """AI 自动修图。
@@ -432,8 +641,14 @@ def auto_grade_endpoint(
     # 1) 参数解析(base_params 非法直接 422)
     try:
         parsed = LutParamsModel(**json.loads(base_params))
+        ctx = EditingContext.model_validate(json.loads(context)) if context else None
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"base_params 非法:{exc}")
+
+    if workspace_id:
+        require_workspace(workspace_id,user["id"])
+    if sample_origin != "source":
+        raise HTTPException(422,"自动修图需要重新选择来源文件,恢复预览仅用于统计验证")
 
     # 2) 读图与校验
     # Content-Length 包含 multipart 边界与其他字段，允许 1 MiB 封装开销。
@@ -475,7 +690,7 @@ def auto_grade_endpoint(
 
         def style_extractor(_client, text, current_params):     # noqa: ANN001
             # 风格复用现有抽取路径 —— 不另立一套参数字典
-            return extract_result(_client, text, params=current_params)
+            return extract_result(_client,text,params=current_params,context=ctx)
 
     try:
         result = run_auto_grade(
@@ -486,6 +701,7 @@ def auto_grade_endpoint(
             use_vision=use_vision and client is not None,
             max_rounds=max(1, min(3, int(max_rounds))),
             style_extractor=style_extractor,
+            **({"context":ctx} if ctx is not None else {}),
         )
     except BudgetExhaustedError as exc:
         # 可操作提示:这不是「服务挂了」,而是预算配置需要调整
@@ -516,7 +732,9 @@ def auto_grade_endpoint(
                 for i in result.issues],
         steps=[AutoGradeStepOut(stage=st.stage, round=st.round, diagnosis=st.diagnosis,
                                 proposed=st.proposed, applied=st.applied,
-                                rejections=st.rejections)
+                                rejections=st.rejections,
+                                params_before=st.params_before,params_after=st.params_after,purpose=st.purpose,
+                                stats_after=asdict(st.stats_after) if st.stats_after else None)
                for st in result.steps],
         style_params=result.style_params,
         style_applied=result.style_applied,
@@ -525,7 +743,12 @@ def auto_grade_endpoint(
         review=result.review,
         review_skip_reason=result.review_skip_reason,
         degraded=result.degraded,
-        usage=result.usage,
+        usage=result.usage,workspace_id=workspace_id,source_digest=source_digest,
+        main_sample_id=main_sample_id,context=ctx,
+        goal_status=result.goal_status,execution_status=result.execution_status,
+        blocked_reasons=result.blocked_reasons,
+        observations=[AutoGradeIssueOut(code=i.code,severity=i.severity,evidence=i.evidence)
+                      for i in result.observations],
     )
     # 4) 落库(图片不落库,只存参数与说明摘要)
     try:
@@ -537,32 +760,35 @@ def auto_grade_endpoint(
 
 
 def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> int:
-    """把自动修图结果写进该用户的**唯一**自动修图会话,返回 session_id。
-
-    两个设计点:
-    - 复用单一会话:否则每点一次就多一个同名会话,把用户的创作会话挤出列表。
-    - 结构化结果存 payload_json(完整 AutoGradeOut),刷新后据此重建报告;
-      content 仍写人类可读摘要,两者并存、互不污染。
-    不写 cube_text —— 避免又一次 0.9MB 落库。
-    """
-    sid = db.get_or_create_auto_session(user_id)
-    lines = [f"AI 自动修图:{len(out.steps)} 步"]
+    """按工作区关联保存报告;旧客户端仍使用原有自动会话。"""
+    sid = db.workspace_session(out.workspace_id,user_id) if out.workspace_id else db.get_or_create_auto_session(user_id)
+    out.session_id = sid
+    goal_labels = {"met": "已满足本次可测目标", "partially_met": "目标部分完成",
+                   "unchanged": "保留原参数", "not_evaluated": "尚未评估"}
+    execution_labels = {"model": "模型执行", "rules_only": "仅规则调整",
+                        "skipped": "已跳过", "failed": "执行失败"}
+    lines = ["AI 自动修图：目标状态：" + goal_labels.get(out.goal_status, out.goal_status)
+             + "；执行：" + execution_labels.get(out.execution_status, out.execution_status)]
     for st in out.steps:
         mark = "已应用" if st.applied else "被拦下"
         lines.append(f"  [{st.stage}] {st.diagnosis}({mark})")
-    if out.degraded:
-        lines.append("  未能完全达标,已采用保守调整")
+    for reason in out.blocked_reasons:
+        lines.append(f"  限制：{reason}")
+    if out.degraded and out.execution_status in ("model", "rules_only"):
+        lines.append("  仍有目标冲突，请结合报告判断当前效果")
     if out.review:
         lines.append(f"  视觉复核:{out.review}")
     elif out.review_skip_reason:
         lines.append(f"  视觉复核未执行({out.review_skip_reason})")
     db.add_message(user_id, sid, "agent", "\n".join(lines),
-                   out.params.model_dump_json(), None, out.model_dump_json())
+                   out.params.model_dump_json(),None,out.model_dump_json())
+    if out.workspace_id:
+        db.add_workspace_report(out.workspace_id,user_id,"auto",out.model_dump_json())
     return sid
 
 
 @app.get("/api/auto/report", response_model=Optional[AutoGradeReportOut])
-def get_auto_report(user: dict = Depends(auth.get_current_user)):
+def get_auto_report(workspace_id: Optional[str]=None,user: dict=Depends(auth.get_current_user)):
     """取该用户最近一次自动修图结果,供前端刷新后重建报告。
 
     返回带 session_id:前端据此判断该不该在当前打开的会话里展示 ——
@@ -570,10 +796,15 @@ def get_auto_report(user: dict = Depends(auth.get_current_user)):
 
     没有记录时返回 null(而不是 404)—— 「还没修过图」是正常状态,不是错误。
     """
-    sid = db.find_auto_session(user["id"])
-    if sid is None:
-        return None
-    rec = db.get_latest_payload_message(sid, user["id"])
+    if workspace_id:
+        workspace = require_workspace(workspace_id,user["id"])
+        sid = workspace["session_id"]
+        rec = db.latest_workspace_report(workspace_id,user["id"],"auto")
+    else:
+        sid = db.find_auto_session(user["id"])
+        if sid is None:
+            return None
+        rec = db.get_latest_payload_message(sid,user["id"])
     if not rec or not rec["payload_json"]:
         return None
     try:
@@ -588,9 +819,14 @@ def get_auto_report(user: dict = Depends(auth.get_current_user)):
 
 
 @app.post("/api/auto/undo")
-def undo_auto_grade(user: dict = Depends(auth.get_current_user)):
-    sid = db.find_auto_session(user["id"])
-    rec = db.get_latest_payload_message(sid, user["id"]) if sid is not None else None
+def undo_auto_grade(workspace_id: Optional[str]=None,user: dict=Depends(auth.get_current_user)):
+    if workspace_id:
+        workspace = require_workspace(workspace_id,user["id"])
+        sid = workspace["session_id"]
+        rec = db.latest_workspace_report(workspace_id,user["id"],"auto")
+    else:
+        sid = db.find_auto_session(user["id"])
+        rec = db.get_latest_payload_message(sid,user["id"]) if sid is not None else None
     if not rec:
         raise HTTPException(status_code=404, detail="没有可撤销的修图")
     try:
@@ -600,9 +836,13 @@ def undo_auto_grade(user: dict = Depends(auth.get_current_user)):
             raise ValueError("already undone")
     except (KeyError, TypeError, ValueError):
         raise HTTPException(status_code=404, detail="没有可撤销的修图")
-    db.add_message(user["id"], sid, "agent", "已撤销自动修图", before.model_dump_json(),
+    if workspace_id and sid is None:
+        sid = db.workspace_session(workspace_id,user["id"])
+    db.add_message(user["id"],sid,"agent","已撤销自动修图",before.model_dump_json(),
                    None, json.dumps({"undone": True}))
-    return {"params": before}
+    if workspace_id:
+        db.add_workspace_report(workspace_id,user["id"],"auto",json.dumps({"undone":True}))
+    return {"params":before}
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)

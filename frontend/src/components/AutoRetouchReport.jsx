@@ -1,4 +1,10 @@
-import { diffParams, gradeHeadline, rejectionList, reviewSkipText, styleDiff } from '../lib/autoGrade.js'
+import {
+  diffParams,
+  gradeHeadline,
+  rejectionList,
+  reviewSkipText,
+  styleDiff,
+} from '../lib/autoGrade.js'
 
 /**
  * 自动修图的修改说明面板。
@@ -10,7 +16,7 @@ import { diffParams, gradeHeadline, rejectionList, reviewSkipText, styleDiff } f
  *  - 被拒项默认折叠,但摘要行必须显示数量
  *  - 复检意见来自另一个模型调用、性质是主观判断,用左边框与确定性数字视觉区隔
  */
-export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
+export default function AutoRetouchReport({ result, beforeParams, onUndo, historical }) {
   if (!result) return null
 
   const changes = diffParams(beforeParams, result.params)
@@ -20,14 +26,16 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
   const styleApplied = result.style_applied
     ? styleDiff(result.style_applied_params || result.style_params)
     : []
-  const styleBlocked = !result.style_applied && result.style_params
-    ? styleDiff(result.style_params)
-    : []
+  const styleBlocked =
+    !result.style_applied && result.style_params ? styleDiff(result.style_params) : []
   const rejected = rejectionList(result.steps)
 
   return (
     <section className="auto-report" tabIndex={-1}>
-      {result.degraded && (
+      {historical && (
+        <p className="workspace-note">来自此前调整，参数或样张已变化；以下为当次报告。</p>
+      )}
+      {result.degraded && !result.goal_status && (
         <div className="auto-warn" role="status">
           <span aria-hidden="true">⚠</span>
           <span>未能完全达标,已采用保守调整(仅修正曝光与白平衡)</span>
@@ -35,13 +43,39 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
       )}
 
       <div className="auto-headline">{gradeHeadline(result)}</div>
+      {result.goal_status && (
+        <p className="workspace-note">
+          目标状态：
+          {
+            {
+              met: '已满足本次可测目标',
+              partially_met: '目标部分完成',
+              unchanged: '保留原参数',
+              not_evaluated: '未评价校正目标',
+            }[result.goal_status]
+          }{' '}
+          · 执行：
+          {{ model: '模型调整', rules_only: '规则调整', failed: '未能完成', skipped: '已跳过' }[
+            result.execution_status
+          ] || result.execution_status}
+        </p>
+      )}
+      {result.blocked_reasons?.length > 0 && (
+        <p className="auto-warn">{result.blocked_reasons.join('；')}</p>
+      )}
 
       <dl className="auto-summary">
         <dt>本次调整</dt>
         <dd>
-          {changes.length > 0
-            ? changes.map((c) => <span key={c.key} className="chip delta">{c.text}</span>)
-            : <span className="text-muted">无</span>}
+          {changes.length > 0 ? (
+            changes.map((c) => (
+              <span key={c.key} className="chip delta">
+                {c.text}
+              </span>
+            ))
+          ) : (
+            <span className="text-muted">无</span>
+          )}
         </dd>
 
         {styleApplied.length > 0 && (
@@ -49,7 +83,9 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
             <dt>风格已应用</dt>
             <dd>
               {styleApplied.map((c) => (
-                <span key={c.key} className="chip delta chip-style">{c.text}</span>
+                <span key={c.key} className="chip delta chip-style">
+                  {c.text}
+                </span>
               ))}
             </dd>
           </>
@@ -63,7 +99,9 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
                 模型理解为以下调整,但未通过安全校验,没有应用到参数上:
               </div>
               {styleBlocked.map((c) => (
-                <span key={c.key} className="chip chip-blocked">{c.text}</span>
+                <span key={c.key} className="chip chip-blocked">
+                  {c.text}
+                </span>
               ))}
               {result.style_rejections?.length > 0 && (
                 <div className="auto-small">原因:{result.style_rejections.join(';')}</div>
@@ -72,11 +110,23 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
           </>
         )}
 
+        {result.observations?.length > 0 && (
+          <>
+            <dt>画面观察</dt>
+            <dd className="auto-span auto-evidence">
+              {result.observations.map((i, n) => (
+                <div key={i.code || n}>· {i.evidence || i}</div>
+              ))}
+            </dd>
+          </>
+        )}
         {result.issues?.length > 0 && (
           <>
-            <dt>诊断</dt>
+            <dt>与目标冲突</dt>
             <dd className="auto-span auto-evidence">
-              {result.issues.map((i) => <div key={i.code}>· {i.evidence}</div>)}
+              {result.issues.map((i) => (
+                <div key={i.code}>· {i.evidence}</div>
+              ))}
             </dd>
           </>
         )}
@@ -90,7 +140,10 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
               <li key={i}>
                 <span className={s.applied ? 'auto-ok' : 'auto-no'}>{s.applied ? '✓' : '×'}</span>
                 <div>
-                  <div>{s.stage === 'style' ? '风格化' : `第 ${s.round} 轮`}{s.diagnosis ? `:${s.diagnosis}` : ''}</div>
+                  <div>
+                    {s.stage === 'style' ? '风格化' : `第 ${s.round} 轮`}
+                    {s.diagnosis ? `:${s.diagnosis}` : ''}
+                  </div>
                   {!s.applied && s.rejections?.length > 0 && (
                     <div className="text-muted auto-small">{s.rejections.join(';')}</div>
                   )}
@@ -105,7 +158,9 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
         <details className="auto-details auto-rejected">
           <summary>有 {rejected.length} 项提议被安全规则拦下</summary>
           <ul className="auto-small">
-            {rejected.map((r, i) => <li key={i}>{r}</li>)}
+            {rejected.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
           </ul>
         </details>
       )}
@@ -121,9 +176,13 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo }) {
         </div>
       )}
 
-      {beforeParams && <div className="auto-report-actions">
-        <button type="button" className="btn" onClick={onUndo}>撤销</button>
-      </div>}
+      {beforeParams && onUndo && (
+        <div className="auto-report-actions">
+          <button type="button" className="btn" onClick={onUndo}>
+            撤销
+          </button>
+        </div>
+      )}
     </section>
   )
 }
