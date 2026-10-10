@@ -1,5 +1,5 @@
 import { defaultParams, normalizeParams } from './lutEngine.js'
-import { PARAM_FIELDS, TECHNICAL_FIELDS, clone, equalValue, domainError, validateParams,
+import { PARAM_FIELDS, TECHNICAL_FIELDS, STRUCTURED_FIELDS, clone, equalValue, domainError, validateParams,
   validateRecipe, inputContract, createProjection, recordStyleContribution,
   resetProjection, defaultPurpose, applyStyleRecipe } from './styleRecipe.js'
 
@@ -8,6 +8,8 @@ export const HISTORY_LIMIT = 100
 export const GOAL_MODES = Object.freeze(['natural', 'preserve', 'style_only'])
 export const PURPOSES = Object.freeze(['default', 'technical', 'correction', 'style', 'unclassified'])
 const UNKNOWN_FIELDS = PARAM_FIELDS.filter((field) => !TECHNICAL_FIELDS.includes(field))
+const AUTO_READONLY_FIELDS = [...TECHNICAL_FIELDS, ...STRUCTURED_FIELDS]
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SNAPSHOT_FIELDS = ['params', 'goal_mode', 'locked_fields', 'name', 'purpose', 'baseline',
   'recipe_projection', 'input_status', 'associated_version', 'validation', 'report']
 
@@ -33,6 +35,7 @@ export function createWorkspace({ id = workspaceId(), userId = 'guest', sessionI
       classification: unknown ? 'unclassified' : 'known', unknown_fields: unknown ? [...UNKNOWN_FIELDS] : [],
       correction_operations: {} }, recipe_projection: createProjection(values), input_status: 'confirmed',
     samples: [], primary_sample_id: null, validation: null, report: null, associated_version: null,
+    applied_auto_job_ids: [],
     created_at: Date.now(), updated_at: Date.now(), ...sanitizeMeta(meta) }
 }
 
@@ -64,6 +67,27 @@ function resolveParams(params, patch) {
 function validateLocks(fields) {
   if (!Array.isArray(fields) || fields.some((key) => !PARAM_FIELDS.includes(key))) throw domainError('invalid_locks', '保护字段不正确')
   return [...new Set(fields)]
+}
+
+function validatedJobIds(ids) {
+  if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !UUID_PATTERN.test(id)))
+    throw domainError('invalid_job_ledger', '自动作业应用标记不正确')
+  return [...new Set(ids.map(id => id.toLowerCase()))].slice(-200)
+}
+
+function migrateParameterSnapshot(params) {
+  validateParams(params, { complete: false })
+  const values = clone(params), defaults = defaultParams()
+  for (const field of STRUCTURED_FIELDS) if (!Object.hasOwn(values, field)) values[field] = clone(defaults[field])
+  validateParams(values)
+  return values
+}
+
+function migrateSnapshot(snapshot) {
+  snapshot.params = migrateParameterSnapshot(snapshot.params)
+  if (snapshot.baseline?.params) snapshot.baseline.params = migrateParameterSnapshot(snapshot.baseline.params)
+  snapshot.report ??= null
+  return snapshot
 }
 
 function validateSnapshot(snapshot) {
@@ -102,9 +126,18 @@ export function previewEdit(state, patch, options = {}) {
   return { ...active, workspace: { ...active.workspace, params } }
 }
 
+export function cancelEdit(state) {
+  if (!state.pending) return state
+  return { ...state, workspace: { ...state.workspace, ...clone(state.pending.before), updated_at: Date.now() }, pending: null }
+}
+
 function addCorrection(baseline, before, after, fields) {
   const next = clone(baseline)
   for (const field of fields) {
+    if (STRUCTURED_FIELDS.includes(field)) {
+      next.correction_operations[field] = { mode: 'set', value: clone(after[field]) }
+      continue
+    }
     const delta = Array.isArray(after[field]) ? after[field].map((value, i) => value - before[field][i]) : after[field] - before[field]
     const previous = next.correction_operations[field]?.value || (Array.isArray(delta) ? [0, 0, 0] : 0)
     next.correction_operations[field] = { mode: 'add', value: Array.isArray(delta) ? delta.map((value, i) => value + previous[i]) : delta + previous }
@@ -139,7 +172,8 @@ export function commitEdit(state, patch, options = {}) {
   const pending = state.pending
   const before = pending?.before || editSnapshot(state.workspace)
   const config = { ...(pending?.options || {}), ...options }
-  const id = pending?.id || workspaceId()
+  const id = config.id ?? pending?.id ?? workspaceId()
+  if (typeof id !== 'string' || !UUID_PATTERN.test(id)) throw domainError('invalid_transaction', '操作标识不正确')
   const after = editSnapshot(state.workspace)
   after.params = resolveParams(after.params, patch)
   if (config.context) {
@@ -169,8 +203,8 @@ export function commitEdit(state, patch, options = {}) {
   }
   const conflicts = lockConflicts(before.params, after.params, before.locked_fields.filter((field) => !unlocked.includes(field)))
   if (conflicts.length) throw domainError('locked_fields', '修改与受保护参数冲突', conflicts)
-  if (config.source === 'auto' && TECHNICAL_FIELDS.some((field) => !equalValue(before.params[field], after.params[field]))) {
-    throw domainError('technical_readonly', '自动修图不能更改输入基准或显示映射', TECHNICAL_FIELDS)
+  if (config.source === 'auto' && AUTO_READONLY_FIELDS.some((field) => !equalValue(before.params[field], after.params[field]))) {
+    throw domainError('technical_readonly', '自动修图不能更改输入、曲线或外部 LUT', AUTO_READONLY_FIELDS)
   }
   validateParams(after.params)
   if (config.replaceBaseline) {
@@ -191,6 +225,8 @@ export function commitEdit(state, patch, options = {}) {
         if (!equalValue(phaseBefore, current)) throw domainError('invalid_phases', '调整来源阶段不连续')
         const phaseConflicts = lockConflicts(before.params, phaseAfter, before.locked_fields.filter((field) => !unlocked.includes(field)))
         if (phaseConflicts.length) throw domainError('locked_fields', '调整阶段修改了受保护参数', phaseConflicts)
+        if (config.source === 'auto' && AUTO_READONLY_FIELDS.some(field => !equalValue(before.params[field], phaseAfter[field])))
+          throw domainError('technical_readonly', '自动阶段不能更改输入、曲线或外部 LUT', AUTO_READONLY_FIELDS)
         applyPhase(after, phaseBefore, phaseAfter, phase, id)
         current = phaseAfter
       }
@@ -221,6 +257,8 @@ export function commitEdit(state, patch, options = {}) {
   // A report follows a real editing transaction; failed or skipped automatic
   // attempts remain metadata and cannot create an undo step on their own.
   if (!SNAPSHOT_FIELDS.some((key) => key !== 'report' && !equalValue(before[key], after[key]))) return { ...state, pending: null }
+  if ([...state.past, ...state.future].some(transaction => transaction.id === id))
+    throw domainError('duplicate_transaction', '此作业操作已经存在，不能重复应用')
   if (Object.hasOwn(config, 'report')) {
     const report = jsonMetadata(config.report)
     if (!report || typeof report !== 'object' || Array.isArray(report)) throw domainError('invalid_report', '事务报告必须是对象')
@@ -272,6 +310,7 @@ export function restoreVersionEdit(state, version, { unlockFields = [], confirmI
     snapshot.recipe_projection = createProjection(params)
     snapshot.input_status = 'confirmed'
   }
+  migrateSnapshot(snapshot)
   return commitEdit(state, null, { source: 'version_restore', restoreSnapshot: snapshot, unlockFields })
 }
 
@@ -287,8 +326,9 @@ function jsonMetadata(value) {
 
 export function sanitizeMeta(meta) {
   const allowed = ['samples', 'primary_sample_id', 'validation', 'report', 'session_id', 'name', 'purpose',
-    'view_state', 'retain_previews', 'associated_version']
-  return Object.fromEntries(allowed.filter((key) => key in meta).map((key) => [key, jsonMetadata(meta[key])]))
+    'view_state', 'retain_previews', 'associated_version', 'applied_auto_job_ids']
+  return Object.fromEntries(allowed.filter((key) => key in meta).map((key) => [key,
+    key === 'applied_auto_job_ids' ? validatedJobIds(meta[key]) : jsonMetadata(meta[key])]))
 }
 
 export function setWorkspaceMeta(state, meta) {
@@ -307,7 +347,8 @@ export function serializeWorkspaceState(state) {
 export function validateWorkspaceRecord(record, userId) {
   if (!record?.workspace || record.workspace.user_id !== String(userId ?? 'guest')) throw domainError('invalid_owner', '草稿不属于当前账号')
   const workspace = clone(record.workspace)
-  workspace.report ??= null
+  migrateSnapshot(workspace)
+  workspace.applied_auto_job_ids = validatedJobIds(workspace.applied_auto_job_ids ?? [])
   validateSnapshot(workspace)
   if (typeof workspace.id !== 'string' || !Number.isInteger(workspace.revision) || workspace.revision < 0) throw domainError('invalid_draft', '草稿标识或修订不正确')
   let historyWarning = null
@@ -317,8 +358,8 @@ export function validateWorkspaceRecord(record, userId) {
       if (!Array.isArray(record.past) || !Array.isArray(record.future)) throw new Error('missing history')
       const restoredPast = clone(record.past); const restoredFuture = clone(record.future)
       for (const transaction of [...restoredPast, ...restoredFuture]) {
-        if (transaction.before) transaction.before.report ??= null
-        if (transaction.after) transaction.after.report ??= null
+        if (transaction.before) migrateSnapshot(transaction.before)
+        if (transaction.after) migrateSnapshot(transaction.after)
         validateSnapshot(transaction.before); validateSnapshot(transaction.after)
         if (typeof transaction.id !== 'string') throw new Error('invalid transaction')
       }

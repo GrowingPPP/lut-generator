@@ -6,24 +6,24 @@ import { COMPARISON_GROUPS, compareVersionParams, compatibleVersionInputs } from
 
 const rowsOf = (result) => result.groups.flatMap((group) => group.rows)
 
-test('groups cover all 30 parameters once, in parameter-panel order', () => {
+test('groups cover every parameter once, in parameter-panel order', () => {
   const fields = COMPARISON_GROUPS.flatMap((group) => group.fields)
-  assert.equal(fields.length, 30)
-  assert.equal(new Set(fields).size, 30)
+  assert.equal(fields.length, 34)
+  assert.equal(new Set(fields).size, 34)
   assert.deepEqual([...fields].sort(), Object.keys(defaultParams()).sort())
   assert.deepEqual(COMPARISON_GROUPS.map((group) => group.id), [
-    'technical', 'basic', 'look', 'tone', 'color', 'selective', 'split', 'rgb',
+    'technical', 'basic', 'look', 'tone', 'color', 'selective', 'split', 'rgb', 'external',
   ])
   assert.deepEqual(COMPARISON_GROUPS.map((group) => group.label), [
-    '输入', '单张校正', '风格', '影调', '色彩', '局部色彩', '分离色调', '分通道(RGB)',
+    '输入', '单张校正', '风格', '影调', '色彩', '局部色彩', '分离色调', '分通道(RGB)', '外部 LUT',
   ])
   assert.deepEqual(fields, [
     'base_photo_style', 'tone_map', 'temp', 'tint', 'exposure', 'look_strength',
-    'contrast', 'contrast_pivot', 'highlights', 'shadows', 'whites', 'blacks', 'curve',
+    'contrast', 'contrast_pivot', 'highlights', 'shadows', 'whites', 'blacks', 'curve', 'curve_points',
     'saturation', 'vibrance', 'hue', 'selective_hue_center', 'selective_hue_width',
     'selective_hue_shift', 'selective_saturation', 'split_shadow_hue', 'split_shadow_sat',
     'split_highlight_hue', 'split_highlight_sat', 'split_mid_hue', 'split_mid_sat',
-    'split_balance', 'lift', 'gamma', 'gain',
+    'split_balance', 'lift', 'gamma', 'gain', 'external_lut_id', 'external_lut_strength', 'external_lut_mode',
   ])
 })
 
@@ -32,10 +32,12 @@ test('every parameter can independently produce a labeled difference', () => {
   for (const group of COMPARISON_GROUPS) {
     for (const field of group.fields) {
       const value = before[field]
+      if (field.startsWith('external_lut_')) continue
       const after = {
         ...before,
         [field]: Array.isArray(value) ? value.map((item, index) => item + (index === 1 ? 0.01 : 0))
-          : typeof value === 'number' ? value + 0.01 : 'NAT',
+          : field === 'curve_points' ? { ...value, master: [[0, 0.1], [1, 1]] }
+            : typeof value === 'number' ? value + 0.01 : 'NAT',
       }
       const result = compareVersionParams(before, after)
       assert.equal(result.changedCount, 1, field)

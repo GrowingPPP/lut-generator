@@ -37,6 +37,21 @@ def summarize(params: dict) -> str:
     units = {"temp": "K", "exposure": "EV", "hue": "°"}
     parts = []
     for k, v in params.items():
+        if k == "curve_points":
+            parts.append("自由曲线沿用当前设置")
+            continue
+        if k == "external_lut_id":
+            if v:
+                parts.append("外部 LUT 沿用当前选择")
+            continue
+        if k == "external_lut_mode":
+            if params.get("external_lut_id"):
+                parts.append("外部 LUT 用途 " + ("输入转换" if v == "input" else "显示风格"))
+            continue
+        if k == "external_lut_strength":
+            if params.get("external_lut_id"):
+                parts.append(f"外部 LUT 强度 {v * 100:g}%")
+            continue
         label = labels.get(k, k)
         if isinstance(v, list):
             parts.append(f"{label} {v}")
@@ -68,7 +83,11 @@ def confirm_node(state: AgentState) -> dict:
 def generate_node(state: AgentState) -> dict:
     engine = lut_params_from_dict(state["params"])
     base = engine.base_photo_style
-    lut = generate_lut(engine, size=33)
+    if engine.external_lut_id:
+        from photo.render import lut_from_params
+        lut = lut_from_params(state["params"])
+    else:
+        lut = generate_lut(engine, size=33)
     cube_text = lut_to_cube(lut, title="generated", photo_style=base)
     reply = "已生成 LUT,右侧预览可查看,可继续调整或保存。"
     return {"cube_text": cube_text, "reply": reply, "done": True}

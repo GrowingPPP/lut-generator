@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { generateLUT, defaultParams } from '../src/lib/lutEngine.js'
+import { clearExternalLutCache, registerExternalLut } from '../src/lib/importedLuts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const golden = JSON.parse(readFileSync(join(here, '..', '..', 'golden.json'), 'utf8'))
@@ -12,6 +13,8 @@ let failures = 0
 let total = 0
 
 for (const c of golden.cases) {
+  clearExternalLutCache()
+  if (c.artifact) registerExternalLut(c.artifact.id, { ...c.artifact, data: new Float32Array(c.artifact.data) })
   const params = { ...defaultParams(), ...c.params }
   const { data } = generateLUT(params, size)
   for (const s of c.samples) {

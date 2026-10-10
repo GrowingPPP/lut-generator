@@ -1,7 +1,11 @@
 import { defaultParams, normalizeParams } from './lutEngine.js'
+import { validateCurvePoints } from './curveMath.js'
+import { validateExternalId, validateExternalOptions } from './cubeLut.js'
 
 export const PARAM_FIELDS = Object.freeze(Object.keys(defaultParams()))
 export const TECHNICAL_FIELDS = Object.freeze(['base_photo_style', 'tone_map'])
+export const EXTERNAL_FIELDS = Object.freeze(['external_lut_id', 'external_lut_strength', 'external_lut_mode'])
+export const STRUCTURED_FIELDS = Object.freeze(['curve_points', ...EXTERNAL_FIELDS])
 export const PARAM_RANGES = Object.freeze({
   temp: [-3000, 3000], tint: [-500, 500], exposure: [-3, 3], contrast: [-1, 1],
   contrast_pivot: [0.1, 0.9], saturation: [-1, 1], hue: [-180, 180], vibrance: [-1, 1],
@@ -12,6 +16,7 @@ export const PARAM_RANGES = Object.freeze({
   selective_hue_center: [0, 360], selective_hue_width: [1, 180],
   selective_hue_shift: [-180, 180], selective_saturation: [-1, 1],
   lift: [-0.1, 0.1], gamma: [0.5, 1.5], gain: [0.5, 1.5],
+  external_lut_strength: [0, 1],
 })
 export const DEPENDENCIES = Object.freeze({
   contrast: ['contrast_pivot'],
@@ -20,9 +25,12 @@ export const DEPENDENCIES = Object.freeze({
   split_shadow_sat: ['split_shadow_hue', 'split_balance'],
   split_highlight_sat: ['split_highlight_hue', 'split_balance'],
   split_mid_sat: ['split_mid_hue', 'split_balance'],
+  external_lut_id: ['external_lut_strength', 'external_lut_mode'],
+  external_lut_strength: ['external_lut_id', 'external_lut_mode'],
+  external_lut_mode: ['external_lut_id', 'external_lut_strength'],
 })
 const SET_FIELDS = new Set(['contrast_pivot', 'selective_hue_center', 'selective_hue_width',
-  'split_shadow_hue', 'split_highlight_hue', 'split_mid_hue', 'split_balance', 'look_strength'])
+  'split_shadow_hue', 'split_highlight_hue', 'split_mid_hue', 'split_balance', 'look_strength', ...STRUCTURED_FIELDS])
 const BASIC_FIELDS = new Set(['temp', 'tint', 'exposure'])
 export const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value))
 export function equalValue(a, b) {
@@ -57,6 +65,15 @@ export function validateParams(params, { complete = true } = {}) {
       if (!['STD', 'NAT', 'VIVD', 'VLOG'].includes(value)) invalid.push(key)
       continue
     }
+    if (STRUCTURED_FIELDS.includes(key)) {
+      try {
+        if (key === 'curve_points') validateCurvePoints(value)
+        else if (key === 'external_lut_id') validateExternalId(value)
+        else if (key === 'external_lut_mode' && !['display', 'input'].includes(value)) throw new Error()
+        else if (key === 'external_lut_strength' && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) throw new Error()
+      } catch { invalid.push(key) }
+      continue
+    }
     const values = Array.isArray(defaults[key]) ? value : [value]
     if (!Array.isArray(values) || (Array.isArray(defaults[key]) && values.length !== 3)) {
       invalid.push(key)
@@ -64,6 +81,12 @@ export function validateParams(params, { complete = true } = {}) {
     }
     const [low, high] = PARAM_RANGES[key]
     if (values.some((v) => typeof v !== 'number' || !Number.isFinite(v) || v < low || v > high)) invalid.push(key)
+  }
+  if (complete) {
+    try {
+      const full = { ...defaults, ...params }
+      validateExternalOptions(full.external_lut_id, full.external_lut_strength, full.external_lut_mode, full.base_photo_style)
+    } catch { invalid.push(...EXTERNAL_FIELDS) }
   }
   if (invalid.length) throw domainError('invalid_params', '参数非法或超出范围', [...new Set(invalid)])
   return params
@@ -92,7 +115,7 @@ export function defaultPurpose(field) {
 
 export function dependenciesFor(field) {
   const deps = [...(DEPENDENCIES[field] || [])]
-  if (!TECHNICAL_FIELDS.includes(field) && !BASIC_FIELDS.has(field) && field !== 'look_strength') deps.push('look_strength')
+  if (!TECHNICAL_FIELDS.includes(field) && !BASIC_FIELDS.has(field) && field !== 'look_strength' && !EXTERNAL_FIELDS.includes(field)) deps.push('look_strength')
   return deps
 }
 
@@ -213,15 +236,30 @@ export function validateRecipe(recipe, { allowEmpty = false } = {}) {
       || Object.keys(operation).some((key) => !['mode', 'value', 'dependency'].includes(key))
       || !['add', 'set'].includes(operation.mode)
       || ('dependency' in operation && typeof operation.dependency !== 'boolean')) { invalid.push(field); continue }
-    const values = Array.isArray(defaults[field]) ? operation.value : [operation.value]
-    if (!Array.isArray(values) || (Array.isArray(defaults[field]) && values.length !== 3)
-      || values.some((value) => !Number.isFinite(value)) || (operation.dependency && operation.mode !== 'set')) invalid.push(field)
-    else if (operation.mode === 'set' && values.some((value) => value < PARAM_RANGES[field][0] || value > PARAM_RANGES[field][1])) invalid.push(field)
+    if (STRUCTURED_FIELDS.includes(field)) {
+      if (operation.mode !== 'set') invalid.push(field)
+      try {
+        if (field === 'curve_points') validateCurvePoints(operation.value)
+        else if (field === 'external_lut_id') validateExternalId(operation.value)
+        else if (field === 'external_lut_mode' && !['display', 'input'].includes(operation.value)) throw new Error()
+        else if (field === 'external_lut_strength' && (typeof operation.value !== 'number' || !Number.isFinite(operation.value) || operation.value < 0 || operation.value > 1)) throw new Error()
+      } catch { invalid.push(field) }
+    } else {
+      const values = Array.isArray(defaults[field]) ? operation.value : [operation.value]
+      if (!Array.isArray(values) || (Array.isArray(defaults[field]) && values.length !== 3)
+        || values.some((value) => !Number.isFinite(value)) || (operation.dependency && operation.mode !== 'set')) invalid.push(field)
+      else if (operation.mode === 'set' && values.some((value) => value < PARAM_RANGES[field][0] || value > PARAM_RANGES[field][1])) invalid.push(field)
+    }
     if (!operation.dependency) {
       for (const dependency of dependenciesFor(field)) {
         if (!recipe.operations[dependency] || recipe.operations[dependency].mode !== 'set') invalid.push(dependency)
       }
     }
+  }
+  if (EXTERNAL_FIELDS.some(field => Object.hasOwn(recipe.operations, field))) {
+    try { validateExternalOptions(recipe.operations.external_lut_id?.value, recipe.operations.external_lut_strength?.value,
+      recipe.operations.external_lut_mode?.value, recipe.input_contract.base_photo_style) }
+    catch { invalid.push(...EXTERNAL_FIELDS) }
   }
   if (invalid.length) throw domainError('invalid_recipe', '配方操作或作用范围不完整', [...new Set(invalid)])
   const needed = new Set(Object.keys(recipe.operations).filter((field) => !recipe.operations[field].dependency).flatMap(dependenciesFor))

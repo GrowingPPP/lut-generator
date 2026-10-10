@@ -1,32 +1,47 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { generateLUT } from '../lib/lutEngine.js'
+import { defaultParams, generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
+import { preloadExternalLut } from '../lib/importedLuts.js'
 import { compareVersionParams, compatibleVersionInputs } from '../lib/versionComparison.js'
 import './ComparisonPreview.css'
 
 function RenderedImage({ image, params, label, className = '' }) {
   const canvas = useRef(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   useEffect(() => {
-    if (!image) return
-    let renderer
-    try {
-      renderer = new LUTRenderer(canvas.current)
-      renderer.setImage(image)
-      renderer.setSplitMode(false)
-      const { data, size } = generateLUT(params, 33)
-      renderer.setLUT(data, size)
-      renderer.render()
-      setError('')
-    } catch (e) {
-      setError(e.message)
+    if (!image) {
+      if (canvas.current) canvas.current.width = canvas.current.width
+      setLoading(false); setError('')
+      return
     }
-    return () => renderer?.dispose()
+    let renderer, cancelled = false
+    setLoading(true); setError('')
+    const render = async () => {
+      try {
+        canvas.current.width = image.width; canvas.current.height = image.height
+        renderer = new LUTRenderer(canvas.current)
+        renderer.clear()
+        await preloadExternalLut(params.external_lut_id)
+        if (cancelled) return
+        renderer.setImage(image)
+        renderer.setSplitMode(false)
+        renderer.setDisplayEncoding(params.base_photo_style === 'VLOG' ? 'Rec709' : 'sRGB')
+        const { data, size } = generateLUT(params, 33)
+        renderer.setLUT(data, size)
+        renderer.render()
+      } catch (e) {
+        if (!cancelled) { renderer?.clear(); setError(e.message) }
+      } finally { if (!cancelled) setLoading(false) }
+    }
+    render()
+    return () => { cancelled = true; renderer?.dispose() }
   }, [image, params])
   return (
     <div className={`pane ${className}`}>
       <div className="pane-label" title={label}>{label}</div>
       {error && <p className="error">{error}</p>}
+      {loading && <p className="text-muted" role="status">正在载入完整效果…</p>}
       <canvas ref={canvas} className="pane-canvas" role="img" aria-label={label} />
     </div>
   )
@@ -74,7 +89,7 @@ export default function ComparisonPreview({ image, a, b, compatible }) {
       <div className="comparison-differences">
         <h4>参数差异 <span>（B − A）</span></h4>
         {differences.identical ? (
-          <p className="comparison-identical" role="status">两版全部 30 项参数相同，没有参数差异。</p>
+          <p className="comparison-identical" role="status">两版全部 {Object.keys(defaultParams()).length} 项参数相同，没有参数差异。</p>
         ) : (
           <>
             <p className="text-muted">共 {differences.changedCount} 项变化，按参数组列出。</p>

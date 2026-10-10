@@ -1,6 +1,8 @@
 """LUT 生成参数定义。"""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
+from .curves import identity_curves, validate_curve_points
+from .imported import validate_external_options
 
 PHOTO_STYLES = ("STD", "NAT", "VIVD", "VLOG")
 
@@ -31,6 +33,10 @@ class LutParams:
     whites: float = 0.0            # 白部层次,正=增强 / 负=降低白点
     blacks: float = 0.0            # 黑部层次,正=抬黑位 / 负=压暗部
     curve: float = 0.0             # S 曲线强度,-1 ~ +1(平滑对比)
+    curve_points: dict = field(default_factory=identity_curves)
+    external_lut_id: str | None = None
+    external_lut_strength: float = 0.0
+    external_lut_mode: str = "display"
 
     # ---- 分离色调(逐点)----
     split_shadow_hue: float = 0.0      # 阴影染色色相(度),0=红,120=绿,240=蓝
@@ -51,6 +57,13 @@ class LutParams:
     gain: Tuple[float, float, float] = (1.0, 1.0, 1.0)   # 线性域 RGB 增益
 
     def __post_init__(self):
+        object.__setattr__(self, "curve_points", validate_curve_points(self.curve_points))
+        external_id, strength, mode = validate_external_options(
+            self.external_lut_id, self.external_lut_strength, self.external_lut_mode)
+        if mode == "input" and self.base_photo_style != "VLOG":
+            raise ValueError("外部输入转换仅支持 VLOG 工作区")
+        object.__setattr__(self, "external_lut_id", external_id)
+        object.__setattr__(self, "external_lut_strength", strength)
         if self.base_photo_style not in PHOTO_STYLES:
             raise ValueError(
                 f"base_photo_style 必须是 {PHOTO_STYLES} 之一,收到 {self.base_photo_style!r}"

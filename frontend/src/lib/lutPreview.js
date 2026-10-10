@@ -18,11 +18,20 @@ uniform sampler3D u_lut;
 uniform float u_lutSize;
 uniform float u_split;
 uniform float u_splitMode;
+uniform float u_rec709Display;
+vec3 displaySrgb(vec3 encoded) {
+  encoded = clamp(encoded, 0.0, 1.0);
+  vec3 linear = mix(pow((encoded + 0.099) / 1.099, vec3(1.0 / 0.45)), encoded / 4.5,
+                    lessThanEqual(encoded, vec3(0.081)));
+  return mix(1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055, 12.92 * linear,
+             lessThanEqual(linear, vec3(0.0031308)));
+}
 void main() {
   vec3 c = texture(u_image, v_uv).rgb;
   float s = (u_lutSize - 1.0) / u_lutSize;
   vec3 coord = c * s + 0.5 / u_lutSize;
   vec3 graded = texture(u_lut, coord).rgb;
+  if (u_rec709Display > 0.5) graded = displaySrgb(graded);
   vec3 outRgb;
   if (u_splitMode > 0.5) {
     outRgb = v_uv.x < u_split ? c : graded;
@@ -42,6 +51,7 @@ export class LUTRenderer {
     gl.getExtension('OES_texture_float_linear')
     this.split = 0.5
     this.splitMode = false
+    this.rec709Display = false
     this.program = this._buildProgram()
     this._setupQuad()
   }
@@ -75,6 +85,7 @@ export class LUTRenderer {
     this.u_lutSize = gl.getUniformLocation(prog, 'u_lutSize')
     this.u_split = gl.getUniformLocation(prog, 'u_split')
     this.u_splitMode = gl.getUniformLocation(prog, 'u_splitMode')
+    this.u_rec709Display = gl.getUniformLocation(prog, 'u_rec709Display')
     return prog
   }
 
@@ -142,6 +153,15 @@ export class LUTRenderer {
     this.splitMode = mode
   }
 
+  setDisplayEncoding(encoding) {
+    this.rec709Display = encoding === 'Rec709'
+  }
+
+  clear() {
+    this.gl.clearColor(0, 0, 0, 0)
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT)
+  }
+
   // 释放全部 GL 资源。不 loseContext,以便 canvas 被复用(StrictMode 双跑/切展示形式)。
   dispose() {
     const gl = this.gl
@@ -167,6 +187,7 @@ export class LUTRenderer {
     gl.uniform1f(this.u_lutSize, this.lutSize)
     gl.uniform1f(this.u_split, this.split)
     gl.uniform1f(this.u_splitMode, this.splitMode ? 1 : 0)
+    gl.uniform1f(this.u_rec709Display, this.rec709Display ? 1 : 0)
     gl.bindVertexArray(this.vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
   }

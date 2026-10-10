@@ -1,0 +1,9 @@
+.photo-export-modal { max-width: 640px; }
+.photo-export-source { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--border, #36363e); border-radius: 12px; background: #1d1d24; }
+.photo-export-source strong { overflow-wrap: anywhere; color: #f1f0ec; }
+.photo-export-source span { color: #c8c6c1; font-size: 13px; }
+.photo-export-options { display: grid; gap: 18px; margin: 18px 0 10px; }
+.photo-export-options label { display: grid; gap: 8px; color: #e4e2dc; }
+.photo-export-options select { min-height: 40px; width: 100%; }
+.photo-export-options output { color: #f0b56d; font-variant-numeric: tabular-nums; }
+.photo-export-options input[type='range'] { width: 100%; accent-color: #e5a553; }

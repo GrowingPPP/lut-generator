@@ -1,6 +1,7 @@
 import { PARAM_LABELS } from './autoGrade.js'
 import { defaultParams, normalizeParams } from './lutEngine.js'
 import { inputContract } from './styleRecipe.js'
+import { equalValue, clone } from './styleRecipe.js'
 
 // 顺序与参数面板一致；技术输入单列，旧版本也补齐当前全部字段。
 export const COMPARISON_GROUPS = Object.freeze([
@@ -9,7 +10,7 @@ export const COMPARISON_GROUPS = Object.freeze([
   { id: 'look', label: '风格', fields: ['look_strength'] },
   {
     id: 'tone', label: '影调',
-    fields: ['contrast', 'contrast_pivot', 'highlights', 'shadows', 'whites', 'blacks', 'curve'],
+    fields: ['contrast', 'contrast_pivot', 'highlights', 'shadows', 'whites', 'blacks', 'curve', 'curve_points'],
   },
   { id: 'color', label: '色彩', fields: ['saturation', 'vibrance', 'hue'] },
   {
@@ -22,6 +23,7 @@ export const COMPARISON_GROUPS = Object.freeze([
       'split_mid_hue', 'split_mid_sat', 'split_balance'],
   },
   { id: 'rgb', label: '分通道(RGB)', fields: ['lift', 'gamma', 'gain'] },
+  { id: 'external', label: '外部 LUT', fields: ['external_lut_id', 'external_lut_strength', 'external_lut_mode'] },
 ].map((group) => Object.freeze({ ...group, fields: Object.freeze(group.fields) })))
 
 const DIFFERENCE_TOLERANCE = 1e-9
@@ -39,6 +41,7 @@ function formatNumber(value) {
 }
 
 function formatValue(value, unit, signed = false) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return Object.entries(value).map(([channel, points]) => `${channel === 'master' ? '主曲线' : channel.toUpperCase()} ${points.map(point => point.map(formatNumber).join('→')).join(' / ')}`).join('；')
   const text = (number) => `${signed && number > 0 ? '+' : ''}${formatNumber(number)}${unit}`
   if (Array.isArray(value)) {
     return value.map((number, index) => `${CHANNEL_LABELS[index]} ${text(number)}`).join(' / ')
@@ -57,12 +60,12 @@ function compareField(field, before, after) {
     delta = after - before
     changed = Math.abs(delta) > DIFFERENCE_TOLERANCE
   } else {
-    changed = before !== after
+    changed = !equalValue(before, after)
   }
   return {
     field, label, unit,
-    before: Array.isArray(before) ? [...before] : before,
-    after: Array.isArray(after) ? [...after] : after,
+    before: clone(before),
+    after: clone(after),
     delta, changed,
     beforeText: formatValue(before, unit),
     afterText: formatValue(after, unit),

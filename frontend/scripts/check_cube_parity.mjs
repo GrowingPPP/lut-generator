@@ -14,11 +14,20 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { defaultParams, paramsToCube } from '../src/lib/lutEngine.js'
+import { identityCurves } from '../src/lib/curveMath.js'
+import { parseCube } from '../src/lib/cubeLut.js'
+import { clearExternalLutCache, registerExternalLut } from '../src/lib/importedLuts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const backendDir = join(here, '..', '..', 'backend')
 const venvPython = join(here, '..', '..', '.venv', 'bin', 'python')
 const ULP = 1e-6 // 6 位小数下的 1 个最低位
+const externalId = '11111111-2222-3333-4444-555555555555'
+const freeCurves = { ...identityCurves(), master:[[0,.02],[.2,.14],[.55,.65],[.8,.93],[1,1]],
+  r:[[0,0],[.3,.38],[.7,.75],[1,1]], b:[[0,0],[.3,.2],[.8,.75],[1,.96]] }
+const cube = ['LUT_3D_SIZE 2','DOMAIN_MIN .1 .2 .3','DOMAIN_MAX .9 .8 .7']
+for (const b of [0,1]) for (const g of [0,1]) for (const r of [0,1]) cube.push(`${.2*r+.8*b} ${g} ${.7*r+.3*b}`)
+function artifact(signal) { return { ...parseCube(cube.join('\n')),id:externalId,input_encoding:signal,output_encoding:signal==='VLOG'?'Rec709':signal } }
 
 const CASES = [
   { name: 'identity', params: {}, title: 'demo', mode: 'camera', bytesExact: true },
@@ -32,15 +41,24 @@ const CASES = [
   { name: 'split_tone', params: { split_shadow_hue: 220, split_shadow_sat: 0.7, split_highlight_hue: 40, split_highlight_sat: 0.6, split_balance: 0.45 }, title: 'split', mode: 'camera' },
   { name: 'tone_extreme_vlog', params: { base_photo_style: 'VLOG', tone_map: 0.4, highlights: -1, shadows: 1, curve: 1, split_shadow_sat: 0.8, split_highlight_sat: 0.8, split_balance: 0.2 }, title: 'vlog-tone', mode: 'camera' },
   { name: 'selective_mid_strength', params: { selective_hue_center: 28, selective_hue_width: 50, selective_hue_shift: 16, selective_saturation: -0.25, split_mid_hue: 210, split_mid_sat: 0.28, look_strength: 0.65 }, title: 'look', mode: 'camera' },
+  { name: 'free_curves',params:{curve_points:freeCurves,contrast:.2,look_strength:.7},title:'curves',mode:'camera' },
+  { name: 'external_display_curves',params:{curve_points:freeCurves,external_lut_id:externalId,external_lut_strength:.63,saturation:.25},artifact:artifact('sRGB'),title:'display',mode:'software' },
+  { name: 'external_rec709_display',params:{base_photo_style:'VLOG',external_lut_id:externalId,external_lut_strength:.8,tone_map:.4},artifact:artifact('Rec709'),title:'display709',mode:'camera' },
+  { name: 'external_input_curves',params:{base_photo_style:'VLOG',curve_points:freeCurves,external_lut_id:externalId,external_lut_strength:1,external_lut_mode:'input',exposure:-.3},artifact:artifact('VLOG'),title:'input',mode:'software' },
 ]
 
 const py = `
 import json, sys
 sys.path.insert(0, '.')
-from lut_engine import lut_params_from_dict, generate_lut, lut_to_cube
+from lut_engine import lut_params_from_dict, generate_lut, lut_to_cube, ImportedLut
+import numpy as np
 spec = json.loads(sys.argv[1])
 p = lut_params_from_dict(spec["params"])
-lut = generate_lut(p, size=33)
+artifact = None
+if spec.get('artifact'):
+    a=spec['artifact'];n=a['size'];data=np.asarray(a['data'],dtype=np.float32).reshape(n,n,n,3).transpose(2,1,0,3)
+    artifact=ImportedLut(n,data,tuple(a['domain_min']),tuple(a['domain_max']),input_encoding=a['input_encoding'],output_encoding=a['output_encoding'])
+lut = generate_lut(p, size=33, external_lut=artifact)
 style = p.base_photo_style if spec["mode"] == "camera" else None
 input_signal = "VLOG/V-Gamut" if p.base_photo_style == "VLOG" else f"{p.base_photo_style}/sRGB"
 output_signal = "Rec709" if p.base_photo_style == "VLOG" else "sRGB"
@@ -52,7 +70,10 @@ let failures = 0
 let totalValues = 0
 
 for (const c of CASES) {
-  const spec = JSON.stringify({ params: c.params, title: c.title, mode: c.mode })
+  clearExternalLutCache()
+  if (c.artifact) registerExternalLut(c.artifact.id,c.artifact)
+  const spec = JSON.stringify({ params: c.params, title: c.title, mode: c.mode,
+    ...(c.artifact ? {artifact:{...c.artifact,data:Array.from(c.artifact.data)}} : {}) })
   const want = execFileSync(venvPython, ['-c', py, spec], {
     cwd: backendDir, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
   })

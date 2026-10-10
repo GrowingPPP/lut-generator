@@ -24,6 +24,8 @@ STYLE_FIELDS = (
     "selective_hue_center", "selective_hue_width",
     "selective_hue_shift", "selective_saturation",
 )
+MANUAL_EFFECT_FIELDS = ("curve_points", "external_lut_id", "external_lut_strength", "external_lut_mode")
+AVAILABLE_FIELDS = STYLE_FIELDS + MANUAL_EFFECT_FIELDS
 
 TOOL_NAME = "submit_lut_params"
 CORRECTION_TOOL_NAME = "propose_correction"

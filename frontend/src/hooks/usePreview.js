@@ -2,11 +2,12 @@
 //
 // 从 App.jsx 抽出来的原因:它是纯粹的命令式副作用逻辑(GL 资源、rAF 合并、
 // 对象 URL 回收),与 React 状态编排是两件事,混在一起会互相干扰可读性。
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
 import { makeTestImage } from '../lib/preview.js'
+import { preloadExternalLut } from '../lib/importedLuts.js'
 
 export default function usePreview(
   originalRef,
@@ -18,9 +19,10 @@ export default function usePreview(
 ) {
   const rendererRef = useRef(null)
   const imageRef = useRef(null)
-  const paramsRef = useRef(params)
   const splitRef = useRef(0.5)
-  paramsRef.current = params
+  const readyRef = useRef(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const drawOriginal = useCallback(
     (img) => {
@@ -43,72 +45,56 @@ export default function usePreview(
     const img = sourceImage || imageRef.current
     const canvas = gradedRef.current
     if (!img || !canvas || !enabled) return
-    const renderer = new LUTRenderer(canvas)
-    renderer.setImage(img)
-    renderer.setSplitMode(displayMode === 'slider')
-    renderer.setSplit(splitRef.current)
-    const { data, size } = generateLUT(paramsRef.current, 33)
-    renderer.setLUT(data, size)
-    renderer.render()
-    rendererRef.current = renderer
-    drawOriginal(img)
+    let renderer
+    try {
+      renderer = new LUTRenderer(canvas)
+      renderer.setImage(img)
+      renderer.setSplitMode(displayMode === 'slider')
+      renderer.setSplit(splitRef.current)
+      renderer.clear()
+      rendererRef.current = renderer
+      drawOriginal(img)
+      setError('')
+    } catch (failure) { setError(failure.message); renderer?.dispose(); setLoading(false) }
     return () => {
-      renderer.dispose()
-      rendererRef.current = null
+      renderer?.dispose()
+      if (rendererRef.current === renderer) { rendererRef.current = null; readyRef.current = false }
     }
   }, [displayMode, gradedRef, drawOriginal, sourceImage, enabled])
 
   // 参数变化 → 重新生成 LUT(rAF 合并,拖滑杆同一帧只烘一次)
   useEffect(() => {
     const renderer = rendererRef.current
-    if (!renderer) return
-    const id = requestAnimationFrame(() => {
-      const { data, size } = generateLUT(paramsRef.current, 33)
-      renderer.setLUT(data, size)
-      renderer.render()
+    if (!renderer || !enabled) { readyRef.current = false; setLoading(false); return }
+    let cancelled = false
+    readyRef.current = false
+    setLoading(true); setError(''); renderer.clear()
+    const id = requestAnimationFrame(async () => {
+      try {
+        await preloadExternalLut(params.external_lut_id)
+        if (cancelled || rendererRef.current !== renderer) return
+        const { data, size } = generateLUT(params, 33)
+        renderer.setLUT(data, size)
+        renderer.setDisplayEncoding(params.base_photo_style === 'VLOG' ? 'Rec709' : 'sRGB')
+        renderer.setSplit(splitRef.current)
+        renderer.render()
+        readyRef.current = true
+      } catch (failure) {
+        if (!cancelled && rendererRef.current === renderer) { renderer.clear(); setError(failure.message) }
+      } finally { if (!cancelled && rendererRef.current === renderer) setLoading(false) }
     })
-    return () => cancelAnimationFrame(id)
-  }, [params])
+    return () => { cancelled = true; cancelAnimationFrame(id) }
+  }, [params, sourceImage, displayMode, enabled])
 
   const setSplit = useCallback((x) => {
     splitRef.current = x
     const renderer = rendererRef.current
-    if (!renderer) return
+    if (!renderer || !readyRef.current) return
     renderer.setSplit(x)
     renderer.render()
   }, [])
 
-  const upload = useCallback(
-    (file) =>
-      new Promise((resolve) => {
-        const url = URL.createObjectURL(file)
-        const img = new Image()
-        img.onload = () => {
-          const side = Math.min(1, 2048 / Math.max(img.naturalWidth, img.naturalHeight))
-          const preview = document.createElement('canvas')
-          preview.width = Math.max(1, Math.round(img.naturalWidth * side))
-          preview.height = Math.max(1, Math.round(img.naturalHeight * side))
-          preview.getContext('2d').drawImage(img, 0, 0, preview.width, preview.height)
-          imageRef.current = preview
-          drawOriginal(preview)
-          const renderer = rendererRef.current
-          renderer.setImage(preview)
-          const { data, size } = generateLUT(paramsRef.current, 33)
-          renderer.setLUT(data, size)
-          renderer.render()
-          URL.revokeObjectURL(url)
-          resolve(true)
-        }
-        img.onerror = () => {
-          URL.revokeObjectURL(url)
-          resolve(false)
-        }
-        img.src = url
-      }),
-    [drawOriginal],
-  )
-
-  return { setSplit, upload }
+  return { setSplit, error, loading }
 }
 
 // 折叠状态下显示「已改动几项」,避免参数被藏起来后用户找不到自己调过什么

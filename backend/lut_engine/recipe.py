@@ -3,9 +3,13 @@ from dataclasses import asdict
 from math import isfinite
 
 from .params import LutParams, PHOTO_STYLES
+from .curves import validate_curve_points
+from .imported import validate_external_id
 
 TECHNICAL_FIELDS = {"base_photo_style", "tone_map"}
 RGB_FIELDS = {"lift", "gamma", "gain"}
+EXTERNAL_FIELDS = {"external_lut_id", "external_lut_strength", "external_lut_mode"}
+STRUCTURED_FIELDS = {"curve_points"} | EXTERNAL_FIELDS
 PARAM_FIELDS = set(asdict(LutParams()))
 STYLE_FIELDS = PARAM_FIELDS - TECHNICAL_FIELDS
 DEPENDENCIES = {
@@ -15,6 +19,9 @@ DEPENDENCIES = {
     "split_shadow_sat": {"split_shadow_hue", "split_balance"},
     "split_highlight_sat": {"split_highlight_hue", "split_balance"},
     "split_mid_sat": {"split_mid_hue", "split_balance"},
+    "external_lut_id": {"external_lut_strength", "external_lut_mode"},
+    "external_lut_strength": {"external_lut_id", "external_lut_mode"},
+    "external_lut_mode": {"external_lut_id", "external_lut_strength"},
 }
 
 
@@ -51,13 +58,20 @@ def validate_params(params):
     for key, value in list(full.items()):
         if key == "base_photo_style":
             continue
+        if key in STRUCTURED_FIELDS:
+            continue
         if key in RGB_FIELDS:
             if not isinstance(value, (list, tuple)) or len(value) != 3:
                 raise RecipeError("invalid_rgb", f"{key} 必须是三个通道", [key])
             full[key] = [_number(v, key) for v in value]
         else:
             full[key] = _number(value, key)
-    clamped = asdict(LutParams(**full))
+    try:
+        full["curve_points"] = validate_curve_points(full["curve_points"])
+        full["external_lut_id"] = validate_external_id(full["external_lut_id"])
+        clamped = asdict(LutParams(**full))
+    except ValueError as exc:
+        raise RecipeError("invalid_effect",str(exc),STRUCTURED_FIELDS) from exc
     invalid = [key for key, value in full.items()
                if (list(clamped[key]) if key in RGB_FIELDS else clamped[key]) != value]
     if invalid:
@@ -70,6 +84,15 @@ def input_contract(params):
     return {"base_photo_style": full["base_photo_style"],
             "tone_map": full["tone_map"],
             "output_encoding": "Rec709" if full["base_photo_style"] == "VLOG" else "sRGB"}
+
+
+def technical_baseline_params(params):
+    """保留当前输入和有效外部技术转换,排除用户创意调整。"""
+    current = validate_params(params)
+    baseline = asdict(LutParams(base_photo_style=current["base_photo_style"], tone_map=current["tone_map"]))
+    if current["external_lut_mode"] == "input":
+        baseline.update({field: current[field] for field in EXTERNAL_FIELDS})
+    return baseline
 
 
 def validate_input_contract(contract):
@@ -111,13 +134,28 @@ def validate_recipe(recipe):
         if type(dependency) is not bool or (dependency and mode != "set"):
             raise RecipeError("invalid_dependency", "依赖项必须使用 set", [field])
         value = operation["value"]
-        if field in RGB_FIELDS:
+        if field in STRUCTURED_FIELDS and mode != "set":
+            raise RecipeError("invalid_operation","自由曲线和外部 LUT 配方必须使用 set",[field])
+        if field == "curve_points":
+            try:
+                value = validate_curve_points(value)
+            except ValueError as exc:
+                raise RecipeError("invalid_curve",str(exc),[field]) from exc
+        elif field == "external_lut_id":
+            try:
+                value = validate_external_id(value)
+            except ValueError as exc:
+                raise RecipeError("invalid_reference",str(exc),[field]) from exc
+        elif field == "external_lut_mode":
+            if value not in ("display","input"):
+                raise RecipeError("invalid_mode","外部 LUT 模式无效",[field])
+        elif field in RGB_FIELDS:
             if not isinstance(value, (list, tuple)) or len(value) != 3:
                 raise RecipeError("invalid_rgb", f"{field} 必须是三个通道", [field])
             value = [_number(v, field) for v in value]
         else:
             value = _number(value, field)
-        if mode == "set":
+        if mode == "set" and field not in EXTERNAL_FIELDS:
             validate_params({field: value})
         normalized[field] = {"mode": mode, "value": value, **({"dependency": True} if dependency else {})}
     effect_fields = {field for field, op in normalized.items() if not op.get("dependency")}
@@ -128,7 +166,7 @@ def validate_recipe(recipe):
     needed = set()
     for field in effect_fields:
         needed.update(DEPENDENCIES.get(field, set()))
-    if effect_fields - {"temp", "tint", "exposure", "look_strength"}:
+    if effect_fields - {"temp", "tint", "exposure", "look_strength"} - EXTERNAL_FIELDS:
         needed.add("look_strength")
     missing = {field for field in needed if normalized.get(field, {}).get("mode") != "set"}
     if missing:
@@ -136,6 +174,9 @@ def validate_recipe(recipe):
     orphaned = {field for field,op in normalized.items() if op.get("dependency") and field not in needed}
     if orphaned:
         raise RecipeError("invalid_dependency","作用范围项不是配方所需的依赖",orphaned)
+    if set(normalized) & EXTERNAL_FIELDS:
+        validate_params({"base_photo_style":contract["base_photo_style"],
+                         **{field:normalized[field]["value"] for field in EXTERNAL_FIELDS}})
     source = recipe.get("source", {})
     if not isinstance(source, dict):
         raise RecipeError("invalid_source", "配方来源必须是对象")

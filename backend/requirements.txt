@@ -2,6 +2,7 @@ fastapi>=0.110
 uvicorn>=0.30
 PyMySQL>=1.1
 numpy>=1.26
+Pillow>=10.3
 openai>=1.40
 python-dotenv>=1.0
 python-multipart>=0.0.9   # FastAPI 文件上传(multipart/form-data)

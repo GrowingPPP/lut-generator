@@ -19,6 +19,10 @@ export const PARAM_LABELS = {
   whites: ['白部层次', ''],
   blacks: ['黑部层次', ''],
   curve: ['S 曲线', ''],
+  curve_points: ['自由曲线', ''],
+  external_lut_id: ['外部 LUT', ''],
+  external_lut_strength: ['外部 LUT 强度', ''],
+  external_lut_mode: ['外部 LUT 用途', ''],
   saturation: ['饱和度', ''],
   vibrance: ['自然饱和', ''],
   hue: ['全局色相', '°'],
@@ -153,7 +157,13 @@ export function diffParams(before, after) {
       out.push({ key, label, text, delta: d })
       continue
     }
-    if (a !== b) out.push({ key, label, text: `${label} ${b}`, delta: null })
+    if (key === 'curve_points') {
+      if (JSON.stringify(a) !== JSON.stringify(b)) out.push({ key, label, text: `${label} 已更新控制点`, delta: null })
+    } else if (a !== b) {
+      const display = key === 'external_lut_id' ? (b ? '已选择' : '已移除')
+        : key === 'external_lut_mode' ? (b === 'input' ? '输入转换' : '显示风格') : b
+      out.push({ key, label, text: `${label} ${display}`, delta: null })
+    }
   }
   return out
 }

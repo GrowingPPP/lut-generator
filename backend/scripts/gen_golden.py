@@ -4,16 +4,23 @@
 """
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from lut_engine import LutParams, generate_lut
+from lut_engine import LutParams, generate_lut, identity_curves, parse_cube
 
 SIZE = 33
 SAMPLE_IDX = [0, 8, 16, 24, 32]
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+EXTERNAL_ID = "11111111-2222-3333-4444-555555555555"
+FREE_CURVES = identity_curves()
+FREE_CURVES["master"] = [[0,.02],[.2,.14],[.55,.65],[.8,.93],[1,1]]
+FREE_CURVES["r"] = [[0,0],[.3,.38],[.7,.75],[1,1]]
+FREE_CURVES["b"] = [[0,0],[.3,.2],[.8,.75],[1,.96]]
+EXTERNAL_CUBE = ("LUT_3D_SIZE 2\nDOMAIN_MIN .1 .2 .3\nDOMAIN_MAX .9 .8 .7\n"+
+                 "\n".join(f"{.2*r+.8*b} {g} {.7*r+.3*b}" for b in [0,1] for g in [0,1] for r in [0,1])+"\n")
 
 # 覆盖照片线(sRGB)、视频线(V-Log)、tone_map 变化、色相色域、全算子
 CASES = [
@@ -61,6 +68,14 @@ CASES = [
                                            "split_highlight_hue": 35.0, "split_highlight_sat": 0.45}},
     {"name": "tone_extreme", "params": {"highlights": -1.0, "shadows": 1.0, "whites": 0.3,
                                         "blacks": 0.3, "curve": 1.0}},
+    {"name": "free_curves", "params": {"curve_points": FREE_CURVES, "contrast": .2, "look_strength": .7}},
+    {"name": "external_display_curves", "params": {"curve_points": FREE_CURVES, "external_lut_id": EXTERNAL_ID,
+         "external_lut_strength": .63, "saturation": .25}, "artifact_signal": "sRGB"},
+    {"name": "external_rec709_display", "params": {"base_photo_style": "VLOG", "external_lut_id": EXTERNAL_ID,
+         "external_lut_strength": .8, "tone_map": .4}, "artifact_signal": "Rec709"},
+    {"name": "external_input_curves", "params": {"base_photo_style": "VLOG", "curve_points": FREE_CURVES,
+         "external_lut_id": EXTERNAL_ID, "external_lut_strength": 1, "external_lut_mode": "input", "exposure": -.3},
+         "artifact_signal": "VLOG"},
 ]
 
 
@@ -68,7 +83,11 @@ def main():
     cases_out = []
     for case in CASES:
         engine = LutParams(**case["params"])
-        lut = generate_lut(engine, size=SIZE)
+        artifact = None
+        if case.get("artifact_signal"):
+            signal = case["artifact_signal"]
+            artifact = replace(parse_cube(EXTERNAL_CUBE),input_encoding=signal,output_encoding="Rec709" if signal=="VLOG" else signal)
+        lut = generate_lut(engine, size=SIZE, external_lut=artifact)
         samples = []
         for r in SAMPLE_IDX:
             for g in SAMPLE_IDX:
@@ -86,6 +105,9 @@ def main():
             "name": case["name"],
             "params": params_full,
             "samples": samples,
+            **({"artifact": {"id":EXTERNAL_ID,"size":artifact.size,"domain_min":artifact.domain_min,"domain_max":artifact.domain_max,
+                             "input_encoding":artifact.input_encoding,"output_encoding":artifact.output_encoding,
+                             "data":artifact.data.transpose(2,1,0,3).reshape(-1).tolist()}} if artifact else {}),
         })
 
     golden = {"size": SIZE, "cases": cases_out}

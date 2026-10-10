@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createWorkspace, createWorkspaceState, beginEdit, previewEdit, commitEdit, undoEdit, redoEdit,
+import { createWorkspace, createWorkspaceState, beginEdit, previewEdit, commitEdit, cancelEdit, undoEdit, redoEdit,
   setWorkspaceMeta, serializeWorkspaceState, validateWorkspaceRecord, applyRecipeEdit, restoreVersionEdit,
   workspaceId } from '../lib/workspace.js'
 import { createDraftStorage, draftBackup } from '../lib/draftStorage.js'
@@ -96,6 +96,7 @@ export default function useWorkspace({ userId = 'guest', initialParams, sessionI
   const begin = useCallback((options = {}) => change((current) => beginEdit(current, options), { immediate: false }), [change])
   const update = useCallback((patch) => change((current) => previewEdit(current, patch), { immediate: false }), [change])
   const commit = useCallback((patch, options = {}) => change((current) => commitEdit(current, patch, options)), [change])
+  const cancel = useCallback(() => change(cancelEdit), [change])
   const undo = useCallback(() => change(undoEdit), [change])
   const redo = useCallback(() => change(redoEdit), [change])
   const setMeta = useCallback((meta) => change((current) => setWorkspaceMeta(current, meta), { immediate: false }), [change])
@@ -229,7 +230,7 @@ export default function useWorkspace({ userId = 'guest', initialParams, sessionI
     ready: ready && state.workspace.user_id === userKey, saveStatus, error, conflict,
     canUndo: state.workspace.user_id === userKey && state.past.length > 0,
     canRedo: state.workspace.user_id === userKey && state.future.length > 0,
-    begin, update, commit, undo, redo, setMeta, loadWorkspace, fork, flush, backup,
+    begin, update, commit, cancel, undo, redo, setMeta, loadWorkspace, fork, flush, backup,
     setGoal, setLocks, setPurpose, reset, applyRecipe, restoreVersion, confirmRecipeInput, confirmBaseline,
     cachePreview, getCachedPreview, clearPreviews }
 }

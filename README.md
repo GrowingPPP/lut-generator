@@ -12,13 +12,22 @@
 - **多样张预览与验证**:最多 5 张样张共用一套 LUT；一张主样张用于 AI，其他图片用于预览与确定性统计，查看缩略图不会切换 AI 主图
 - **命名版本与 A/B**:每个工作区最多 20 个账号版本，选择时固定 A/B 快照；查看不改参数，恢复版本是一条可撤销事务
 - **AI 自动修图**:以主样张和当前参数分析，可叠加自然语言风格；报告分别展示画面观察、目标冲突、实际调整与受阻原因
-- **精细调色**:30 个参数,按单张校正、风格强度、影调、全局与局部色彩、阴影/中间调/高光染色、RGB 分通道和输入基准分组。风格强度可在技术转换与完整效果之间调整
-- **输入与相机引导**:本机读取可用的相机型号和 EXIF 色彩空间供核对；Photo Style 仍由用户确认。提供当前输入/输出说明、S5II/S5IIX 导入参考、异常排查与使用说明下载
+- **精细调色**:34 个参数字段,按单张校正、风格强度、影调、全局与局部色彩、阴影/中间调/高光染色、RGB 分通道和输入基准分组。风格强度可在技术转换与完整效果之间调整
+- **输入与相机引导**:读取可用的相机型号和 EXIF 色彩空间供核对；Photo Style 仍由用户确认。提供当前输入/输出说明、S5II/S5IIX 导入参考、异常排查与使用说明下载
 - **图像诊断**:选中真实样张并确认匹配输入后，显示缩小预览的亮度/RGB 直方图、裁切风险与技术中性基线差异；提供风险叠加和现有曲线/局部色相范围示意
 - **资产库组织**:搜索名称/描述/标签，按种类、输入、收藏和分组筛选，并按时间/名称排序；标签、描述、收藏、分组、内置封面编辑独立保存，纯信息修改不新增调色修订
 - **自动修图过程控制**:显示服务端真实阶段，支持请求取消、安全重试与部分完成结果续跑；请求幂等恢复，续跑核对当前参数与照片来源；取消在安全边界确认后生效，保存开始后会明确提示不能取消
 
-本轮使用完善方案见 [设计文档](docs/specs/product-readiness-design.md)，完成清单与检查结果见 [验收记录](docs/specs/product-readiness-validation.md)。真实模型效果矩阵与相机实拍验收按用户要求延期。
+新增图像与调色扩展：
+
+- **统一色彩管理**：有效 ICC 的普通照片统一转换到 sRGB，方向统一，预览与分析使用同一规范化解码；V-Log 保留原编码。无 ICC 的 RGB 明确提示假定 sRGB，旧预览需重新绑定后更新。
+- **刷新恢复作业**：提交前持久保存冻结请求摘要；刷新继续查询与冻结编辑。核对来源后恢复正式候选，以作业 UUID 防止重复应用，确认草稿保存后才完成回执。已正式保存的结果可在服务重启后恢复。
+- **参考图匹配**：独立上传参考照片，选择色彩/影调及强度，在现有参数内寻找受保护、通过风险检查的候选；预览后明确应用，一次撤销。统计接近不代表艺术效果一致，不调用模型。
+- **外部 .cube**：账号内导入纯3D 2–65点文件并确认信号；同编码显示风格支持强度，VLOG→Rec709替换系统技术转换且固定100%。预览、照片与LUT导出使用同一合成效果。
+- **自由曲线**：主曲线与RGB曲线，每通道2–16点，单调PCHIP；拖动、键盘与精确百分比输入，删除、通道复位、保护和撤销。曲线及外部字段由手动入口控制，AI保留当前设置。
+- **调整后照片导出**：从已绑定原文件按完整33³ LUT渲染原分辨率JPEG/PNG，嵌入sRGB ICC并移除原EXIF/GPS；PNG无损保存8位调整结果，JPEG质量可调。
+
+本轮方案见[图像与调色扩展设计](docs/specs/extended-grading-design.md)，检查结果见[扩展验收记录](docs/specs/extended-grading-validation.md)。此前使用完善记录见[原验收记录](docs/specs/product-readiness-validation.md)。真实模型效果矩阵与相机实拍验收按用户要求继续待办。
 
 ## 技术栈
 
@@ -208,7 +217,7 @@ key 优先级:`CHROMA_LLM_API_KEY`(环境变量或项目根 `.env`)> `OPENAI_API
 
 ### 工作区 API
 
-接口使用现有登录 cookie，新增元数据不进入 30 项调色参数。完整请求与响应说明见[调色工作区接口契约](docs/specs/style-workspace-design.md#93-实际-api)。
+接口使用现有登录 cookie，工作区元数据独立于 34 项调色参数。完整请求与响应说明见[调色工作区接口契约](docs/specs/style-workspace-design.md#93-实际-api)。
 
 | 职责 | 当前入口 |
 |---|---|
@@ -221,7 +230,7 @@ key 优先级:`CHROMA_LLM_API_KEY`(环境变量或项目根 `.env`)> `OPENAI_API
 | 资产组织与检索 | `GET /api/luts` 支持查询筛选排序，`GET /api/luts/summary` 提供总数与分组，`PATCH /api/luts/{id}/metadata` 编辑信息 |
 | 明确目标导出 | `GET /api/luts/{id}/download` 下载保存效果或 `neutral` 风格；`POST` 提交 `target: "current"` 和当前完整参数 |
 
-自动修图作业注册表保存在服务进程内，当前部署须使用 **单个 Uvicorn worker**（项目的 `make dev` 已采用此方式）。每账号最多一个、全局最多两个活跃作业，终态保留 15 分钟；重启或过期后需核对草稿并重新开始。数据库限流仍跨进程共享，但这不意味着作业状态可以跨进程查询。多 worker 或多实例部署前需将作业状态、幂等标识与取消信号迁移到共享存储。
+自动修图作业注册表保存在服务进程内，当前部署须使用 **单个 Uvicorn worker**（项目的 `make dev` 已采用此方式）。每账号最多一个、全局最多两个活跃作业，进程内终态保留 15 分钟；正式保存的成功结果可按作业 UUID 从账号报告恢复，尚在运行的任务不支持服务重启续跑。未知请求须明确阻止迟到登记后才解除冻结，拒绝回执仍属于当前进程的状态。数据库限流仍跨进程共享，但这不意味着作业状态可以跨进程查询。多 worker 或多实例部署前需将作业状态、幂等标识与取消信号迁移到共享存储。
 
 ## 松下相机适配说明
 
@@ -271,19 +280,21 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 
 同日后续使用完善的最终完整 `make check`：**894 项后端、109 项前端、21 组引擎与 11 组 `.cube` 全部通过**，生产构建成功。新增输入引导、诊断、资产组织和作业控制的浏览器流程及独立复核结果见[本轮验收记录](docs/specs/product-readiness-validation.md)。
 
+同日图像与调色扩展的最终完整 `make check`：**1,020 项后端、141 项前端、25 组引擎（9,375 个通道采样）与 15 组 `.cube`（1,617,165 个数值）全部通过**，生产构建成功。统一色彩管理、刷新作业恢复、参考匹配、外部 LUT、自由曲线及原分辨率照片导出的浏览器验收与使用边界见[扩展验收记录](docs/specs/extended-grading-validation.md)。
+
 浏览器使用真实 JPEG 验证了正常调色预览、本机缩小预览恢复、原文件重新绑定、双样张统计、参数保护、撤销/重做和固定 A/B；另验证跨标签冲突另存副本、全参数保护时自动修图跳过、风格候选不改稿与重复追加取消、版本恢复后撤销，以及 STD 的 33³ 机内文件下载。390px 手机布局已验证两幅比较预览尺寸一致、滑动裁切正确且无横向溢出；撤销当前草稿后，冻结 A/B 的参数差异仍保持正确。模型约束与失败路径使用模拟响应覆盖；本轮没有现场重测真实模型生成的艺术效果，因此上述验证不代表对风格审美的验收。
 
 前后端各有一份同数学的引擎实现(后端 numpy 用于产出 `.cube`,前端 JS 用于 WebGL 实时预览、缩略图与未保存时的直接下载),因此有三道一致性校验:
 
 | 校验 | 内容 | 判定标准 |
 |---|---|---|
-| `check_parity.mjs` | 引擎数学 | 125 个采样点 × 21 组参数,逐点差 < 1e-6 |
+| `check_parity.mjs` | 引擎数学 | 125 个采样点 × 25 组参数,逐点差 < 1e-6 |
 | `check_cube_parity.mjs` | `.cube` 序列化 | header 与行数逐字节相同;数值差异 ≤ 6 位小数下 1 个最低位 |
 | `test_photo_render.py` | LUT 采样语义 | Python 渲染与前端 GLSL 公式逐点一致(< 1e-5) |
 
 第三道是自动修图引入的:模型看的是后端渲染的图,用户看的是前端渲染的图,**两者必须一致**,否则视觉复检的结论对不上用户所见。
 
-`.cube` 序列化的已知差异:后端 `f"{v:.6f}"` 用 Python 的 round-half-even,前端 `toFixed` 用 half-away-from-zero,叠加 JS `Math.pow` 与 numpy 的浮点差。实测纯 sRGB 路径**逐字节相同**,V-Log 与 gamma/矩阵路径最多 1 个最低位(占比 < 1%)。**改动任一侧的算子或序列化后都要跑 `make check`。**
+`.cube` 序列化的已知差异:后端 `f"{v:.6f}"` 用 Python 的 round-half-even,前端 `toFixed` 用 half-away-from-zero,叠加 JS `Math.pow` 与 numpy 的浮点差。当前 15 组用例中 identity、暖调相机和基础软件输出**逐字节相同**；含 V-Log、gamma、曲线或外部 LUT 的路径最多差 1 个最低位，差异占比最高约 2.02%。**改动任一侧的算子或序列化后都要跑 `make check`。**
 
 ## 文档
 
@@ -297,5 +308,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 | [docs/specs/style-workspace-design.md](docs/specs/style-workspace-design.md) | 已实现的六项工作区能力：用户流程、保存边界、参数/配方契约、实际 API 与验收记录 |
 | [docs/specs/product-readiness-design.md](docs/specs/product-readiness-design.md) | 输入引导、调色诊断、资产组织与 AI 过程控制的设计与范围 |
 | [docs/specs/product-readiness-validation.md](docs/specs/product-readiness-validation.md) | 本轮完成清单、完整回归、浏览器与独立复核结果、部署边界和延期事项 |
+| [docs/specs/extended-grading-design.md](docs/specs/extended-grading-design.md) | 色彩管理、作业恢复、参考匹配、外部 LUT、自由曲线与照片导出的设计及参数契约 |
+| [docs/specs/extended-grading-validation.md](docs/specs/extended-grading-validation.md) | 扩展功能交付、1,020 项后端与 141 项前端回归、浏览器验收、复核修复及待办 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |
 | [docs/leftover-issues.md](docs/leftover-issues.md) | 已知问题的记录与处理结果 |

@@ -1,5 +1,6 @@
 """调色任务的创作目标与参数保护,不扩展 LUT 参数集合。"""
 import json
+from copy import deepcopy
 from dataclasses import asdict
 from typing import Any, Literal
 
@@ -9,6 +10,7 @@ from lut_engine import LutParams
 
 PARAM_FIELDS = tuple(LutParams.__dataclass_fields__)
 AUTO_READONLY_FIELDS = ("base_photo_style", "tone_map")
+MANUAL_EFFECT_FIELDS = ("curve_points", "external_lut_id", "external_lut_strength", "external_lut_mode")
 ATMOSPHERE_FIELDS = ("exposure", "temp", "tint")
 
 
@@ -35,7 +37,7 @@ def normalize_context(context: EditingContext | dict | None = None) -> EditingCo
 
 def parameter_snapshot(params: dict[str, Any]) -> dict[str, Any]:
     """复制包含 RGB 数组的参数,使阶段来源不随后续编辑改变。"""
-    return {key: list(value) if isinstance(value, (list, tuple)) else value
+    return {key: list(value) if isinstance(value, tuple) else deepcopy(value)
             for key, value in params.items()}
 
 
@@ -59,7 +61,7 @@ def writable_fields(context: EditingContext | dict | None, stage: str) -> set[st
         fields = set(PARAM_FIELDS)
     if stage != "chat":
         fields -= set(AUTO_READONLY_FIELDS)
-    return fields - set(ctx.locked_fields)
+    return fields - set(ctx.locked_fields) - set(MANUAL_EFFECT_FIELDS)
 
 
 def application_reasons(before: dict, candidate: dict,
@@ -69,6 +71,8 @@ def application_reasons(before: dict, candidate: dict,
     old, new = complete_params(before), complete_params(candidate)
     reasons = [f"参数 {key} 已锁定,本次提议未应用"
                for key in ctx.locked_fields if old[key] != new[key]]
+    reasons.extend(f"手动效果 {key} 在 AI 调整中只读"
+                   for key in MANUAL_EFFECT_FIELDS if old[key] != new[key])
     if stage != "chat":
         reasons.extend(f"输入参数 {key} 在自动修图中只读"
                        for key in AUTO_READONLY_FIELDS if old[key] != new[key])
@@ -93,6 +97,7 @@ def context_prompt(context: EditingContext | dict | None, stage: str) -> str:
     elif ctx.goal_mode == "style_only":
         text += "\n只落实用户明确要求的风格,不执行基础曝光或白平衡校正。"
     text += "\n锁定字段不得改变;相同目标值或零增量可以保持原值。"
+    text += "自由曲线与外部 LUT 由用户手动控制,必须原样保留,不能反推为参数或宣称修改。"
     if ctx.locked_fields:
         text += "锁定项:" + ", ".join(ctx.locked_fields)
     return text

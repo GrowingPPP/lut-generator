@@ -171,6 +171,15 @@ def init_db():
                     if exc.args[0] != 1060:
                         raise
             cur.execute("UPDATE luts SET updated_at=created_at WHERE updated_at=''")
+            cur.execute("""CREATE TABLE IF NOT EXISTS imported_luts (
+                id CHAR(36) PRIMARY KEY,user_id INT NOT NULL,name VARCHAR(255) NOT NULL,
+                title VARCHAR(255) NOT NULL,size INT NOT NULL,digest CHAR(64) NOT NULL,
+                input_encoding VARCHAR(16) NOT NULL,output_encoding VARCHAR(16) NOT NULL,
+                mode VARCHAR(16) NOT NULL,domain_min_json TEXT NOT NULL,domain_max_json TEXT NOT NULL,
+                grid_blob MEDIUMBLOB NOT NULL,byte_size INT NOT NULL,created_at VARCHAR(64) NOT NULL,
+                UNIQUE KEY idx_import_digest(user_id,digest,input_encoding,output_encoding),
+                INDEX idx_import_owner(user_id)
+            ) CHARACTER SET utf8mb4""")
             cur.execute("""CREATE TABLE IF NOT EXISTS workspaces (
                 id CHAR(36) PRIMARY KEY, user_id INT NOT NULL, session_id INT,
                 name VARCHAR(255) NOT NULL, created_at VARCHAR(64) NOT NULL,
@@ -392,6 +401,7 @@ def clear_users():
             cur.execute("DELETE FROM auth_rate_events")
             cur.execute("DELETE FROM auth_rate_keys")
             cur.execute("DELETE FROM workspace_reports")
+            cur.execute("DELETE FROM imported_luts")
             cur.execute("DELETE FROM workspace_versions")
             cur.execute("DELETE FROM workspaces")
             cur.execute("DELETE FROM users")
@@ -694,6 +704,32 @@ def persist_auto_grade(user_id, workspace_id, content, params_json, payload):
             raise
 
 
+def find_auto_job_report(user_id, job_id, workspace_id=None):
+    """按账号与作业身份恢复已共同提交的正式报告。"""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            where = "user_id=%s AND kind='auto' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.job_id'))=%s"
+            values = [user_id, job_id]
+            if workspace_id is not None:
+                where += " AND workspace_id=%s"
+                values.append(workspace_id)
+            cur.execute("SELECT payload_json FROM workspace_reports WHERE " + where + " ORDER BY id DESC LIMIT 1", values)
+            record = cur.fetchone()
+            if record is None:
+                cur.execute("SELECT payload_json FROM messages WHERE user_id=%s AND role='agent' "
+                            "AND JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.job_id'))=%s ORDER BY id DESC LIMIT 1",
+                            (user_id, job_id))
+                record = cur.fetchone()
+            if not record:
+                return None
+            payload = json.loads(record['payload_json'])
+            if payload.get('undone'):
+                return None
+            if workspace_id is not None and payload.get('workspace_id') != workspace_id:
+                return None
+            return payload
+
+
 def list_messages(session_id: int, user_id: int):
     """列出会话消息。
 
@@ -881,3 +917,50 @@ def latest_workspace_report(workspace_id,user_id,kind="auto"):
             cur.execute("SELECT * FROM workspace_reports WHERE user_id=%s AND workspace_id=%s AND kind=%s "
                         "ORDER BY id DESC LIMIT 1", (user_id,workspace_id,kind))
             return cur.fetchone()
+
+
+class ImportCapacityError(ValueError):
+    pass
+
+
+def create_imported_lut(user_id, name, title, size, digest, input_encoding, output_encoding,
+                        mode, domain_min, domain_max, grid_blob):
+    """不可变账号引用；同一内容及信号声明去重,容量校验与创建共享账号行锁。"""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE id=%s FOR UPDATE",(user_id,))
+            if not cur.fetchone():
+                raise ValueError("账号不存在")
+            cur.execute("SELECT * FROM imported_luts WHERE user_id=%s AND digest=%s AND input_encoding=%s AND output_encoding=%s",
+                        (user_id,digest,input_encoding,output_encoding))
+            existing = cur.fetchone()
+            if existing:
+                return existing
+            cur.execute("SELECT COUNT(*) AS n,COALESCE(SUM(byte_size),0) AS bytes FROM imported_luts WHERE user_id=%s",(user_id,))
+            usage = cur.fetchone()
+            if usage["n"] >= 50 or usage["bytes"]+len(grid_blob) > 100*1024*1024:
+                raise ImportCapacityError("每账号最多50个导入LUT,解析数据总量最多100MB")
+            identifier = str(uuid4())
+            cur.execute("INSERT INTO imported_luts (id,user_id,name,title,size,digest,input_encoding,output_encoding,mode,domain_min_json,domain_max_json,grid_blob,byte_size,created_at) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (identifier,user_id,name,title,size,digest,input_encoding,output_encoding,mode,
+                         json.dumps(domain_min),json.dumps(domain_max),grid_blob,len(grid_blob),datetime.now(timezone.utc).isoformat()))
+            cur.execute("SELECT * FROM imported_luts WHERE id=%s",(identifier,))
+            created = cur.fetchone()
+        conn.commit()
+    return created
+
+
+def get_imported_lut(identifier,user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM imported_luts WHERE id=%s AND user_id=%s",(identifier,user_id))
+            return cur.fetchone()
+
+
+def list_imported_luts(user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,name,title,size,digest,input_encoding,output_encoding,mode,domain_min_json,domain_max_json,byte_size,created_at "
+                        "FROM imported_luts WHERE user_id=%s ORDER BY created_at DESC,id DESC",(user_id,))
+            return cur.fetchall()

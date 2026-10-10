@@ -14,6 +14,7 @@ import {
   metadataPatch,
   normalizeAsset,
 } from '../lib/assetLibrary.js'
+import { preloadExternalLut } from '../lib/importedLuts.js'
 import { makeThumb } from '../lib/preview.js'
 import useModalFocus from '../hooks/useModalFocus.js'
 import './LibraryView.css'
@@ -140,8 +141,12 @@ export default function LibraryView({ onPreview }) {
         listLuts(filtersRef.current),
         getLibrarySummary(),
       ])
+      const loaded = await Promise.all(assets.map(async (asset) => {
+        try { await preloadExternalLut(asset.params?.external_lut_id); return normalizeAsset(asset) }
+        catch (failure) { return { ...normalizeAsset(asset), preview_error: failure.message } }
+      }))
       if (requestId.current !== id) return
-      setLuts(assets.map(normalizeAsset))
+      setLuts(loaded)
       setSummary(info)
       setError('')
     } catch (e) {
@@ -161,7 +166,7 @@ export default function LibraryView({ onPreview }) {
       Object.fromEntries(
         luts
           .filter((lut) => lut.cover_id === 'engine')
-          .map((lut) => [lut.id, makeThumb(lut.params)]),
+          .map((lut) => [lut.id, lut.preview_error ? null : makeThumb(lut.params)]),
       ),
     [luts],
   )
@@ -427,7 +432,7 @@ export default function LibraryView({ onPreview }) {
           <AssetCover
             asset={detail}
             thumb={
-              detail.cover_id === 'engine' ? makeThumb(detail.params) : null
+              detail.cover_id === 'engine' && !detail.preview_error ? makeThumb(detail.params) : null
             }
           />
           <dl className="library-detail">

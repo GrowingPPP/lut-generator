@@ -3,6 +3,7 @@
 // 抽出来单独放的原因:这两个函数被生成页与「我的 LUT」页共用,
 // 之前都堆在 App.jsx 里,导致改一处要读 950 行文件。
 import { applyLUTToImageData, generateLUT } from './lutEngine.js'
+import { displayImageData } from './displayColor.js'
 
 let _testImage = null
 
@@ -57,7 +58,7 @@ export function makeThumb(params) {
   ctx.drawImage(makeTestImage(), 0, 0, w, h)
   const imageData = ctx.getImageData(0, 0, w, h)
   const { data, size } = generateLUT(params, 33)
-  const out = applyLUTToImageData(imageData, data, size)
+  const out = displayImageData(applyLUTToImageData(imageData, data, size), params.base_photo_style)
   ctx.putImageData(out, 0, 0)
   return c.toDataURL('image/jpeg', 0.85)
 }

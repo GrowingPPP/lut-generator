@@ -5,13 +5,13 @@
 
 计算全部在**编码值域**(0..1)上完成,不做线性化:判据阈值是按编码值标定的。
 """
-import io
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from PIL import Image, ImageFile, ImageOps
+from PIL import Image
 
-from .types import CorruptImageError, ImageTooLargeError, UnsupportedImageError, PhotoStats
+from .types import PhotoStats
+from .color_management import MAX_PIXELS, PREVIEW_SIDE, photo_array
 
 # 统计前降采样到此长边。分位数对采样密度不敏感,降采样只影响速度不影响判据。
 MAX_ANALYZE_SIDE = 512
@@ -36,8 +36,7 @@ DARK_Q = 0.20
 BRIGHT_Q = 0.80
 
 # 单张图最大像素数(PIL 的 decompression bomb 阈值远高于此,这里自己收一道)
-MAX_PIXELS = 8000 * 8000
-MAX_RENDER_SIDE = 2048  # 后续多轮 LUT 渲染按这个尺寸分配 float 数组
+MAX_RENDER_SIDE = PREVIEW_SIDE
 
 _LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 # BT.601 的 RGB→YCbCr 系数(与肤色区间配套,不要换成 709)
@@ -47,42 +46,9 @@ _YCC = np.array([
     [0.5, -0.418688, -0.081312],
 ], np.float32)
 
-# 损坏图片容错:允许截断的 JPEG 尽最大努力解码,而不是直接抛错
-ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-
-def load_image(data: bytes) -> np.ndarray:
-    """bytes → float32 RGB HxWx3,值域 0..1,EXIF 方向已应用。
-
-    校验的是**实际内容**而不是声明的 MIME 类型。
-    """
-    if not data:
-        raise CorruptImageError("图片内容为空")
-    try:
-        img = Image.open(io.BytesIO(data))
-        img.verify()                     # 先验完整性
-    except UnsupportedImageError:
-        raise
-    except Exception as exc:
-        raise CorruptImageError(f"图片无法解码:{exc}") from exc
-
-    try:
-        img = Image.open(io.BytesIO(data))   # verify 之后必须重新打开
-        if img.width * img.height > MAX_PIXELS:
-            raise ImageTooLargeError(
-                f"图片像素数 {img.width}×{img.height} 超出上限 {MAX_PIXELS}"
-            )
-        img.draft("RGB", (MAX_RENDER_SIDE, MAX_RENDER_SIDE))
-        img.thumbnail((MAX_RENDER_SIDE, MAX_RENDER_SIDE), Image.Resampling.LANCZOS)
-        img = ImageOps.exif_transpose(img)   # 应用方向,否则统计的是旋转过的图
-        img = img.convert("RGB")
-    except ImageTooLargeError:
-        raise
-    except Exception as exc:
-        raise CorruptImageError(f"图片无法读取:{exc}") from exc
-
-    arr = np.asarray(img, dtype=np.float32) / 255.0
-    return np.ascontiguousarray(arr)
+def load_image(data: bytes, base_photo_style: str = "STD") -> np.ndarray:
+    """使用照片预览同一解码流程，返回 float32 编码 RGB，EXIF 方向已应用。"""
+    return photo_array(data, base_photo_style, max_pixels=MAX_PIXELS)
 
 
 def downsample(img: np.ndarray, max_side: int = MAX_ANALYZE_SIDE) -> np.ndarray:

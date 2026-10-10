@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { normalizeParams } from '../lib/lutEngine.js'
 import { parameterSignature } from '../lib/workspaceFlow.js'
 import { curvePoints, diagnosticDimensions, hueWeight, measureDiagnostics } from '../lib/diagnostics.js'
+import { preloadExternalLut, resolveExternalLut } from '../lib/importedLuts.js'
 import './DiagnosticsPanel.css'
 
 const CHANNELS = [
@@ -97,7 +98,7 @@ export default function DiagnosticsPanel({ image, params, compatible, sampleName
   const normalized = useMemo(() => normalizeParams(params), [params])
   const signature = useMemo(() => parameterSignature(normalized), [normalized])
   const measurable = !!image && compatible === true
-  const currentMeasurement = measurable && measurement?.image === image && measurement?.signature === signature ? measurement.result : null
+  const currentMeasurement = measurable && !failure && measurement?.image === image && measurement?.signature === signature ? measurement.result : null
 
   useEffect(() => {
     const id = ++generationRef.current
@@ -110,8 +111,10 @@ export default function DiagnosticsPanel({ image, params, compatible, sampleName
     const reject = (error) => {
       if (!cancelled && generationRef.current === id) setFailure(error.message || error || '无法测量当前预览')
     }
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       try {
+        await preloadExternalLut(params.external_lut_id)
+        if (cancelled || generationRef.current !== id) return
         let maxSide = 128
         if (typeof Worker !== 'undefined') {
           try { worker = new Worker(new URL('../workers/diagnostics.worker.js', import.meta.url), { type: 'module' }); maxSide = 256 }
@@ -132,7 +135,8 @@ export default function DiagnosticsPanel({ image, params, compatible, sampleName
             worker?.terminate()
           }
           worker.onerror = () => { reject('图像诊断未能完成，请切换样张后重试'); worker?.terminate() }
-          worker.postMessage({ id, image: sample, params }, [sample.data.buffer])
+          const external = params.external_lut_id ? resolveExternalLut(params.external_lut_id) : null
+          worker.postMessage({ id, image: sample, params, external }, [sample.data.buffer])
         } else accept(measureDiagnostics(sample, params))
       } catch (error) { reject(error); worker?.terminate() }
     }, 180)

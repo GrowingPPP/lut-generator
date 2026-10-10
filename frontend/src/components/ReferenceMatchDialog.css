@@ -1,0 +1,17 @@
+.reference-match { width: min(1120px, calc(100vw - 32px)); }
+.reference-kicker { display:block; color:var(--accent,#e4a04b); font-size:11px; letter-spacing:.14em; margin-bottom:5px; }
+.reference-images { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin:20px 0 12px; align-items:start; }
+.reference-images .pane { min-width:0; background:#101114; border:1px solid #33353a; border-radius:10px; overflow:hidden; }
+.reference-images .pane-canvas { display:block; width:100%; max-height:390px; object-fit:contain; }
+.reference-upload { display:flex; min-height:210px; align-items:center; justify-content:center; flex-direction:column; gap:18px; border:1px dashed #5e5550; color:#f0d2ac; border-radius:10px; cursor:pointer; }
+.reference-upload input { max-width:185px; }
+.reference-file { display:flex; justify-content:space-between; gap:12px; align-items:center; font-size:13px; color:#dedee0; overflow-wrap:anywhere; }
+.reference-file input { position:absolute; width:1px; height:1px; opacity:0; }
+.reference-options { display:flex; flex-wrap:wrap; gap:20px; margin:18px 0; border:0; padding:0; color:#e6e7e9; }
+.reference-options label { display:flex; gap:8px; align-items:center; }
+.reference-strength { flex:1; min-width:220px; }
+.reference-strength input { flex:1; min-width:60px; }
+.reference-strength output { color:#efbb75; min-width:38px; font-variant-numeric:tabular-nums; }
+.reference-result { padding:15px 18px; border-left:2px solid #e4a04b; background:#25211c; margin:16px 0; border-radius:0 9px 9px 0; }
+.reference-result p { font-size:13px; line-height:1.7; }
+@media(max-width:600px) { .reference-images { grid-template-columns:1fr; } .reference-match { width:calc(100vw - 20px); } .reference-file { align-items:flex-start; } }

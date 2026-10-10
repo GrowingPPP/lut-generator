@@ -79,7 +79,7 @@ def test_engine_layer_is_dependency_free(path):
 
 def test_engine_only_depends_on_numpy():
     """引擎的外部依赖只应有 numpy —— 加依赖要显式决策,不能悄悄引入。"""
-    allowed = {"numpy", "math", "dataclasses", "typing", "__future__"}
+    allowed = {"numpy", "math", "dataclasses", "typing", "__future__", "re"}
     for path in _py_files(BACKEND / "lut_engine"):
         extra = _imports_of(path) - allowed - {path.stem}
         # 允许包内相对导入(level>0 不会被 _imports_of 收集)
@@ -96,8 +96,8 @@ def test_param_count_consistent_across_implementations():
     """
     from dataclasses import asdict
 
-    from agent.schemas import STYLE_FIELDS
-    from api.main import LutParamsModel
+    from agent.schemas import STYLE_FIELDS, AVAILABLE_FIELDS, MANUAL_EFFECT_FIELDS, ExtractResult
+    from api.models import LutParamsModel
     from lut_engine.params import LutParams
 
     backend_fields = set(LutParams.__dataclass_fields__)
@@ -106,11 +106,10 @@ def test_param_count_consistent_across_implementations():
     for key in ("lift", "gamma", "gain"):
         engine_defaults[key] = list(engine_defaults[key])
     assert LutParamsModel().model_dump() == engine_defaults
-    assert backend_fields == set(STYLE_FIELDS), (
-        f"LutParams 与 STYLE_FIELDS 不一致:"
-        f" 仅引擎有 {sorted(backend_fields - set(STYLE_FIELDS))},"
-        f" 仅 schema 有 {sorted(set(STYLE_FIELDS) - backend_fields)}"
-    )
+    assert backend_fields == set(AVAILABLE_FIELDS)
+    assert set(STYLE_FIELDS) == backend_fields - set(MANUAL_EFFECT_FIELDS)
+    assert set(ExtractResult.model_fields) - {"intent"} == set(STYLE_FIELDS)
+    assert set(MANUAL_EFFECT_FIELDS) == {"curve_points", "external_lut_id", "external_lut_strength", "external_lut_mode"}
 
     js = (FRONTEND / "src/lib/lutEngine.js").read_text(encoding="utf-8")
     block = re.search(r"export function defaultParams\(\) \{\s*return \{(.*?)\n  \}", js, re.S)

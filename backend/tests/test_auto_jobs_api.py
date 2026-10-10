@@ -337,3 +337,56 @@ def test_single_worker_configuration_is_a_definite_not_accepted_error(owner, cle
     assert response.json()["detail"]["code"] == "single_worker_required"
     assert response.json()["detail"]["accepted"] is False
     assert not executor.tasks
+
+
+def test_committed_job_restores_from_report_and_replays_without_a_live_registry(owner, clean):
+    _, headers, wid = owner
+    jobs, executor = clean
+    raw, data = request_data(wid)
+    assert post(headers, raw, data).status_code == 202
+    executor.next()
+    completed = state(headers, data['request_id'])
+    assert completed['result']['job_id'] == data['request_id']
+    assert completed['result']['job_fingerprint']
+    jobs._jobs.clear()
+    recovered = client.get(f"/api/auto/jobs/{data['request_id']}",
+                           params={'workspace_id': wid}, headers=headers)
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()['recovered_from_report']
+    assert recovered.json()['result'] == completed['result']
+    assert recovered.json()['stages'] == [] and recovered.json()['continuation_stages'] == []
+    repeated = post(headers, raw, data)
+    assert repeated.status_code == 202 and repeated.json()['recovered_from_report']
+    assert not executor.tasks
+    changed = {**data, 'base_params': json.dumps({**DEFAULT_PARAMS, 'contrast': .1})}
+    assert post(headers, raw, changed).status_code == 409
+    assert len(db.list_messages(completed['result']['session_id'], owner[0])) == 1
+
+
+def test_explicit_missing_submission_fence_prevents_a_late_post(owner, clean):
+    _, headers, wid = owner
+    _, executor = clean
+    raw, data = request_data(wid)
+    assert client.get(f"/api/auto/jobs/{data['request_id']}", headers=headers).status_code == 404
+    ended = client.delete(f"/api/auto/jobs/{data['request_id']}", headers=headers,
+                          params={'workspace_id': wid, 'prevent_late': 'true'})
+    assert ended.status_code == 200, ended.text
+    assert ended.json()['status'] == 'cancelled' and ended.json()['not_accepted']
+    late = post(headers, raw, data)
+    assert late.status_code == 409 and late.json()['detail']['code'] == 'request_blocked'
+    assert not executor.tasks and report(headers, wid) is None
+
+
+def test_job_queries_and_cancel_fence_are_scoped_to_the_receipt_workspace(owner, clean):
+    _, headers, wid = owner
+    _, executor = clean
+    raw, data = request_data(wid)
+    assert post(headers, raw, data).status_code == 202
+    other = client.post('/api/workspaces', headers=headers, json={}).json()['id']
+    path = f"/api/auto/jobs/{data['request_id']}"
+    assert client.get(path, headers=headers, params={'workspace_id': other}).status_code == 404
+    assert client.delete(path, headers=headers,
+                         params={'workspace_id': other, 'prevent_late': 'true'}).status_code == 404
+    assert state(headers, data['request_id'])['status'] == 'queued'
+    executor.next()
+    assert client.get(path, headers=headers, params={'workspace_id': other}).status_code == 404

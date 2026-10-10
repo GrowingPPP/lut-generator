@@ -5,20 +5,16 @@ export function parameterSignature(params) {
 }
 
 export function equivalentCandidate(a, b, tolerance = 1e-9) {
-  return PARAM_FIELDS.every((field) => {
-    if (field === 'base_photo_style') return a[field] === b[field]
-    const left = Array.isArray(a[field]) ? a[field] : [a[field]]
-    const right = Array.isArray(b[field]) ? b[field] : [b[field]]
-    return (
-      left.length === right.length &&
-      left.every(
-        (value, i) =>
-          Number.isFinite(value) &&
-          Number.isFinite(right[i]) &&
-          Math.abs(value - right[i]) <= tolerance,
-      )
-    )
-  })
+  const same = (left, right) => {
+    if (typeof left === 'number' || typeof right === 'number')
+      return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance
+    if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object')
+      return left === right && left !== undefined
+    if (Array.isArray(left) !== Array.isArray(right)) return false
+    const keys = Object.keys(left)
+    return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && same(left[key], right[key]))
+  }
+  return !!a && !!b && PARAM_FIELDS.every(field => same(a[field], b[field]))
 }
 
 export function effectivePhases(result, { chatPurpose } = {}) {

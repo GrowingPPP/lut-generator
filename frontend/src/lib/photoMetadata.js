@@ -103,6 +103,21 @@ export async function readPhotoMetadata(file) {
 export function photoMetadataNotes(metadata) {
   const info = metadata || UNKNOWN
   const camera = [info.camera_make, info.camera_model].filter(Boolean).join(' ')
+  if (info.color_management?.version === 1) {
+    const management = info.color_management
+    return {
+      camera: camera || '未识别相机信息',
+      color: management.input_style === 'VLOG'
+        ? '已保留 V-Log / V-Gamut 编码'
+        : management.status === 'converted_srgb'
+          ? '已按 ICC 统一为 sRGB'
+          : management.status === 'declared_srgb'
+            ? '已统一为 sRGB'
+            : '未带 ICC，按 sRGB 解释',
+      warning: management.warning || '',
+      input: '相机信息不能证明直出或识别 Photo Style，请按拍摄设置确认输入。',
+    }
+  }
   const color =
     info.color_space === 'sRGB'
       ? 'EXIF 标记 sRGB'

@@ -1,5 +1,6 @@
 import { defaultParams, generateLUT, normalizeParams } from './lutEngine.js'
 import { domainError, inputContract, validateParams } from './styleRecipe.js'
+import { displayComponent } from './displayColor.js'
 
 export const DIAGNOSTIC_BINS = 64
 export const DIAGNOSTIC_MAX_SIDE = 256
@@ -23,7 +24,9 @@ export function technicalBaseline(params) {
   validateParams(params, { complete: false })
   const current = normalizeParams(params)
   validateParams(current)
-  return { ...defaultParams(), base_photo_style: current.base_photo_style, tone_map: current.tone_map }
+  return { ...defaultParams(), base_photo_style: current.base_photo_style, tone_map: current.tone_map,
+    ...(current.external_lut_mode === 'input' ? { external_lut_id: current.external_lut_id,
+      external_lut_mode: current.external_lut_mode, external_lut_strength: current.external_lut_strength } : {}) }
 }
 
 function assertImage({ data, width, height } = {}) {
@@ -101,13 +104,15 @@ export function measureDiagnostics(image, params) {
   const overlayBytes = new Uint8ClampedArray(image.data.length)
   for (let pixel = 0; pixel < mask.length; pixel++) {
     const offset = pixel * 4
-    for (let channel = 0; channel < 3; channel++) currentBytes[offset + channel] = Math.round(currentPixels[pixel * 3 + channel] * 255)
+    for (let channel = 0; channel < 3; channel++) currentBytes[offset + channel] = Math.round(displayComponent(currentPixels[pixel * 3 + channel], normalized.base_photo_style) * 255)
     currentBytes[offset + 3] = image.data[offset + 3]
     if (mask[pixel]) overlayBytes.set(mask[pixel] === 1 ? [255, 190, 80, 160] : [95, 165, 255, 160], offset)
   }
   return { version: DIAGNOSTIC_VERSION, width: image.width, height: image.height,
     sampled_pixels: current.sampled_pixels, input_contract: inputContract(normalized),
-    baseline_definition: '相同输入基准的中性参数；V-Log 保留当前显示映射',
+    baseline_definition: normalized.external_lut_id && normalized.external_lut_mode === 'input'
+      ? '相同输入基准的中性参数；保留当前外部 V-Log 技术转换'
+      : '相同输入基准的中性参数；V-Log 保留当前显示映射',
     baseline, current, highlight_clip_delta_pct: current.highlight_clip_pct - baseline.highlight_clip_pct,
     shadow_clip_delta_pct: current.shadow_clip_pct - baseline.shadow_clip_pct,
     current_pixels: currentBytes, overlay_pixels: overlayBytes }

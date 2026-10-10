@@ -38,7 +38,7 @@ CONSERVATIVE_TEMP_GAIN_PER_UNIT = 3800.0
 CONSERVATIVE_TEMP_BUDGET_K = 1200.0
 
 # 不参与自动调整的字段(决定 LUT 输入侧,必须只读透传)
-READONLY_FIELDS = ("base_photo_style", "tone_map")
+READONLY_FIELDS = ("base_photo_style", "tone_map", "curve_points", "external_lut_id", "external_lut_strength", "external_lut_mode")
 
 
 class AutoGradeCancelled(Exception):
@@ -99,7 +99,7 @@ def clamp_params(params: Dict[str, Any]) -> Dict[str, Any]:
     # 只读字段原样回填
     for key in READONLY_FIELDS:
         if key in params:
-            out[key] = params[key]
+            out[key] = parameter_snapshot({key:params[key]})[key]
     return out
 
 
@@ -420,8 +420,9 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
                   style: Optional[str] = None,
                   model: Optional[str] = None, max_tokens: int = 1200,
                   *, context: Optional[Dict[str, Any]] = None,
+                  base_photo_style: str = "STD",
                   ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
-    """把原图与渲染图拼成一张发给模型做主观复检。
+    """把调整前后已渲染的编码 RGB 转到 sRGB 后发给模型做主观复检。
 
     返回 (意见, usage, 跳过原因)。跳过原因三选一:
       None      复检正常执行(可能仍返回空意见)
@@ -435,9 +436,10 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
     if client is None:
         return None, {}, "no_client"
     try:
-        panel = R.side_by_side(before, after)
+        from photo.color_management import display_rgb
+        panel = R.side_by_side(display_rgb(before, base_photo_style), display_rgb(after, base_photo_style))
         url = R.to_data_url(panel)
-        text = VISION_REVIEW_PROMPT + "\n" + context_prompt(context, "review")
+        text = VISION_REVIEW_PROMPT.replace("左边是原图", "左边是本次调整前的效果") + "\n" + context_prompt(context, "review")
         if style:
             text += f"\n(用户指定的风格是「{style}」,请一并判断是否贴合)"
         resp = client.chat.completions.create(
@@ -697,7 +699,8 @@ def auto_grade(
         notify("review", "running")
         after_img = R.render_lut(R.lut_from_params(params), img)
         review, usage, review_skip_reason = vision_review(
-            client, baseline_img, after_img, style=style, context=ctx)
+            client, baseline_img, after_img, style=style, context=ctx,
+            base_photo_style=params["base_photo_style"])
         _accumulate_usage(usage_total, usage)
         notify("review", "done" if review_skip_reason is None else "skipped",
                reason=review_skip_reason)

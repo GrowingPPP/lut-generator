@@ -235,9 +235,13 @@ async function submitAutoGrade(path, {
 
 export const autoGrade = (request) => submitAutoGrade('/auto/grade', request)
 export const startAutoJob = (request) => submitAutoGrade('/auto/jobs', request)
-export const getAutoJob = (id) => jsonFetch(`${BASE}/auto/jobs/${encodeURIComponent(id)}`)
-export const cancelAutoJob = (id) =>
-  jsonFetch(`${BASE}/auto/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const getAutoJob = (id, workspaceId) => jsonFetch(`${BASE}/auto/jobs/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`)
+export const cancelAutoJob = (id, { workspaceId, preventLate = false } = {}) => {
+  const query = new URLSearchParams()
+  if (workspaceId) query.set('workspace_id', workspaceId)
+  if (preventLate) query.set('prevent_late', 'true')
+  return jsonFetch(`${BASE}/auto/jobs/${encodeURIComponent(id)}${query.size ? `?${query}` : ''}`, { method: 'DELETE' })
+}
 
 export const listWorkspaces = () => jsonFetch(`${BASE}/workspaces`)
 export const createWorkspace = (data) =>

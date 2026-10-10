@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { defaultParams, normalizeParams } from './lib/lutEngine.js'
 import usePreview from './hooks/usePreview.js'
 import useWorkspace from './hooks/useWorkspace.js'
 import { inputContract, applyStyleRecipe } from './lib/styleRecipe.js'
 import { lockConflicts } from './lib/workspace.js'
-import { decodeSample, restoreSample, sampleMatches } from './lib/samples.js'
+import { decodeSample, restoreSample, sampleMatches, sampleIsNormalized } from './lib/samples.js'
 import { diffParams } from './lib/autoGrade.js'
 import { parameterSignature, effectivePhases, versionSource, equivalentCandidate } from './lib/workspaceFlow.js'
 import WorkspaceToolbar from './components/WorkspaceToolbar.jsx'
@@ -22,6 +22,12 @@ import {
   logout as apiLogout, me,
 } from './lib/api.js'
 import { paramsToCube } from './lib/lutEngine.js'
+import { sameAutoMetadata } from './lib/autoJobs.js'
+import { preloadExternalLut, clearExternalLutCache } from './lib/importedLuts.js'
+import CurveEditor from './components/CurveEditor.jsx'
+import ImportedLutPanel from './components/ImportedLutPanel.jsx'
+import ReferenceMatchDialog from './components/ReferenceMatchDialog.jsx'
+import PhotoExportDialog from './components/PhotoExportDialog.jsx'
 import AutoRetouchBar from './components/AutoRetouchBar.jsx'
 import AutoRetouchReport from './components/AutoRetouchReport.jsx'
 import AuthView from './components/AuthView.jsx'
@@ -172,6 +178,7 @@ function GenerateView({ previewLut, user }) {
   const [grading, setGrading] = useState(false)
   const [validating, setValidating] = useState(false)
   const [sampleLoading, setSampleLoading] = useState(false)
+  const [advancedLoading, setAdvancedLoading] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [groupOpen, setGroupOpen] = useState(defaultGroupOpen)
@@ -182,6 +189,10 @@ function GenerateView({ previewLut, user }) {
   const [saveDialog, setSaveDialog] = useState(false)
   const [cameraGuide, setCameraGuide] = useState(null)
   const [inputConfirmation, setInputConfirmation] = useState(false)
+  const [referenceDialog, setReferenceDialog] = useState(false)
+  const [photoExport, setPhotoExport] = useState(false)
+  const [resourceLoading, setResourceLoading] = useState(false)
+  const [resourceError, setResourceError] = useState('')
   const [savedAsset, setSavedAsset] = useState(null)
   const [pendingAsset, setPendingAsset] = useState(null)
   const [baselineFields, setBaselineFields] = useState([])
@@ -200,7 +211,8 @@ function GenerateView({ previewLut, user }) {
   mediaRef.current = media
   const currentRef = useRef(workspace)
   currentRef.current = workspace
-  const busy = sending || grading || validating || sampleLoading || remoteBusy || !ready
+  const baseBusy = sending || grading || validating || sampleLoading || remoteBusy || resourceLoading || !ready
+  const busy = baseBusy || advancedLoading
   const samples = workspace.samples || []
   const primaryId = workspace.primary_sample_id || null
   const selectedSample = samples.find((s) => s.id === selectedId) || samples[0]
@@ -209,7 +221,7 @@ function GenerateView({ previewLut, user }) {
   const primaryMedia = media.get(primaryId)
   const compatible = !!selectedSample?.input_confirmed && sampleMatches(selectedSample, params)
   const primaryCompatible = !!primarySample?.input_confirmed && sampleMatches(primarySample, params)
-  const { setSplit } = usePreview(
+  const { setSplit, error: previewError } = usePreview(
     originalRef,
     gradedRef,
     params,
@@ -217,7 +229,8 @@ function GenerateView({ previewLut, user }) {
     selectedMedia?.canvas,
     !samples.length || (!!selectedMedia && compatible),
   )
-  const context = { goal_mode: workspace.goal_mode, locked_fields: workspace.locked_fields }
+  const context = useMemo(() => ({ goal_mode: workspace.goal_mode, locked_fields: workspace.locked_fields }),
+    [workspace.goal_mode, workspace.locked_fields])
   const retainPreviews = !!workspace.retain_previews
   const gradeResult = workspace.report
   const validation = workspace.validation
@@ -235,6 +248,16 @@ function GenerateView({ previewLut, user }) {
     validation?.stale ||
     validation?._params_json !== parameterSignature(params) ||
     validation?._samples_json !== sampleKey
+
+  useEffect(() => {
+    let cancelled = false
+    setResourceError('')
+    setResourceLoading(Boolean(params.external_lut_id))
+    preloadExternalLut(params.external_lut_id).catch((error) => {
+      if (!cancelled) setResourceError(error.message)
+    }).finally(() => { if (!cancelled) setResourceLoading(false) })
+    return () => { cancelled = true }
+  }, [params.external_lut_id, workspace.id])
 
   const ensureRemote = async (ws = currentRef.current) => {
     if (remoteRequests.current.has(ws.id)) return remoteRequests.current.get(ws.id)
@@ -378,6 +401,8 @@ function GenerateView({ previewLut, user }) {
         saveDialog ||
         inputConfirmation ||
         pendingAsset ||
+        referenceDialog ||
+        photoExport ||
         /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
       )
         return
@@ -386,7 +411,7 @@ function GenerateView({ previewLut, user }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editor.undo, editor.redo, busy, saveDialog, inputConfirmation, pendingAsset])
+  }, [editor.undo, editor.redo, busy, saveDialog, inputConfirmation, pendingAsset, referenceDialog, photoExport])
 
   const captureRequest = () => {
     const ws = currentRef.current
@@ -400,6 +425,40 @@ function GenerateView({ previewLut, user }) {
     }
   }
   const requestMatches = (request) => JSON.stringify(captureRequest()) === JSON.stringify(request)
+  const applyAutoResult = async (result, meta, request = null) => {
+    const ws = currentRef.current
+    const sample = (ws.samples || []).find((item) => item.id === ws.primary_sample_id)
+    const current = { workspace_id: ws.id, params: ws.params,
+      context: { goal_mode: ws.goal_mode, locked_fields: ws.locked_fields },
+      main_sample_id: ws.primary_sample_id, source_digest: sample?.source_digest }
+    if ((request && !requestMatches(request)) || !sameAutoMetadata(meta?.requestSummary, current)
+      || parameterSignature(result.before_params) !== parameterSignature(ws.params)
+      || result.workspace_id !== ws.id || result.source_digest !== sample?.source_digest
+      || result.main_sample_id !== ws.primary_sample_id || result.job_id !== meta?.jobId) {
+      setStatus('工作区、参数或主样张已变化，本次响应未应用')
+      return false
+    }
+    if ((ws.applied_auto_job_ids || []).includes(meta.jobId)) return true
+    await preloadExternalLut(result.params.external_lut_id)
+    const latest = currentRef.current
+    const latestSample = latest.samples.find(item => item.id === latest.primary_sample_id)
+    if (!sameAutoMetadata(meta.requestSummary, { workspace_id: latest.id, params: latest.params,
+      context: { goal_mode: latest.goal_mode, locked_fields: latest.locked_fields },
+      main_sample_id: latest.primary_sample_id, source_digest: latestSample?.source_digest })) return false
+    const report = { ...result, job_id: meta.jobId,
+      _params_json: parameterSignature(result.params), _sample_id: ws.primary_sample_id,
+      _source_digest: sample?.source_digest }
+    const next = editor.commit(result.params, { id: meta.jobId, source: 'auto', purpose: 'correction',
+      phases: effectivePhases(result), report })
+    if (!next) { setStatus('参数未应用，请查看草稿提示'); return false }
+    await editor.setMeta({ report: next.report?.job_id === meta.jobId ? next.report : report,
+      applied_auto_job_ids: [...(ws.applied_auto_job_ids || []), meta.jobId].slice(-200),
+      ...(result.session_id ? { session_id: result.session_id } : {}) })
+    if (!(await editor.flush())) { setStatus('本次结果未能保存，恢复记录保留，请重试草稿保存'); return false }
+    if (result.session_id) listSessions().then(setSessions).catch(() => {})
+    return true
+  }
+
 
   const newWorkspace = async () => {
     if (busy) return
@@ -730,13 +789,28 @@ function GenerateView({ previewLut, user }) {
     }
   }
   const confirmSample = async (id, contract) => {
-    await editor.setMeta({
-      samples: samples.map((s) =>
-        s.id === id ? { ...s, input_contract: contract, input_confirmed: true } : s,
-      ),
-      validation: validation ? { ...validation, stale: true } : null,
-    })
+    const ws = currentRef.current
+    const sample = ws.samples.find((item) => item.id === id)
+    if (!sample) return
+    setSampleLoading(true)
+    try {
+      let confirmed = { ...sample, input_contract: contract, input_confirmed: true }
+      if (!sampleIsNormalized(confirmed)) {
+        const item = mediaRef.current.get(id)
+        if (!item?.file) throw new Error('请先重新绑定原文件，再统一色彩并确认输入')
+        const decoded = await decodeSample(item.file, params, { ...sample, input_contract: contract })
+        if (currentRef.current.id !== ws.id) return
+        confirmed = { ...decoded.metadata, input_confirmed: true }
+        setMedia((previous) => new Map(previous).set(id, decoded))
+        if (ws.retain_previews) await editor.cachePreview(id, decoded.blob, confirmed)
+      }
+      if (currentRef.current.id !== ws.id) return
+      await editor.setMeta({ samples: ws.samples.map((item) => item.id === id ? confirmed : item),
+        validation: ws.validation ? { ...ws.validation, stale: true } : null })
+    } catch (failure) { setStatus(failure.message) }
+    finally { setSampleLoading(false) }
   }
+
   const removeSample = (id) => {
     const remaining = samples.filter((s) => s.id !== id)
     setMedia((prev) => {
@@ -1104,6 +1178,7 @@ function GenerateView({ previewLut, user }) {
                 ? '样张文件仅保留于上次页面内存，请重新绑定照片。'
                 : !selectedSample?.input_confirmed
                   ? '请先确认照片输入基准，确认后才显示 LUT 预览。'
+                  : !sampleIsNormalized(selectedSample) ? '此样张来自旧色彩处理流程，请重新绑定原文件并确认输入。'
                   : `照片的 ${selectedSample.input_contract.base_photo_style} 输入与当前 ${params.base_photo_style} LUT 不一致，已暂停预览。`}
             </div>
           )}
@@ -1177,6 +1252,13 @@ function GenerateView({ previewLut, user }) {
           compatible={compatible}
           sampleName={selectedSample?.name}
         />
+        {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
+        <div className="actions">
+          <button className="btn" disabled={busy || !primaryCompatible || !primaryMedia?.file || !!resourceError}
+            onClick={() => setReferenceDialog(true)}>参考图风格匹配</button>
+          <button className="btn" disabled={busy || !compatible || !selectedMedia?.file || !!resourceError}
+            onClick={() => setPhotoExport(true)}>导出调整后照片</button>
+        </div>
         <AutoRetouchBar
           file={primaryMedia?.file}
           params={params}
@@ -1195,6 +1277,7 @@ function GenerateView({ previewLut, user }) {
             setComparison(null)
             const request = captureRequest()
             try {
+              if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
               await ensureRemote()
               return request
             } catch (e) {
@@ -1202,37 +1285,11 @@ function GenerateView({ previewLut, user }) {
               return false
             }
           }}
-          onResult={async (result, request) => {
-            if (!requestMatches(request)) {
-              setStatus('工作区或主样张已变化，本次响应未应用')
-              return false
-            }
-            const report = {
-              ...result,
-              _params_json: parameterSignature(result.params),
-              _sample_id: primaryId,
-              _source_digest: primarySample?.source_digest,
-            }
-            const next = editor.commit(result.params, {
-              source: 'auto',
-              purpose: 'correction',
-              phases: effectivePhases(result),
-              report,
-            })
-            if (!next) {
-              setStatus('参数未应用，请查看草稿提示')
-              return false
-            }
-            if (next.report?.transaction_id === workspace.report?.transaction_id)
-              await editor.setMeta({ report })
-            if (result.session_id) {
-              await editor.setMeta({ session_id: result.session_id })
-              listSessions()
-                .then(setSessions)
-                .catch(() => {})
-            }
-            return true
-          }}
+          userId={user}
+          workspaceReady={ready}
+          getAppliedJob={(id) => (currentRef.current.applied_auto_job_ids || []).includes(id)}
+          onResult={(result, request, meta) => applyAutoResult(result, meta, request)}
+          onRestoreResult={(result, meta) => applyAutoResult(result, meta)}
         />
         {!primaryCompatible && samples.length > 0 && (
           <p className="workspace-note">
@@ -1289,7 +1346,7 @@ function GenerateView({ previewLut, user }) {
                   step={0.01}
                   value={params.tone_map}
                   {...gesture}
-                  disabled={locked('tone_map')}
+                  disabled={locked('tone_map') || (params.external_lut_id && params.external_lut_mode === 'input')}
                   onChange={(e) => updateParam('tone_map', Number(e.target.value))}
                 />
                 <em>{params.tone_map.toFixed(2)}</em>
@@ -1313,6 +1370,19 @@ function GenerateView({ previewLut, user }) {
               </button>
             </div>
           )}
+          <p className="workspace-note">自由曲线与外部 LUT 由手动控制，AI 自动修图和参考匹配会保留这些设置。</p>
+          <ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
+            locked={workspace.locked_fields} onError={(error) => setStatus(error.message)} onReady={() => setResourceError('')}
+            onCommit={(patch) => editor.commit(patch, { source: 'external_lut', purpose: 'style' })} />
+          <CurveEditor key={`curves:${workspace.id}`} params={params} disabled={busy} locked={workspace.locked_fields}
+            onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
+            onPreview={editor.update}
+            onCommit={(patch) => editor.commit(patch, { source: 'curve', purpose: 'style' })}
+            onCancel={editor.cancel} />
+          <div className="advanced-locks">
+            <button className="parameter-lock" onClick={() => toggleLock(['curve_points'])}>{locked('curve_points') ? '解除自由曲线保护' : '保护自由曲线'}</button>
+            <button className="parameter-lock" onClick={() => toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode'])}>{locked('external_lut_id') ? '解除外部 LUT 保护' : '保护外部 LUT'}</button>
+          </div>
           {PARAM_GROUPS.map((g) => {
             const fields =
               g.id === 'rgb' ? RGB_GROUPS.map((r) => r.key) : g.sliders.map((s) => s.key)
@@ -1503,6 +1573,24 @@ function GenerateView({ previewLut, user }) {
           </span>
         </div>
       </section>
+      {referenceDialog && <ReferenceMatchDialog file={primaryMedia?.file} image={primaryMedia?.canvas}
+        params={params} context={context} workspaceId={workspace.id} sourceDigest={primarySample?.source_digest}
+        mainSampleId={primaryId} compatible={primaryCompatible} onClose={() => setReferenceDialog(false)}
+        onBusyChange={setRemoteBusy} onPrepare={async () => {
+          const request = captureRequest()
+          if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
+          await ensureRemote()
+          return request
+        }} onApply={async (result, request) => {
+          if (!requestMatches(request)) return false
+          const next = editor.commit(result.params, { source: 'reference', purpose: 'style' })
+          if (!next) return false
+          if (!(await editor.flush())) throw new Error('候选未能保存，请重试草稿保存')
+          setSelectedId(primaryId); setComparison(null); setStatus('参考匹配候选已应用，可一次撤销')
+          return true
+        }} />}
+      {photoExport && <PhotoExportDialog sample={selectedSample} media={selectedMedia} params={params}
+        compatible={compatible} onClose={() => setPhotoExport(false)} onBusyChange={setRemoteBusy} />}
       {inputConfirmation && (
         <InputConfirmationDialog
           workspace={workspace}
@@ -1585,6 +1673,7 @@ export default function App() {
 
   useEffect(() => {
     const onUnauthorized = () => {
+      clearExternalLutCache()
       setUser(null)
       setPreviewLut(null)
     }
@@ -1606,6 +1695,7 @@ export default function App() {
   }
 
   const handleLogout = async () => {
+    clearExternalLutCache()
     try {
       await apiLogout()
     } catch {

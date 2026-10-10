@@ -16,13 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from agent.editing import EditingContext
 from api import auth
 from api.models import LutParamsModel, checked_metadata
-from lut_engine import input_contract, validate_recipe, validate_input_contract, RecipeError
+from lut_engine import input_contract, validate_recipe, validate_input_contract, RecipeError, technical_baseline_params
 from storage import db
 
 router = APIRouter(prefix="/api/workspaces")
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_BATCH_BYTES = 64 * 1024 * 1024
-MEASUREMENT_VERSION = "rgb-exif-lanczos2048-stats512-v1"
+MEASUREMENT_VERSION = "icc-srgb-exif-lanczos2048-stats512-v2"
 _engine_path = Path(__file__).resolve().parents[1] / "lut_engine"
 ENGINE_VERSION = "chroma-lut-" + hashlib.sha256(b"".join(
     path.read_bytes() for path in sorted(_engine_path.glob("*.py")))).hexdigest()[:12]
@@ -157,6 +157,14 @@ def delete_workspace(workspace_id: str, user=Depends(auth.get_current_user)):
 @router.post("/{workspace_id}/versions")
 def create_version(workspace_id: str, body: VersionCreate, user=Depends(auth.get_current_user)):
     require_workspace(workspace_id, user["id"])
+    if body.params.external_lut_id:
+        from api.imported_luts import resolver_for_user
+        from photo.render import lut_from_params
+        from lut_engine import CubeError
+        try:
+            lut_from_params(body.params.model_dump(),resolver=resolver_for_user(user["id"]))
+        except CubeError as exc:
+            raise HTTPException(422,str(exc)) from exc
     snapshot = body.model_dump(exclude={"name"})
     if body.recipe:
         try:
@@ -243,7 +251,7 @@ def pixel_digest(pixels):
 
 def measure_sample(raw, sample, params, baseline_lut, current_lut):
     from photo import stats as S, render as R, quality as Q
-    image = S.load_image(raw)
+    image = S.load_image(raw, params["base_photo_style"])
     baseline = R.render_lut(baseline_lut,image)
     current = R.render_lut(current_lut,image)
     mask = S.skin_mask_of(baseline)
@@ -305,8 +313,14 @@ def validate_samples(workspace_id: str, request: Request, params: str = Form(...
         raise HTTPException(429,"统计验证正在处理,请稍后重试",headers={"Retry-After":"2"})
     try:
         contract = input_contract(full)
-        neutral = {"base_photo_style":full["base_photo_style"],"tone_map":full["tone_map"]}
-        baseline_lut, current_lut = R.lut_from_params(neutral), R.lut_from_params(full)
+        neutral = technical_baseline_params(full)
+        from api.imported_luts import resolver_for_user
+        from lut_engine import CubeError
+        resolver = resolver_for_user(user["id"])
+        try:
+            baseline_lut, current_lut = R.lut_from_params(neutral,resolver=resolver), R.lut_from_params(full,resolver=resolver)
+        except CubeError as exc:
+            raise HTTPException(422,str(exc)) from exc
         results, total = [], 0
         for file,sample in zip(files,refs):
             raw = file.file.read(MAX_IMAGE_BYTES+1)

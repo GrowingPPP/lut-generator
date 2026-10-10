@@ -44,6 +44,10 @@ class JobRequestExpired(Exception):
     pass
 
 
+class JobRequestBlocked(Exception):
+    pass
+
+
 @dataclass
 class _Job:
     id: str
@@ -83,6 +87,7 @@ class AutoJobRegistry:
         self.executor = executor or ThreadPoolExecutor(max_workers=max_active, thread_name_prefix="auto-grade")
         self._jobs = {}
         self._expired = {}
+        self._blocked = {}
         self._lock = RLock()
 
     def _forget(self, job, now):
@@ -123,10 +128,16 @@ class AutoJobRegistry:
             self._expired = {key: value for key, value in self._expired.items() if value[2] > now}
             while len(self._expired) > 2000:
                 del self._expired[next(iter(self._expired))]
+            self._blocked = {key: value for key, value in self._blocked.items() if value[2] > now}
 
     def replay(self, request_id, user_id, fingerprint):
         with self._lock:
             self.cleanup()
+            blocked = self._blocked.get(request_id)
+            if blocked:
+                if blocked[0] != user_id:
+                    raise JobNotFound()
+                raise JobRequestBlocked()
             if request_id in self._jobs:
                 previous = self._owned(request_id, user_id)
                 if previous.fingerprint != fingerprint:
@@ -198,6 +209,26 @@ class AutoJobRegistry:
                     job.status = "cancelling"
                     job.updated_at = self.clock()
 
+    def prevent_late(self, job_id, user_id, workspace_id):
+        with self._lock:
+            self.cleanup()
+            if job_id in self._jobs:
+                job = self._owned(job_id, user_id)
+                if workspace_id != job.workspace_id:
+                    raise JobNotFound()
+                return self.cancel(job_id, user_id)
+            previous = self._blocked.get(job_id) or self._expired.get(job_id)
+            if previous and previous[0] != user_id:
+                raise JobNotFound()
+            if job_id in self._blocked and self._blocked[job_id][1] != workspace_id:
+                raise JobNotFound()
+            if len(self._blocked) >= 2000 and job_id not in self._blocked:
+                raise JobLimitExceeded()
+            self._blocked[job_id] = (user_id, workspace_id, self.clock() + 86400)
+            return {"id": job_id, "status": "cancelled", "persisted": False, "result": None,
+                    "can_cancel": False, "not_accepted": True, "workspace_id": workspace_id,
+                    "stages": [], "progress": None, "continuation_stages": [], "error": None}
+
     def continuation_request(self, job_id, user_id, params, context, workspace_id,
                              source_digest, main_sample_id, actual_digest):
         with self._lock:
@@ -252,6 +283,8 @@ class AutoJobRegistry:
                     return
                 job.status = "running"
             result = run(progress, cancelled)
+            result["job_id"] = job.id
+            result["job_fingerprint"] = job.fingerprint
             with self._lock:
                 if cancelled():
                     self._finish(job, "cancelled")
@@ -335,6 +368,23 @@ def _job_response(action, job_id, user_id):
                                   "message": "作业不存在、已过期或服务已重启；当前草稿未应用该结果"}) from exc
 
 
+def _saved_job(job_id, user_id, workspace_id=None):
+    from storage import db
+    result = db.find_auto_job_report(user_id, job_id, workspace_id)
+    if not result:
+        return None
+    return {"id": job_id, "status": "succeeded", "persisted": True, "result": result,
+            "can_cancel": False, "workspace_id": result.get("workspace_id"),
+            "source_digest": result.get("source_digest"), "main_sample_id": result.get("main_sample_id"),
+            "recovered_from_report": True, "stages": [], "progress": None,
+            "continuation_stages": [], "continued_from": result.get("continued_from"), "error": None}
+
+
+def _request_blocked():
+    return HTTPException(409, {"code": "request_blocked", "accepted": False,
+                              "message": "此请求已明确结束，不会重新提交；请使用新的请求标识重新开始"})
+
+
 @router.post("", status_code=202)
 def create_job(request: Request, file: UploadFile = File(...),
                base_params: str = Form(..., max_length=8192), style: Optional[str] = Form(None),
@@ -381,6 +431,13 @@ def create_job(request: Request, file: UploadFile = File(...),
         raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始") from exc
     except JobRequestExpired as exc:
         raise HTTPException(410, "原请求已失效，当前草稿未应用该结果；请明确重新开始") from exc
+    except JobRequestBlocked as exc:
+        raise _request_blocked() from exc
+    saved = _saved_job(job_id, user["id"], workspace_id)
+    if saved:
+        if saved["result"].get("job_fingerprint") != fingerprint:
+            raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始")
+        return saved
     if continue_from:
         try:
             previous = registry.continuation_request(continue_from, user["id"], parsed.model_dump(),
@@ -394,6 +451,8 @@ def create_job(request: Request, file: UploadFile = File(...),
         request_data = previous
 
     def run(progress, cancel_check):
+        from api.imported_luts import resolver_for_user
+        from photo.render import using_lut_resolver
         if cancel_check():
             raise AutoGradeCancelled()
         prepared = _prepare_auto_grade(request, UploadFile(file=BytesIO(raw)), base_params, context,
@@ -401,12 +460,14 @@ def create_job(request: Request, file: UploadFile = File(...),
         if cancel_check():
             raise AutoGradeCancelled()
         _reserve_auto_grade(user["id"])
-        out = _compute_auto_grade(prepared[0], prepared[1], prepared[2], request_data["style"], use_vision,
-                                   max_rounds, workspace_id, source_digest, main_sample_id,
-                                   progress=progress, cancel_check=cancel_check,
-                                   resume=request_data.get("resume"), continued_from=continue_from)
-        return {**out.model_dump(), "_continuation_stages": continuation_stages(
-            prepared[0], out, request_data["style"], prepared[2], request_data.get("resume"))}
+        with using_lut_resolver(resolver_for_user(user["id"])):
+            out = _compute_auto_grade(prepared[0], prepared[1], prepared[2], request_data["style"], use_vision,
+                                       max_rounds, workspace_id, source_digest, main_sample_id,
+                                       progress=progress, cancel_check=cancel_check,
+                                       resume=request_data.get("resume"), continued_from=continue_from,
+                                       user_id=user["id"])
+            return {**out.model_dump(), "_continuation_stages": continuation_stages(
+                prepared[0], out, request_data["style"], prepared[2], request_data.get("resume"))}
 
     def persist(data):
         from api.main import AutoGradeOut
@@ -427,15 +488,42 @@ def create_job(request: Request, file: UploadFile = File(...),
         raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始") from exc
     except JobRequestExpired as exc:
         raise HTTPException(410, "原请求已失效，当前草稿未应用该结果；请明确重新开始") from exc
+    except JobRequestBlocked as exc:
+        raise _request_blocked() from exc
 
 
 @router.get("/{job_id}")
-def get_job(job_id: str, user: dict = Depends(auth.get_current_user)):
+def get_job(job_id: str, workspace_id: Optional[str] = None, user: dict = Depends(auth.get_current_user)):
     require_single_worker()
-    return _job_response(registry.get, job_id, user["id"])
+    try:
+        job = registry.get(job_id, user["id"])
+        if workspace_id and job["workspace_id"] != workspace_id:
+            raise JobNotFound()
+        return job
+    except JobNotFound:
+        saved = _saved_job(job_id, user["id"], workspace_id)
+        if saved:
+            return saved
+        raise HTTPException(404, {"code": "expired_or_restarted",
+                                  "message": "作业不存在、已过期或服务已重启；请核对当前草稿和来源"})
 
 
 @router.delete("/{job_id}")
-def cancel_job(job_id: str, user: dict = Depends(auth.get_current_user)):
+def cancel_job(job_id: str, workspace_id: Optional[str] = None, prevent_late: bool = False,
+               user: dict = Depends(auth.get_current_user)):
     require_single_worker()
+    if prevent_late:
+        try:
+            job_id = str(UUID(job_id))
+        except ValueError as exc:
+            raise HTTPException(422, "请求标识无效") from exc
+        saved = _saved_job(job_id, user["id"], workspace_id)
+        if saved:
+            return saved
+        try:
+            return registry.prevent_late(job_id, user["id"], workspace_id)
+        except JobNotFound as exc:
+            raise HTTPException(404, "作业不存在") from exc
+        except JobLimitExceeded as exc:
+            raise HTTPException(429, "暂时不能确认请求结束，请稍后再试") from exc
     return _job_response(registry.cancel, job_id, user["id"])

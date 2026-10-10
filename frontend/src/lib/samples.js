@@ -1,5 +1,5 @@
 import { inputContract } from './styleRecipe.js'
-import { readPhotoMetadata } from './photoMetadata.js'
+import { normalizePhoto } from './photoApi.js'
 
 export async function contentDigest(value) {
   const bytes =
@@ -14,23 +14,25 @@ export async function contentDigest(value) {
 export async function decodeSample(file, params, existing) {
   if (file.size > 32 * 1024 * 1024) throw new Error('单张图片需小于 32MB')
   const digest = await contentDigest(file)
-  const photoMetadata = await readPhotoMetadata(file)
   if (existing && digest !== existing.source_digest)
     throw new Error('照片内容与原样张不同，请添加为新的样张')
-  const url = URL.createObjectURL(file)
+  const inputStyle = existing?.input_contract?.base_photo_style || params.base_photo_style || 'STD'
+  const normalized = await normalizePhoto(file, inputStyle, digest)
+  const photoMetadata = normalized.metadata
+  const blob = normalized.blob
+  const url = URL.createObjectURL(blob)
   try {
     const img = new Image()
     img.src = url
     await img.decode()
     if (img.naturalWidth * img.naturalHeight > 64_000_000)
       throw new Error('图片超过 6400 万像素，请先缩小')
-    const scale = Math.min(1, 2048 / Math.max(img.naturalWidth, img.naturalHeight))
     const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    if (canvas.width !== photoMetadata.width || canvas.height !== photoMetadata.height)
+      throw new Error('照片规范化尺寸不一致，请重新上传')
     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.94))
-    if (!blob) throw new Error('无法生成预览')
     return {
       metadata: {
         ...existing,
@@ -43,6 +45,9 @@ export async function decodeSample(file, params, existing) {
         preview_digest: await contentDigest(blob),
         width: canvas.width,
         height: canvas.height,
+        source_width: photoMetadata.source_width,
+        source_height: photoMetadata.source_height,
+        color_management: photoMetadata.color_management,
         photo_metadata: photoMetadata,
       },
       file,
@@ -81,8 +86,15 @@ export function sampleMatches(sample, params) {
   const contract = sample?.input_contract
   if (!contract) return false
   const current = inputContract(params)
+  if (!sampleIsNormalized(sample)) return false
   return (
     contract.base_photo_style === current.base_photo_style &&
     contract.output_encoding === current.output_encoding
   )
+}
+
+export function sampleIsNormalized(sample) {
+  const management = sample?.color_management || sample?.photo_metadata?.color_management
+  return management?.version === 1 &&
+    management.input_style === sample?.input_contract?.base_photo_style
 }

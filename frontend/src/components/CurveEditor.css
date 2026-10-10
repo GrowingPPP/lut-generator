@@ -1,0 +1,26 @@
+.curve-editor { display: grid; gap: 12px; min-width: 0; }
+.curve-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.curve-editor-heading h3 { margin: 0; font-size: 15px; font-weight: 600; color: #e7e4df; }
+.curve-editor-heading span, .curve-editor-help { color: #aaa9b4; font-size: 12px; line-height: 1.6; }
+.curve-editor-channels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.curve-editor button { border: 1px solid #46434a; border-radius: 6px; background: #29282e; padding: 7px 10px; color: #d6d6de; font: inherit; font-size: 12px; cursor: pointer; }
+.curve-editor button[aria-pressed="true"] { color: #f0c68d; border-color: #ab8456; background: #3c3228; }
+.curve-editor button:disabled { color: #a2a1aa; cursor: default; }
+.curve-editor button:focus-visible, .curve-point:focus-visible { outline: 2px solid #f0c68d; outline-offset: 3px; }
+.curve-editor-graph { width: calc(100% - 16px); max-width: 320px; aspect-ratio: 1; margin: 8px; overflow: visible; background: #222127; border: 1px solid #48454e; border-radius: 2px; touch-action: none; color: #f0c68d; }
+.curve-editor-graph.channel-r { color: #eb9390; }
+.curve-editor-graph.channel-g { color: #92cda4; }
+.curve-editor-graph.channel-b { color: #92b4e8; }
+.curve-grid { stroke: #38363f; stroke-width: .3; fill: none; }
+.curve-identity { stroke: #5b5861; stroke-width: .35; stroke-dasharray: 2 2; fill: none; }
+.curve-line { stroke: currentColor; stroke-width: .8; fill: none; pointer-events: none; }
+.curve-point { stroke: #222127; stroke-width: .65; fill: currentColor; cursor: grab; }
+.curve-point:active { cursor: grabbing; }
+.curve-editor-help { margin: 0; }
+.curve-editor-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.curve-editor-coordinates label { display: grid; gap: 6px; color: #d6d6de; font-size: 12px; }
+.curve-editor-coordinates input { width: 100%; min-width: 0; box-sizing: border-box; color: #f0c68d; background: #25242b; border: 1px solid #4a4650; border-radius: 6px; padding: 8px; font: inherit; font-variant-numeric: tabular-nums; }
+.curve-editor-coordinates input:focus-visible { outline: 2px solid #f0c68d; outline-offset: 3px; }
+.curve-editor-coordinates input:disabled { color: #aaa7b0; }
+.curve-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.curve-editor-actions span { flex: 1 1 100%; font-size: 12px; color: #c5c2cb; font-variant-numeric: tabular-nums; }

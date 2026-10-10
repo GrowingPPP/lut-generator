@@ -1,8 +1,9 @@
 """HTTP 参数与轻量元数据校验。"""
 import json
 from typing import List, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from agent.schemas import RGBOffsetValue, RGBScaleValue
+from lut_engine import identity_curves, validate_curve_points, validate_external_id, validate_external_options
 
 class LutParamsModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -24,6 +25,27 @@ class LutParamsModel(BaseModel):
     whites: float = Field(0.0, ge=-1, le=1)
     blacks: float = Field(0.0, ge=-1, le=1)
     curve: float = Field(0.0, ge=-1, le=1)
+    curve_points: dict = Field(default_factory=identity_curves)
+    external_lut_id: str | None = None
+    external_lut_strength: float = Field(0.0, ge=0, le=1)
+    external_lut_mode: Literal["display", "input"] = "display"
+
+    @field_validator("curve_points", mode="before")
+    @classmethod
+    def valid_curve_points(cls, value):
+        return validate_curve_points(value)
+
+    @field_validator("external_lut_id", mode="before")
+    @classmethod
+    def valid_external_id(cls, value):
+        return validate_external_id(value)
+
+    @model_validator(mode="after")
+    def valid_external_options(self):
+        validate_external_options(self.external_lut_id,self.external_lut_strength,self.external_lut_mode)
+        if self.external_lut_mode == "input" and self.base_photo_style != "VLOG":
+            raise ValueError("输入转换模式仅支持 VLOG 工作区")
+        return self
     # 分离色调
     split_shadow_hue: float = Field(0.0, ge=0, le=360)
     split_shadow_sat: float = Field(0.0, ge=0, le=1)

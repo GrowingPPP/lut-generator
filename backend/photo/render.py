@@ -11,6 +11,8 @@
 """
 import base64
 import io
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -21,11 +23,28 @@ from lut_engine import generate_lut, lut_params_from_dict
 DEFAULT_LUT_SIZE = 33
 PREVIEW_MAX_SIDE = 768      # 发给模型的图:体积与细节的折中(实测 768px q80 ≈ 246 KB)
 PREVIEW_QUALITY = 80
+_LUT_RESOLVER = ContextVar("lut_resolver", default=None)
 
 
-def lut_from_params(params: Dict[str, Any], size: int = DEFAULT_LUT_SIZE) -> np.ndarray:
+@contextmanager
+def using_lut_resolver(resolver):
+    """执行范围内注入纯引用解析函数,线程和嵌套调用互相隔离。"""
+    token = _LUT_RESOLVER.set(resolver)
+    try:
+        yield
+    finally:
+        _LUT_RESOLVER.reset(token)
+
+
+def lut_from_params(params: Dict[str, Any], size: int = DEFAULT_LUT_SIZE, resolver=None) -> np.ndarray:
     """参数 → LUT。薄封装,便于测试与替换。"""
-    return generate_lut(lut_params_from_dict(params), size=size)
+    external = None
+    if params.get("external_lut_id") is not None:
+        resolve = resolver if resolver is not None else _LUT_RESOLVER.get()
+        if resolve is None:
+            raise ValueError("外部 LUT 需要账号引用解析器")
+        external = resolve(params["external_lut_id"])
+    return generate_lut(lut_params_from_dict(params), size=size, external_lut=external)
 
 
 def render_lut(lut: np.ndarray, img: np.ndarray) -> np.ndarray:

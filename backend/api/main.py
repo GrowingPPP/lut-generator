@@ -23,6 +23,13 @@ from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
 from api.workspaces import router as workspace_router, require_workspace, recipe_http_error, ENGINE_VERSION, validation_slot
 from api.auto_jobs import router as auto_jobs_router
+from api.photos import router as photos_router
+from api.imported_luts import router as imported_luts_router, resolver_for_user
+from api.reference_match import router as reference_router
+from photo import render as R
+from lut_engine import technical_baseline_params
+from lut_engine import CubeError
+from contextlib import nullcontext
 
 logger = logging.getLogger("chroma.api")
 
@@ -177,6 +184,9 @@ app = FastAPI(title="CHROMA LUT API")
 db.init_db()
 app.include_router(workspace_router)
 app.include_router(auto_jobs_router)
+app.include_router(photos_router)
+app.include_router(imported_luts_router)
+app.include_router(reference_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -251,11 +261,21 @@ def _asset_content(body, existing=None):
         "source_json":encode(current.get("source")),"workspace_id":current.get("workspace_id")}
 
 
+def _validate_external(params, user_id):
+    if not params.get("external_lut_id"):
+        return
+    try:
+        R.lut_from_params(params, resolver=resolver_for_user(user_id))
+    except CubeError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/luts", response_model=LutOut)
 def create_lut(body: LutCreate, user: dict = Depends(auth.get_current_user)):
     if body.workspace_id:
         require_workspace(body.workspace_id,user["id"])
     params_json,metadata = _asset_content(body)
+    _validate_external(json.loads(params_json), user["id"])
     metadata.update(organization_changes(body.model_dump(exclude_unset=True)))
     lut_id = db.create_lut(user["id"],body.name,body.description,params_json,**metadata)
     return _record_to_out(db.get_lut(lut_id,user["id"]))
@@ -301,6 +321,7 @@ def update_lut(lut_id: int,body: LutUpdate,user: dict=Depends(auth.get_current_u
             supplied.pop(key,None)
     def content(locked):
         params_json,metadata = _asset_content(body,locked)
+        _validate_external(json.loads(params_json), user["id"])
         return params_json,{**metadata,**organization}
     try:
         rec = db.update_lut(lut_id,user["id"],name=body.name,description=body.description,
@@ -376,6 +397,8 @@ def apply_asset(lut_id: int,body: AssetApply,user: dict=Depends(auth.get_current
                 raise RecipeError("input_conflict","载入完整效果需要确认输入切换")
     except RecipeError as exc:
         raise recipe_http_error(exc) from exc
+    _validate_external(current, user["id"])
+    _validate_external(candidate, user["id"])
     return {"params":candidate,"changes":changes,"kind":asset["kind"],"recipe":asset.get("recipe"),
             "revision_id":revision_id,"source":asset.get("source"),"validation_status":"not_verified"}
 
@@ -401,15 +424,15 @@ def apply_asset_with_image(lut_id: int,request: Request,body: str=Form(...,max_l
     _,retry = db.reserve_auth_event(f"validation:{user['id']}",10,60)
     if retry:
         raise HTTPException(429,"验证请求过于频繁",headers={"Retry-After":str(retry)})
-    with validation_slot():
+    with validation_slot(), R.using_lut_resolver(resolver_for_user(user["id"])):
         try:
-            image = S.load_image(raw)
+            image = S.load_image(raw, parsed.params.base_photo_style)
         except ImageTooLargeError as exc:
             raise HTTPException(413,str(exc)) from exc
         except PhotoError as exc:
             raise HTTPException(400,str(exc)) from exc
         current = parsed.params.model_dump()
-        neutral = {"base_photo_style":current["base_photo_style"],"tone_map":current["tone_map"]}
+        neutral = technical_baseline_params(current)
         baseline_image = R.render_lut(R.lut_from_params(neutral),image)
         mask = S.skin_mask_of(baseline_image)
         baseline = S.analyze(baseline_image,skin_mask=mask)
@@ -424,9 +447,12 @@ def apply_asset_with_image(lut_id: int,request: Request,body: str=Form(...,max_l
         return out
 
 
-def _cube_response(asset,params,mode):
+def _cube_response(asset,params,mode,user_id):
     engine_params = lut_params_from_dict(params)
-    lut = generate_lut(engine_params,size=33)
+    try:
+        lut = R.lut_from_params(params, resolver=resolver_for_user(user_id))
+    except CubeError as exc:
+        raise HTTPException(422, str(exc)) from exc
     photo_style = engine_params.base_photo_style if mode == "camera" else None
     input_signal = "VLOG/V-Gamut" if engine_params.base_photo_style == "VLOG" else f"{engine_params.base_photo_style}/sRGB"
     output_signal = "Rec709" if engine_params.base_photo_style == "VLOG" else "sRGB"
@@ -452,7 +478,7 @@ def download_lut(lut_id: int,mode: Literal["camera","software"]="camera",
         if target == "neutral":
             raise HTTPException(422,"完整效果只能下载已保存参数或 current 完整参数")
         params = asset["params"]
-    return _cube_response(asset,params,mode)
+    return _cube_response(asset,params,mode,user["id"])
 
 
 @app.post("/api/luts/{lut_id}/download")
@@ -461,7 +487,7 @@ def download_current_lut(lut_id: int,body: AssetDownload,user: dict=Depends(auth
     params = body.params.model_dump()
     if input_contract(params) != (asset.get("input_contract") or input_contract(asset["params"])):
         raise HTTPException(409,{"code":"input_conflict","message":"当前完整参数与资产输入契约不一致"})
-    return _cube_response(asset,params,body.mode)
+    return _cube_response(asset,params,body.mode,user["id"])
 
 
 def _build_extract_fn(body: "ChatRequest", full_params: dict | None):
@@ -502,6 +528,8 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
         raise HTTPException(404,"会话不存在")
 
     full_params = body.params.model_dump() if body.params else None
+    if full_params:
+        _validate_external(full_params,user["id"])
     initial = None
     if full_params:
         # 过滤默认值字段,只保留用户实际调整过的,避免默认值被当成已确认参数
@@ -515,8 +543,9 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
     result = {}
     try:
         kwargs = {"context":body.context} if body.context is not None else {}
-        result = run_agent(_build_extract_fn(body,full_params),body.message,
-                           params=full_params if (body.context is not None or body.workspace_id) else initial,**kwargs)
+        with R.using_lut_resolver(resolver_for_user(user["id"])):
+            result = run_agent(_build_extract_fn(body,full_params),body.message,
+                               params=full_params if (body.context is not None or body.workspace_id) else initial,**kwargs)
         reply = result.get("reply", "")
         done = result.get("done", False)
         cube_text = result.get("cube_text")
@@ -622,6 +651,8 @@ class AutoGradeIssueOut(BaseModel):
 
 class AutoGradeOut(BaseModel):
     params: LutParamsModel
+    job_id: Optional[str] = None
+    job_fingerprint: Optional[str] = None
     before_params: Optional[LutParamsModel] = None
     session_id: Optional[int] = None
     issues: List[AutoGradeIssueOut] = Field(default_factory=list)
@@ -694,7 +725,7 @@ def auto_grade_endpoint(
                                            workspace_id, sample_origin, user)
     _reserve_auto_grade(user["id"])
     out = _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
-                              workspace_id, source_digest, main_sample_id)
+                              workspace_id, source_digest, main_sample_id, user_id=user["id"])
     try:
         out.session_id = _persist_auto_grade(user["id"], out)
     except Exception as exc:
@@ -715,6 +746,7 @@ def _prepare_auto_grade(request, file, base_params, context, workspace_id, sampl
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"base_params 非法:{exc}")
 
+    _validate_external(parsed.model_dump(),user["id"])
     if workspace_id:
         require_workspace(workspace_id,user["id"])
     if sample_origin != "source":
@@ -731,7 +763,7 @@ def _prepare_auto_grade(request, file, base_params, context, workspace_id, sampl
     if len(raw) > MAX_AUTO_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="图片过大,请压缩到 32MB 以内")
     try:
-        img = photo_stats.load_image(raw)
+        img = photo_stats.load_image(raw, parsed.base_photo_style)
     except ImageTooLargeError as exc:
         # 像素数超限也是「太大」,应是 413 而不是 400
         raise HTTPException(status_code=413, detail=str(exc)) from exc
@@ -756,7 +788,7 @@ def _reserve_auto_grade(user_id):
 
 def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
                         workspace_id, source_digest, main_sample_id,
-                        *, progress=None, cancel_check=None, resume=None, continued_from=None):
+                        *, progress=None, cancel_check=None, resume=None, continued_from=None, user_id=None):
     from agent.auto import AutoGradeCancelled, auto_grade as run_auto_grade
     from agent.llm import BudgetExhaustedError
 
@@ -774,19 +806,20 @@ def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
             return extract_result(_client,text,params=current_params,context=ctx)
 
     try:
-        result = run_auto_grade(
-            img,
-            parsed.model_dump(),
-            style=style_text,
-            client=client,
-            use_vision=use_vision and client is not None,
-            max_rounds=max(1, min(3, int(max_rounds))),
-            style_extractor=style_extractor,
-            **({"context":ctx} if ctx is not None else {}),
-            **({"progress": progress} if progress is not None else {}),
-            **({"cancel_check": cancel_check} if cancel_check is not None else {}),
-            **({"resume": resume} if resume is not None else {}),
-        )
+        with R.using_lut_resolver(resolver_for_user(user_id)) if user_id is not None else nullcontext():
+            result = run_auto_grade(
+                img,
+                parsed.model_dump(),
+                style=style_text,
+                client=client,
+                use_vision=use_vision and client is not None,
+                max_rounds=max(1, min(3, int(max_rounds))),
+                style_extractor=style_extractor,
+                **({"context":ctx} if ctx is not None else {}),
+                **({"progress": progress} if progress is not None else {}),
+                **({"cancel_check": cancel_check} if cancel_check is not None else {}),
+                **({"resume": resume} if resume is not None else {}),
+            )
     except AutoGradeCancelled:
         raise
     except BudgetExhaustedError as exc:

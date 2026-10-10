@@ -1,3 +1,7 @@
+import { identityCurves, validateCurvePoints, prepareFreeCurves } from './curveMath.js'
+import { validateExternalId, validateExternalOptions, sampleImportedLut } from './cubeLut.js'
+import { resolveExternalLut } from './importedLuts.js'
+
 // 参数化 3D LUT 生成,与后端 lut_engine 同数学(线性/编码分离管线)。
 const LUMA = [0.2126, 0.7152, 0.0722]
 const TINT_GAIN = 0.0002
@@ -20,6 +24,10 @@ export function defaultParams() {
     whites: 0,
     blacks: 0,
     curve: 0,
+    curve_points: identityCurves(),
+    external_lut_id: null,
+    external_lut_strength: 0,
+    external_lut_mode: 'display',
     split_shadow_hue: 0,
     split_shadow_sat: 0,
     split_highlight_hue: 0,
@@ -43,7 +51,11 @@ export function normalizeParams(params) {
   if (!params || typeof params !== 'object') return normalized
   for (const [key, fallback] of Object.entries(normalized)) {
     const value = params[key]
-    if (Array.isArray(fallback)) {
+    if (key === 'curve_points' && value !== undefined) {
+      normalized[key] = validateCurvePoints(value)
+    } else if (key === 'external_lut_id' && value !== undefined) {
+      normalized[key] = validateExternalId(value)
+    } else if (Array.isArray(fallback)) {
       normalized[key] = fallback.map((item, i) => Number.isFinite(value?.[i]) ? value[i] : item)
     } else if (typeof fallback === 'number' && Number.isFinite(value)) {
       normalized[key] = value
@@ -51,6 +63,8 @@ export function normalizeParams(params) {
       normalized[key] = value
     }
   }
+  validateExternalOptions(normalized.external_lut_id, normalized.external_lut_strength,
+    normalized.external_lut_mode, normalized.base_photo_style)
   return normalized
 }
 
@@ -84,6 +98,10 @@ function srgbOetf(lin) {
 function rec709Oetf(lin) {
   lin = Math.max(0, lin)
   return lin <= 0.018 ? 4.5 * lin : 1.099 * Math.pow(lin, 0.45) - 0.099
+}
+
+function rec709Eotf(c) {
+  return c <= 0.081 ? c / 4.5 : Math.pow((c + 0.099) / 1.099, 1 / 0.45)
 }
 
 function kelvinToRgb(kelvin) {
@@ -379,6 +397,15 @@ export function generateLUT(params = defaultParams(), size = 33) {
   const step = 1 / (size - 1)
   const isVlog = params.base_photo_style === 'VLOG'
   const encode = isVlog ? rec709Oetf : srgbOetf
+  const external = resolveExternalLut(params.external_lut_id)
+  const inputMode = params.external_lut_mode === 'input'
+  const outputEncoding = isVlog ? 'Rec709' : 'sRGB'
+  if (external && (inputMode
+    ? external.input_encoding !== 'VLOG' || external.output_encoding !== 'Rec709'
+    : external.input_encoding !== outputEncoding || external.output_encoding !== outputEncoding)) {
+    throw new Error('外部 LUT 的输入与输出信号不匹配当前工作区')
+  }
+  const freeCurves = prepareFreeCurves(params.curve_points)
   let idx = 0
   for (let b = 0; b < size; b++) {
     for (let g = 0; g < size; g++) {
@@ -386,7 +413,10 @@ export function generateLUT(params = defaultParams(), size = 33) {
         let rr = r * step
         let gg = g * step
         let bb = b * step
-        if (isVlog) {
+        if (inputMode) {
+          const mapped = sampleImportedLut(external, rr, gg, bb)
+          rr = rec709Eotf(mapped[0]); gg = rec709Eotf(mapped[1]); bb = rec709Eotf(mapped[2])
+        } else if (isVlog) {
           const conv = vlogDecodeToRec709Linear(rr, gg, bb)
           rr = conv[0]
           gg = conv[1]
@@ -400,18 +430,23 @@ export function generateLUT(params = defaultParams(), size = 33) {
         rr = lin[0]
         gg = lin[1]
         bb = lin[2]
-        if (isVlog) {
+        if (isVlog && !inputMode) {
           rr = toneMapAces(rr, params.tone_map)
           gg = toneMapAces(gg, params.tone_map)
           bb = toneMapAces(bb, params.tone_map)
         }
         const creative = applyCreativeLinearOps(rr, gg, bb, params)
         const base = [clamp01(encode(rr)), clamp01(encode(gg)), clamp01(encode(bb))]
-        const enc = applyEncodedOps(encode(creative[0]), encode(creative[1]),
-                                    encode(creative[2]), params)
-        data[idx++] = clamp01(base[0] + params.look_strength * (enc[0] - base[0]))
-        data[idx++] = clamp01(base[1] + params.look_strength * (enc[1] - base[1]))
-        data[idx++] = clamp01(base[2] + params.look_strength * (enc[2] - base[2]))
+        const encoded = applyEncodedOps(encode(creative[0]), encode(creative[1]), encode(creative[2]), params)
+        const enc = freeCurves(...encoded)
+        let out = base.map((value, channel) => clamp01(value + params.look_strength * (enc[channel] - value)))
+        if (external && !inputMode && params.external_lut_strength > 0) {
+          const mapped = sampleImportedLut(external, ...out)
+          out = out.map((value, channel) => clamp01(value + params.external_lut_strength * (mapped[channel] - value)))
+        }
+        data[idx++] = out[0]
+        data[idx++] = out[1]
+        data[idx++] = out[2]
         data[idx++] = 1
       }
     }

@@ -65,12 +65,45 @@ export async function ensureAutoJob(request, {
 }
 
 export function sameAutoConditions(captured, current) {
-  return !!captured && captured.file === current.file
-    && captured.workspace_id === current.workspace_id
+  return !!captured && captured.file === current.file && sameAutoMetadata(captured, current)
+}
+
+export function sameAutoMetadata(captured, current) {
+  const contextKey = (context) => JSON.stringify({ goal_mode: context?.goal_mode || 'natural',
+    locked_fields: [...(context?.locked_fields || [])].sort() })
+  return !!captured && captured.workspace_id === current.workspace_id
     && captured.source_digest === current.source_digest
     && captured.main_sample_id === current.main_sample_id
     && parameterSignature(captured.params) === parameterSignature(current.params)
-    && JSON.stringify(captured.context) === JSON.stringify(current.context)
+    && contextKey(captured.context) === contextKey(current.context)
+}
+
+export function bindAutoRequest(summary, current) {
+  return sameAutoMetadata(summary, current) && current.file
+    ? captureAutoRequest({ ...summary, file: current.file }) : null
+}
+
+export async function waitRestoredAutoJob(id, {
+  get, onMissing = () => {}, onConnectionError = () => {}, isCurrent = () => true,
+  resolved = () => null, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  while (isCurrent()) {
+    const decision = resolved()
+    if (decision) return decision
+    try {
+      const job = await get(id)
+      if (!isCurrent()) return null
+      if (job.id !== id) throw new Error('作业响应不匹配')
+      return job
+    } catch (error) {
+      if (!isCurrent()) return null
+      if (error.status === 401) throw error
+      if (error.status === 404) onMissing()
+      else onConnectionError(error)
+    }
+    await sleep(1000)
+  }
+  return null
 }
 
 export function jobProgressSteps(job) {

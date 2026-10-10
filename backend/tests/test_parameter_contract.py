@@ -3,8 +3,8 @@ import re
 from pathlib import Path
 
 from agent.auto import READONLY_FIELDS
-from agent.schemas import CorrectionProposal, ExtractResult, STYLE_FIELDS, build_tool_schema
-from api.main import LutParamsModel
+from agent.schemas import CorrectionProposal, ExtractResult, STYLE_FIELDS, AVAILABLE_FIELDS, MANUAL_EFFECT_FIELDS, build_tool_schema
+from api.models import LutParamsModel
 from lut_engine import LutParams
 
 
@@ -41,11 +41,12 @@ def _ui_ranges():
 def test_ai_outputs_only_parameters_available_in_manual_controls():
     fields = set(LutParams.__dataclass_fields__)
     assert set(LutParamsModel.model_fields) == fields
-    assert set(ExtractResult.model_fields) - {"intent"} == fields == set(STYLE_FIELDS)
-    assert set(_ui_ranges()) | {"base_photo_style"} == fields
+    assert fields == set(AVAILABLE_FIELDS)
+    assert set(ExtractResult.model_fields) - {"intent"} == fields - set(MANUAL_EFFECT_FIELDS) == set(STYLE_FIELDS)
+    assert set(_ui_ranges()) | {"base_photo_style"} | set(MANUAL_EFFECT_FIELDS) == fields
     assert set(CorrectionProposal.model_fields) - {"diagnosis"} <= fields - set(READONLY_FIELDS)
     tool = build_tool_schema()["function"]["parameters"]
-    assert set(tool["properties"]) - {"intent"} == fields
+    assert set(tool["properties"]) - {"intent"} == fields - set(MANUAL_EFFECT_FIELDS)
     assert tool["additionalProperties"] is False
 
 
@@ -54,7 +55,8 @@ def test_ai_absolute_value_bounds_match_api_and_manual_controls():
     ai = build_tool_schema()["function"]["parameters"]["properties"]
     for key, bounds in _ui_ranges().items():
         assert _bounds(api[key]) == bounds, f"{key}: API 范围与手调控件不一致"
-        assert _bounds(_value_schema(ai[key])) == bounds, f"{key}: AI 范围与手调控件不一致"
+        if key not in MANUAL_EFFECT_FIELDS:
+            assert _bounds(_value_schema(ai[key])) == bounds, f"{key}: AI 范围与手调控件不一致"
     assert _value_schema(ai["base_photo_style"])["enum"] == api["base_photo_style"]["enum"]
     styles = re.search(r"const PHOTO_STYLES = \[(.*?)\n\]", APP.read_text(encoding="utf-8"), re.S)
     assert styles, "输入基准控件选项未定义"

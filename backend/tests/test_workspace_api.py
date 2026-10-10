@@ -263,7 +263,7 @@ def test_auto_workspace_report_bound_and_new_session_not_fixed(headers,monkeypat
     assert out["workspace_id"] == wid and out["source_digest"] == "source-123"
     assert out["main_sample_id"] == "main-1" and out["execution_status"] == "skipped"
     for phase in out["steps"]:
-        assert len(phase["params_before"]) == 30 and len(phase["params_after"]) == 30
+        assert len(phase["params_before"]) == 34 and len(phase["params_after"]) == 34
     assert client.get(f"/api/auto/report?workspace_id={wid}",headers=headers).json() == out
     assert client.get("/api/auto/report",headers=headers).json() is None
     other = workspace(headers)["id"]
@@ -284,7 +284,7 @@ def test_chat_receives_complete_context_and_returns_actual_phases(headers,monkey
     response = client.post("/api/session/chat",headers=headers,json={"message":"风格","params":{},"workspace_id":wid,
         "context":{"goal_mode":"preserve","locked_fields":["exposure"]},"source_digest":"src","main_sample_id":"main"})
     assert response.status_code == 200,response.text
-    assert len(captured["params"]) == 30 and captured["context"]["locked_fields"] == ["exposure"]
+    assert len(captured["params"]) == 34 and captured["context"]["locked_fields"] == ["exposure"]
     assert response.json()["steps"][0]["params_after"]["saturation"] == .2
     assert response.json()["workspace_id"] == wid
 
