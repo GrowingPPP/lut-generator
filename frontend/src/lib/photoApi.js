@@ -1,8 +1,8 @@
 const BASE = '/api/photos'
 
-async function photoFetch(path, body) {
+async function photoFetch(path, body, signal) {
   const response = await fetch(`${BASE}${path}`, {
-    method: 'POST', credentials: 'include', body,
+    method: 'POST', credentials: 'include', body, signal,
   })
   if (response.status === 401) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
@@ -17,13 +17,17 @@ async function photoFetch(path, body) {
   return response
 }
 
-export function normalizedPhotoMetadata(metadata, inputStyle, sourceDigest) {
+export function normalizedPhotoMetadata(metadata, inputStyle, sourceDigest, resolution = 'preview') {
   const management = metadata?.color_management
   if (
+    !['preview', 'original'].includes(resolution) ||
     management?.version !== 1 || management.input_style !== inputStyle ||
     metadata.source_digest !== sourceDigest ||
     !Number.isInteger(metadata.width) || !Number.isInteger(metadata.height) ||
-    metadata.width < 1 || metadata.height < 1 || Math.max(metadata.width, metadata.height) > 2048 ||
+    metadata.width < 1 || metadata.height < 1 ||
+    (resolution === 'original'
+      ? metadata.width !== metadata.source_width || metadata.height !== metadata.source_height
+      : Math.max(metadata.width, metadata.height) > 2048) ||
     !Number.isInteger(metadata.source_width) || !Number.isInteger(metadata.source_height) ||
     metadata.source_width < 1 || metadata.source_height < 1 ||
     metadata.source_width * metadata.source_height > 64_000_000
@@ -31,18 +35,21 @@ export function normalizedPhotoMetadata(metadata, inputStyle, sourceDigest) {
   return metadata
 }
 
-export async function normalizePhoto(file, inputStyle, sourceDigest) {
+export async function normalizePhoto(file, inputStyle, sourceDigest, options = {}) {
+  const { resolution = 'preview', signal } = options
+  if (!['preview', 'original'].includes(resolution)) throw new Error('照片规范化分辨率选项无效')
   const body = new FormData()
   body.append('file', file, file.name)
   body.append('input_style', inputStyle)
-  const response = await photoFetch('/normalize', body)
+  body.append('resolution', resolution)
+  const response = await photoFetch('/normalize', body, signal)
   let metadata
   try {
     metadata = JSON.parse(response.headers.get('X-Photo-Metadata'))
   } catch {
     throw new Error('照片规范化结果缺少色彩信息，请重新上传')
   }
-  normalizedPhotoMetadata(metadata, inputStyle, sourceDigest)
+  normalizedPhotoMetadata(metadata, inputStyle, sourceDigest, resolution)
   return { blob: await response.blob(), metadata }
 }
 

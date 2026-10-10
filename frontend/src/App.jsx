@@ -30,6 +30,9 @@ import CurveEditor from './components/CurveEditor.jsx'
 import ImportedLutPanel from './components/ImportedLutPanel.jsx'
 import ReferenceMatchDialog from './components/ReferenceMatchDialog.jsx'
 import PhotoExportDialog from './components/PhotoExportDialog.jsx'
+import PhotoViewer from './components/PhotoViewer.jsx'
+import { makeTestImage } from './lib/preview.js'
+import { compatibleVersionInputs } from './lib/versionComparison.js'
 import AutoRetouchBar from './components/AutoRetouchBar.jsx'
 import AutoRetouchReport from './components/AutoRetouchReport.jsx'
 import AuthView from './components/AuthView.jsx'
@@ -213,6 +216,7 @@ function GenerateView({ previewLut, user }) {
   const [workspaceHistory, setWorkspaceHistory] = useState(false)
   const [detailsRequest, setDetailsRequest] = useState(0)
   const [photoExport, setPhotoExport] = useState(false)
+  const [photoViewer, setPhotoViewer] = useState(false)
   const [resourceLoading, setResourceLoading] = useState(false)
   const [resourceError, setResourceError] = useState('')
   const [savedAsset, setSavedAsset] = useState(null)
@@ -333,6 +337,7 @@ function GenerateView({ previewLut, user }) {
     setToolTab(TOOL_TABS.some(([key]) => key === view.tool_tab) ? view.tool_tab : 'ai')
     setAiIntent(AI_INTENTS.some(([key]) => key === view.ai_intent) ? view.ai_intent : 'optimize')
     setCurvesOpen(Boolean(view.curves_open))
+    setPhotoViewer(false)
     setSavedAsset(null)
     setBaselineFields([])
     ensureRemote(workspace)
@@ -431,6 +436,7 @@ function GenerateView({ previewLut, user }) {
         pendingAsset ||
         workspaceHistory ||
         photoExport ||
+        photoViewer ||
         /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
       )
         return
@@ -445,7 +451,7 @@ function GenerateView({ previewLut, user }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editor.undo, editor.redo, editor.canUndo, editor.canRedo, busy, saveDialog, inputConfirmation, pendingAsset, workspaceHistory, photoExport])
+  }, [editor.undo, editor.redo, editor.canUndo, editor.canRedo, busy, saveDialog, inputConfirmation, pendingAsset, workspaceHistory, photoExport, photoViewer])
 
   const captureRequest = () => {
     const ws = currentRef.current
@@ -1074,6 +1080,11 @@ function GenerateView({ previewLut, user }) {
   const reportHistorical = reportIsHistorical(gradeResult, { params, primaryId, sourceDigest: primarySample?.source_digest, context })
   const curvesVisible = toolTab === 'manual' && curvesOpen
   const curvesChanged = Object.values(params.curve_points).some(points => points.some(([x, y]) => Math.abs(x - y) > 1e-9))
+  const viewerMedia = selectedMedia || (!samples.length ? { canvas: makeTestImage() } : null)
+  const viewerUnavailable = !viewerMedia?.canvas ? '请先上传或重新绑定照片'
+    : comparison && (!comparison.a || !comparison.b) ? '请选择版本 A 和 B 后再放大比较'
+      : comparison && !compatibleVersionInputs(comparison.a.params, comparison.b.params) ? '两版输入基准不同，无法放大比较'
+        : ''
   const activeAiIntent = grading ? 'optimize' : sending ? 'text' : referenceBusy ? 'reference' : null
   const openCurves = () => {
     setToolTab('manual')
@@ -1151,6 +1162,9 @@ function GenerateView({ previewLut, user }) {
           <span className="text-muted">
             {selectedSample ? `正在查看：${selectedSample.name}` : '合成示意图 · 不参与 AI 分析'}
           </span>
+          <button type="button" className="btn photo-viewer-launch" aria-label="放大查看照片"
+            disabled={!!viewerUnavailable} title={viewerUnavailable || '放大照片，缩放与拖动查看细节'}
+            onClick={() => setPhotoViewer(true)}>放大查看</button>
           <button type="button" className="btn curve-quick-toggle" ref={curveEntryRef}
             aria-expanded={curvesVisible} aria-controls="curve-workbench"
             onClick={() => curvesVisible ? closeCurves() : openCurves()}>
@@ -1672,6 +1686,10 @@ function GenerateView({ previewLut, user }) {
       </WorkbenchDialog>}
       {photoExport && <PhotoExportDialog sample={selectedSample} media={selectedMedia} params={params}
         compatible={compatible} onClose={() => setPhotoExport(false)} onBusyChange={setRemoteBusy} />}
+      {photoViewer && !viewerUnavailable && <PhotoViewer key={`${workspace.id}:${selectedSample?.id || 'synthetic'}`}
+        sample={selectedSample} media={viewerMedia} params={params} comparison={comparison}
+        compatible={comparison ? comparisonSampleMatches : !samples.length || compatible}
+        initialMode={displayMode} initialSplit={split} onClose={() => setPhotoViewer(false)} />}
       {inputConfirmation && (
         <InputConfirmationDialog
           workspace={workspace}

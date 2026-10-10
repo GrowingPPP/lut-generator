@@ -256,6 +256,12 @@
   white-space: nowrap;
 }
 
+.gen-workbench .preview-toolbar .photo-viewer-launch {
+  min-height: 34px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
 .gen-workbench .input-context {
   flex: 0 0 auto;
   margin: 0;

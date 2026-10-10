@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from . import auth
 from .models import LutParamsModel
-from photo.color_management import MAX_PHOTO_BYTES, decode_photo, encode_preview
+from photo.color_management import MAX_PHOTO_BYTES, PREVIEW_SIDE, decode_photo, encode_preview
 from photo.export import export_photo
 from photo import render as R
 from photo.types import ImageTooLargeError, PhotoError
@@ -48,11 +48,13 @@ def photo_error(exc):
 @router.post("/normalize")
 def normalize_photo(request: Request, file: UploadFile = File(...),
                     input_style: Literal["STD", "NAT", "VIVD", "VLOG"] = Form("STD"),
+                    resolution: Literal["preview", "original"] = Form("preview"),
                     user=Depends(auth.get_current_user)):
     with photo_slot():
         raw = read_photo(request, file)
         try:
-            photo = decode_photo(raw, input_style)
+            photo = decode_photo(raw, input_style,
+                                 max_side=None if resolution == "original" else PREVIEW_SIDE)
             data = encode_preview(photo)
         except PhotoError as exc:
             raise photo_error(exc) from exc
