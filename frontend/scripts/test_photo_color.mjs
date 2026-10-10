@@ -36,4 +36,5 @@ test('normalized color metadata explains conversion, assumptions and log preserv
   assert.match(assumed.color, /按 sRGB/)
   assert.equal(assumed.warning, '按 sRGB 解释')
   assert.match(photoMetadataNotes({ color_management: { ...metadata.color_management, input_style: 'VLOG', status: 'preserved_vlog' } }).color, /V-Log/)
+  assert.match(photoMetadataNotes({ color_management: { ...metadata.color_management, status: 'converted_adobe_rgb' } }).color, /Adobe RGB.*sRGB/)
 })

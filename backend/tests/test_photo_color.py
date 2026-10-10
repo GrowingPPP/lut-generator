@@ -10,7 +10,7 @@ from lut_engine.colorspace import rec709_eotf, srgb_oetf
 from photo.color_management import decode_photo, encode_preview, photo_array, srgb_profile
 from photo.export import export_photo
 from photo.render import lut_from_params, render_lut
-from photo.types import UnsupportedImageError
+from photo.types import PhotoError, UnsupportedImageError
 
 
 def encoded(image, *, icc=None, exif=None, format="PNG"):
@@ -33,6 +33,114 @@ def linear_rgb_profile():
         if signature in (b"rTRC", b"gTRC", b"bTRC"):
             struct.pack_into(">4sIHHI", profile, offset, b"para", 0, 0, 0, 65536)
     return bytes(profile)
+
+
+def encoded_mpo(primary, thumbnails, *, roles, exif=None, entry_fields=None, declared_frames=None):
+    """生成实际 JPEG/MPF 容器，角色由测试指定。"""
+    out = io.BytesIO()
+    primary.save(out, "MPO", save_all=True, append_images=thumbnails,
+                 quality=100, subsampling=0, **({"exif": exif} if exif else {}))
+    raw = bytearray(out.getvalue())
+    tiff_start = raw.index(b"MPF\0") + 4
+    endian = "<" if raw[tiff_start:tiff_start + 2] == b"II" else ">"
+    directory = tiff_start + struct.unpack_from(endian + "I", raw, tiff_start + 4)[0]
+    count = struct.unpack_from(endian + "H", raw, directory)[0]
+    for index in range(count):
+        entry = directory + 2 + index * 12
+        tag, _, byte_count, offset = struct.unpack_from(endian + "HHII", raw, entry)
+        if tag == 0xB001 and declared_frames is not None:
+            struct.pack_into(endian + "I", raw, entry + 8, declared_frames)
+        if tag == 0xB002:
+            assert byte_count == len(roles) * 16
+            entries = tiff_start + offset
+            for frame, role in enumerate(roles):
+                struct.pack_into(endian + "I", raw, entries + frame * 16, role)
+            for frame, fields in (entry_fields or {}).items():
+                for field, value in fields.items():
+                    field_offset = {"Size": 4, "DataOffset": 8}[field]
+                    struct.pack_into(endian + "I", raw, entries + frame * 16 + field_offset, value)
+            return bytes(raw)
+    raise AssertionError("生成的照片缺少 MPF 帧索引")
+
+
+@pytest.mark.parametrize("thumbnail_role", [0x010001, 0x010002])
+def test_mpo_camera_photo_uses_oriented_primary_and_ignores_thumbnail(thumbnail_role):
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    exif[0x010F] = "Camera with MPF thumbnail"
+    raw = encoded_mpo(Image.new("RGB", (20, 10), (204, 25, 37)),
+                      [Image.new("RGB", (4, 3), "blue")],
+                      roles=[0x030000, thumbnail_role], exif=exif)
+    with Image.open(io.BytesIO(raw)) as source:
+        assert source.format == "MPO" and source.n_frames == 2
+    result = decode_photo(raw, max_side=None)
+    assert result.image.size == (10, 20)
+    assert result.metadata["source_width"] == 10
+    assert result.metadata["source_height"] == 20
+    assert result.metadata["camera_make"] == "Camera with MPF thumbnail"
+    assert np.max(np.abs(np.asarray(result.image).astype(int) - (204, 25, 37))) <= 2
+    assert not result.image.getexif()
+
+
+@pytest.mark.parametrize("roles", [
+    [0x000000, 0x010002],
+    [0x010002, 0x030000],
+    [0x030000, 0x030000],
+    [0x030000, 0x000000],
+    [0x030000, 0x020001],
+    [0x030000, 0x020002],
+    [0x030000, 0x020003],
+    [0x030000, 0x01010002],
+])
+def test_mpo_ambiguous_or_multi_picture_roles_are_rejected(roles):
+    raw = encoded_mpo(Image.new("RGB", (12, 8), "red"),
+                      [Image.new("RGB", (4, 3), "blue")], roles=roles)
+    with pytest.raises(PhotoError):
+        decode_photo(raw)
+
+
+@pytest.mark.parametrize("entry_fields", [
+    {0: {"DataOffset": 1}},
+    {1: {"DataOffset": 0}},
+    {1: {"DataOffset": 1}},
+    {1: {"DataOffset": 100000}},
+    {0: {"Size": 0}},
+    {1: {"Size": 0}},
+    {0: {"Size": 1}},
+    {1: {"Size": 100}},
+    {1: {"Size": 100000}},
+])
+def test_mpo_bad_frame_index_is_rejected_instead_of_ignored(entry_fields):
+    raw = encoded_mpo(Image.new("RGB", (12, 8), "red"),
+                      [Image.new("RGB", (4, 3), "blue")],
+                      roles=[0x030000, 0x010002], entry_fields=entry_fields)
+    with pytest.raises(PhotoError):
+        decode_photo(raw)
+
+
+def test_mpo_frame_count_must_match_index():
+    raw = encoded_mpo(Image.new("RGB", (12, 8), "red"),
+                      [Image.new("RGB", (4, 3), "blue")],
+                      roles=[0x030000, 0x010002], declared_frames=3)
+    with pytest.raises(PhotoError):
+        decode_photo(raw)
+
+
+def test_mpo_pixel_limit_uses_full_primary_not_small_thumbnail():
+    from photo.types import ImageTooLargeError
+    raw = encoded_mpo(Image.new("RGB", (20, 10), "red"),
+                      [Image.new("RGB", (4, 3), "blue")],
+                      roles=[0x030000, 0x010002])
+    with pytest.raises(ImageTooLargeError):
+        decode_photo(raw, max_pixels=100)
+
+
+def test_multi_page_tiff_remains_unsupported():
+    out = io.BytesIO()
+    Image.new("RGB", (12, 8), "red").save(out, "TIFF", save_all=True,
+        append_images=[Image.new("RGB", (12, 8), "blue")])
+    with pytest.raises(UnsupportedImageError):
+        decode_photo(out.getvalue())
 
 
 def test_icc_conversion_changes_linear_encoded_pixels_and_is_shared_with_preview():

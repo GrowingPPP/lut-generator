@@ -109,7 +109,9 @@ export function photoMetadataNotes(metadata) {
       camera: camera || '未识别相机信息',
       color: management.input_style === 'VLOG'
         ? '已保留 V-Log / V-Gamut 编码'
-        : management.status === 'converted_srgb'
+        : management.status === 'converted_adobe_rgb'
+          ? '已按照片声明将 Adobe RGB 转换为 sRGB'
+          : management.status === 'converted_srgb'
           ? '已按 ICC 统一为 sRGB'
           : management.status === 'declared_srgb'
             ? '已统一为 sRGB'

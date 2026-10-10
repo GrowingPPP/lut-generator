@@ -9,13 +9,14 @@ from PIL import Image, ImageCms, ImageFile, ImageOps
 from lut_engine.colorspace import rec709_eotf, srgb_oetf
 
 from .types import CorruptImageError, ImageTooLargeError, UnsupportedImageError
+from .adobe_rgb import adobe_rgb_to_srgb
 
 MAX_PHOTO_BYTES = 32 * 1024 * 1024
 MAX_PIXELS = 64_000_000
 PREVIEW_SIDE = 2048
 COLOR_VERSION = 1
 INPUT_STYLES = frozenset(("STD", "NAT", "VIVD", "VLOG"))
-SUPPORTED_FORMATS = frozenset(("JPEG", "PNG", "WEBP", "TIFF"))
+SUPPORTED_FORMATS = frozenset(("JPEG", "PNG", "WEBP", "TIFF", "MPO"))
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -53,17 +54,51 @@ def decode_photo(data: bytes, input_style: str = "STD", *, max_side=PREVIEW_SIDE
             if check.width * check.height > pixel_limit:
                 raise ImageTooLargeError(f"图片像素数 {check.width}×{check.height} 超出上限 {pixel_limit:,} 像素")
             if check.format not in SUPPORTED_FORMATS:
-                raise UnsupportedImageError("支持 JPEG、PNG、WebP 与 TIFF 照片")
-            if getattr(check, "n_frames", 1) != 1:
+                raise UnsupportedImageError("支持 JPEG、PNG、WebP、TIFF 与带缩略图的 MPO 照片")
+            if check.format == "MPO":
+                mpinfo = getattr(check, "mpinfo", {})
+                entries = mpinfo.get(0xB002, [])
+                thumbnail_roles = {"Large Thumbnail (VGA Equivalent)",
+                                   "Large Thumbnail (Full HD Equivalent)"}
+                if not entries or len(entries) != getattr(check, "n_frames", 1):
+                    raise UnsupportedImageError("MPO 缺少有效主照片与缩略图索引")
+                frame_ranges = []
+                for index, entry in enumerate(entries):
+                    attribute = entry.get("Attribute", {})
+                    role = attribute.get("MPType")
+                    allowed = role == "Baseline MP Primary Image" if index == 0 else role in thumbnail_roles
+                    if attribute.get("ImageDataFormat") != "JPEG" or not allowed:
+                        raise UnsupportedImageError("MPO 只支持一张主照片及辅助缩略图，不支持多画面照片")
+                    size, offset = entry.get("Size", 0), entry.get("DataOffset", 0)
+                    if size <= 0 or (offset != 0 if index == 0 else offset <= 0):
+                        raise UnsupportedImageError("MPO 帧索引的大小或偏移无效")
+                    # 读取辅助帧的 JPEG 头来验证索引，不解码其像素。
+                    check.seek(index)
+                    start, end = check.offset, check.offset + size
+                    if (end > len(data) or data[start:start + 3] != b"\xff\xd8\xff"
+                            or data[end - 2:end] != b"\xff\xd9"
+                            or any(start < other_end and end > other_start
+                                   for other_start, other_end in frame_ranges)):
+                        raise UnsupportedImageError("MPO 帧索引越界、重叠或未覆盖完整 JPEG")
+                    frame_ranges.append((start, end))
+                check.seek(0)
+            elif "mp" in check.info:
+                raise UnsupportedImageError("MPO 索引无法识别，请转换为普通 JPEG 后上传")
+            elif getattr(check, "n_frames", 1) != 1:
                 raise UnsupportedImageError("请使用静态照片，不支持动图或多页图片")
             check.verify()
         with Image.open(io.BytesIO(data)) as source:
+            source.seek(0)
             exif = source.getexif()
             try:
                 color_space = exif.get_ifd(0x8769).get(0xA001, exif.get(0xA001))
+            except (KeyError, TypeError, ValueError):
+                color_space = exif.get(0xA001)
+            try:
                 interop = exif.get_ifd(0xA005).get(1)
             except (KeyError, TypeError, ValueError):
-                color_space, interop = exif.get(0xA001), None
+                interop = None
+            declared_adobe_rgb = color_space == 0xFFFF and interop in ("R03", b"R03")
             icc = source.info.get("icc_profile")
             source_mode = source.mode
             tiff_bits = source.tag_v2.get(258, (8,)) if source.format == "TIFF" else (8,)
@@ -97,6 +132,9 @@ def decode_photo(data: bytes, input_style: str = "STD", *, max_side=PREVIEW_SIDE
                 except (ImageCms.PyCMSError, OSError, ValueError, TypeError) as exc:
                     raise UnsupportedImageError("ICC 配置无法转换，请先将照片转换为 sRGB 后上传") from exc
                 status, warning = "converted_srgb", ""
+            elif declared_adobe_rgb:
+                img = adobe_rgb_to_srgb(img)
+                status, warning = "converted_adobe_rgb", "按照片 EXIF 声明将 Adobe RGB 转换为 sRGB。"
             else:
                 if img.mode in ("CMYK", "LAB") or color_space == 0xFFFF or interop in ("R03", b"R03"):
                     raise UnsupportedImageError("照片色彩空间未校准或为 Adobe RGB，缺少有效 ICC；请先转换为 sRGB 后上传")
@@ -113,7 +151,7 @@ def decode_photo(data: bytes, input_style: str = "STD", *, max_side=PREVIEW_SIDE
             metadata = {
                 "camera_make": _camera_text(exif.get(0x010F)),
                 "camera_model": _camera_text(exif.get(0x0110)),
-                "color_space": "sRGB" if color_space == 1 else "uncalibrated" if color_space == 0xFFFF else "unknown",
+                "color_space": "Adobe RGB" if declared_adobe_rgb else "sRGB" if color_space == 1 else "uncalibrated" if color_space == 0xFFFF else "unknown",
                 "embedded_icc": bool(icc),
                 "source_width": source_width, "source_height": source_height,
                 "width": img.width, "height": img.height,

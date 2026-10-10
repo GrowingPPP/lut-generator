@@ -11,6 +11,7 @@ import { parameterSignature, effectivePhases, versionSource, equivalentCandidate
 import WorkspaceToolbar from './components/WorkspaceToolbar.jsx'
 import InputConfirmationDialog from './components/InputConfirmationDialog.jsx'
 import SampleGallery from './components/SampleGallery.jsx'
+import SampleInputPreview from './components/SampleInputPreview.jsx'
 import VersionPanel from './components/VersionPanel.jsx'
 import StyleSaveDialog from './components/StyleSaveDialog.jsx'
 import CameraGuideDialog from './components/CameraGuideDialog.jsx'
@@ -815,6 +816,7 @@ function GenerateView({ previewLut, user }) {
         primary_sample_id: primaryId || nextSamples[0]?.id,
         validation: validation ? { ...validation, stale: true } : null,
       })
+      setComparison(null)
       setStatus('样张已载入，请确认照片输入基准')
     } catch (e) {
       setStatus(e.message)
@@ -1165,19 +1167,17 @@ function GenerateView({ previewLut, user }) {
         )}
         <div hidden={!!comparison}>
           {samples.length > 0 && (!selectedMedia || !compatible) && (
+            selectedMedia ? <SampleInputPreview key={`${workspace.id}:${selectedSample.id}:${selectedSample.input_contract?.base_photo_style}`}
+              sample={selectedSample} media={selectedMedia} params={params} busy={busy}
+              onConfirm={contract => confirmSample(selectedSample.id, contract)}
+              onRebind={() => { setRebindingId(selectedSample.id); fileInputRef.current?.click() }}
+              onDetails={() => setDetailsRequest(value => value + 1)} onInput={() => setToolTab('manual')} /> :
             <div className="preview-empty">
-              {!selectedMedia
-                ? '样张文件仅保留于上次页面内存，请重新绑定照片。'
-                : !selectedSample?.input_confirmed
-                  ? '请先确认照片输入基准，确认后才显示 LUT 预览。'
-                  : !sampleIsNormalized(selectedSample) ? '此样张来自旧色彩处理流程，请重新绑定原文件并确认输入。'
-                  : `照片的 ${selectedSample.input_contract.base_photo_style} 输入与当前 ${params.base_photo_style} LUT 不一致，已暂停预览。`}
+              样张文件仅保留于上次页面内存，请重新绑定照片。
               <div className="preview-empty-actions">
                 <button className="btn-primary" disabled={busy} onClick={() => {
-                  if (!selectedMedia || !sampleIsNormalized(selectedSample)) {
-                    setRebindingId(selectedSample.id); fileInputRef.current?.click()
-                  } else setDetailsRequest(value => value + 1)
-                }}>{!selectedMedia || !sampleIsNormalized(selectedSample) ? '重新绑定照片' : '查看照片详情'}</button>
+                  setRebindingId(selectedSample.id); fileInputRef.current?.click()
+                }}>重新绑定照片</button>
                 <button className="btn" onClick={() => setToolTab('manual')}>检查 LUT 输入</button>
               </div>
             </div>
