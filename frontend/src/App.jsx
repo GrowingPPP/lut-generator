@@ -1082,9 +1082,14 @@ function GenerateView({ previewLut, user }) {
       const region = curveWorkbenchRef.current
       if (!region || region.hidden) return
       region.focus({ preventScroll: true })
-      if (window.matchMedia('(max-width: 960px), (max-height: 620px)').matches)
-        region.scrollIntoView({ block: 'start' })
+      const stacked = window.matchMedia('(max-width: 960px), (max-height: 620px)').matches
+      const target = stacked ? region : region.querySelector('.curve-workbench-heading')
+      target?.scrollIntoView({ block: stacked ? 'start' : 'nearest' })
     })
+  }
+  const closeCurves = () => {
+    setCurvesOpen(false)
+    requestAnimationFrame(() => curveEntryRef.current?.focus())
   }
 
   return (
@@ -1131,7 +1136,7 @@ function GenerateView({ previewLut, user }) {
       </header>
       {status && <div className="workbench-notice" role="status"><span>{status}</span>{activeAiIntent && !(toolTab === 'ai' && aiIntent === activeAiIntent) && <button className="btn" onClick={() => { setToolTab('ai'); setAiIntent(activeAiIntent) }}>{grading ? '查看作业与取消' : '查看当前操作'}</button>}</div>}
       <div className="workbench-body">
-        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片工作区">
+        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片工作区" tabIndex={0}>
         <div className="preview-toolbar">
           <label className="mode-select">
             展示形式
@@ -1148,7 +1153,7 @@ function GenerateView({ previewLut, user }) {
           </span>
           <button type="button" className="btn curve-quick-toggle" ref={curveEntryRef}
             aria-expanded={curvesVisible} aria-controls="curve-workbench"
-            onClick={() => curvesVisible ? setCurvesOpen(false) : openCurves()}>
+            onClick={() => curvesVisible ? closeCurves() : openCurves()}>
             自由曲线{curvesVisible ? ' · 收起' : curvesChanged ? ' · 已调整' : ''}
           </button>
           <button
@@ -1238,6 +1243,16 @@ function GenerateView({ previewLut, user }) {
           </div>
         </div>
         </div>
+        <div className="curve-workbench" id="curve-workbench" ref={curveWorkbenchRef} role="region" aria-label="自由曲线 · 四通道" tabIndex={-1} hidden={!curvesVisible}>
+          <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><button className="btn" onClick={closeCurves}>收起曲线</button></div>
+          <div className="curve-workbench-body">
+            <CurveEditor key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
+              onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
+              onPreview={editor.update}
+              onCommit={(patch) => editor.commit(patch, { source: 'curve', purpose: 'style' })}
+              onCancel={editor.cancel} />
+          </div>
+        </div>
         <SampleGallery
           detailsRequest={detailsRequest}
           samples={samples}
@@ -1269,16 +1284,6 @@ function GenerateView({ previewLut, user }) {
         />
           <DiagnosticsPanel compact image={selectedMedia?.canvas} params={params} compatible={compatible} sampleName={selectedSample?.name} />
           {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
-          <div className="curve-workbench" id="curve-workbench" ref={curveWorkbenchRef} role="region" aria-label="自由曲线 · 四通道" tabIndex={-1} hidden={!curvesVisible}>
-            <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><button className="btn" onClick={() => { setCurvesOpen(false); curveEntryRef.current?.focus({ preventScroll: true }) }}>收起曲线</button></div>
-            <div className="curve-workbench-body">
-          <CurveEditor key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
-            onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
-            onPreview={editor.update}
-            onCommit={(patch) => editor.commit(patch, { source: 'curve', purpose: 'style' })}
-            onCancel={editor.cancel} />
-            </div>
-          </div>
         </section>
         <aside className="task-panel" aria-label="调色工具">
           <div className="task-tabs" role="tablist" aria-label="调色任务">
@@ -1291,7 +1296,7 @@ function GenerateView({ previewLut, user }) {
               }}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</button>)}
           </div>
           <div className="manual-tool-shortcuts" hidden={toolTab !== 'manual'}>
-            <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => curvesOpen ? setCurvesOpen(false) : openCurves()}>
+            <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => curvesOpen ? closeCurves() : openCurves()}>
               <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>
             </button>
           </div>
