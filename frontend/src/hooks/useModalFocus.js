@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
 
-export default function useModalFocus(onClose, allowClose = true) {
+export default function useModalFocus(onClose, allowClose = true, active = true) {
   const ref = useRef(null)
   const close = useRef(onClose)
   close.current = onClose
   useEffect(() => {
+    if (!active) return undefined
     const previous = document.activeElement
     const panel = ref.current
     const controls = () =>
@@ -46,6 +47,6 @@ export default function useModalFocus(onClose, allowClose = true) {
       document.removeEventListener('keydown', onKey)
       if (previous?.isConnected) previous.focus()
     }
-  }, [allowClose])
+  }, [allowClose, active])
   return ref
 }

@@ -5,35 +5,55 @@ import {
   reviewSkipText,
   styleDiff,
 } from '../lib/autoGrade.js'
+import { contextSignature } from '../lib/workspaceFlow.js'
 
-/**
- * 自动修图的修改说明面板。
- *
- * 设计要点:
- *  - 降级警示必须显眼(role="status" 而非 alert —— 它不是错误,不该打断)
- *  - 「风格理解」单独一行:这是最可能出错的地方(模型把「日系清透」理解成「大幅提亮」),
- *    必须让用户能一眼核对
- *  - 被拒项默认折叠,但摘要行必须显示数量
- *  - 复检意见来自另一个模型调用、性质是主观判断,用左边框与确定性数字视觉区隔
- */
-export default function AutoRetouchReport({ result, beforeParams, onUndo, historical }) {
+const GOAL_LABELS = {
+  natural: '自然校正',
+  preserve: '保留氛围',
+  style_only: '只调整风格',
+}
+
+export default function AutoRetouchReport({ result, beforeParams, onUndo, historical, applied }) {
   if (!result) return null
 
   const changes = diffParams(beforeParams, result.params)
-  // 风格分两种呈现,绝不能混:提议(可能没生效)与真正的应用结果。
-  // 曾经只用 style_params,于是被硬校验拦下的风格也会显示成一个数字,
-  // 而滑杆纹丝不动 —— 用户看到「曝光 -0.30 EV」却发现曝光还是 0.00。
   const styleApplied = result.style_applied
     ? styleDiff(result.style_applied_params || result.style_params)
     : []
   const styleBlocked =
     !result.style_applied && result.style_params ? styleDiff(result.style_params) : []
   const rejected = rejectionList(result.steps)
+  const requestContext = Object.hasOwn(result, '_request_context')
+    ? result._request_context : result.context
+  const goal = GOAL_LABELS[requestContext?.goal_mode || result.goal_mode] || '未记录'
+  const protectedCount = contextSignature(requestContext)
+    ? new Set(requestContext.locked_fields).size : null
+  const sampleId = result._sample_id ?? result.main_sample_id
+  const sampleName = result._sample_name || (sampleId ? '样张名称未记录' : '未记录')
+  const recordedTime = result._applied_at || result.created_at
+  const timestamp = recordedTime ? new Date(recordedTime) : null
+  const validTime = timestamp && Number.isFinite(timestamp.getTime())
+  const headline = applied ? gradeHeadline(result) : gradeHeadline(result).replace('已应用', '已完成')
 
   return (
     <section className="auto-report" tabIndex={-1}>
+      <header className="auto-report-context">
+        <strong>{historical ? '此前结果' : applied ? '当前已应用' : '本次结果 · 应用状态未记录'}</strong>
+        <dl className="auto-summary">
+          <dt>来源照片</dt>
+          <dd title={sampleId || undefined}>{sampleName}</dd>
+          <dt>当次目标</dt>
+          <dd>{goal}</dd>
+          <dt>已保护</dt>
+          <dd>{protectedCount === null ? '未记录' : `${protectedCount} 项参数`}</dd>
+          <dt>{result._applied_at ? '应用时间' : '报告时间'}</dt>
+          <dd>
+            {validTime ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleString('zh-CN')}</time> : '未记录'}
+          </dd>
+        </dl>
+      </header>
       {historical && (
-        <p className="workspace-note">来自此前调整，参数或样张已变化；以下为当次报告。</p>
+        <p className="workspace-note">以下为当次报告。参数、主样张或创作上下文已变化，或当次上下文未记录。</p>
       )}
       {result.degraded && !result.goal_status && (
         <div className="auto-warn" role="status">
@@ -42,7 +62,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
         </div>
       )}
 
-      <div className="auto-headline">{gradeHeadline(result)}</div>
+      <div className="auto-headline">{headline}</div>
       {result.goal_status && (
         <p className="workspace-note">
           目标状态：
@@ -65,10 +85,10 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
       )}
 
       <dl className="auto-summary">
-        <dt>本次调整</dt>
+        <dt>主要变化</dt>
         <dd>
           {changes.length > 0 ? (
-            changes.map((c) => (
+            changes.slice(0, 3).map((c) => (
               <span key={c.key} className="chip delta">
                 {c.text}
               </span>
@@ -77,61 +97,52 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
             <span className="text-muted">无</span>
           )}
         </dd>
-
-        {styleApplied.length > 0 && (
-          <>
-            <dt>风格已应用</dt>
-            <dd>
-              {styleApplied.map((c) => (
-                <span key={c.key} className="chip delta chip-style">
-                  {c.text}
-                </span>
-              ))}
-            </dd>
-          </>
-        )}
-
-        {styleBlocked.length > 0 && (
-          <>
-            <dt>风格被拦下</dt>
-            <dd className="auto-span auto-style-blocked">
-              <div className="auto-small">
-                模型理解为以下调整,但未通过安全校验,没有应用到参数上:
-              </div>
-              {styleBlocked.map((c) => (
-                <span key={c.key} className="chip chip-blocked">
-                  {c.text}
-                </span>
-              ))}
-              {result.style_rejections?.length > 0 && (
-                <div className="auto-small">原因:{result.style_rejections.join(';')}</div>
-              )}
-            </dd>
-          </>
-        )}
-
-        {result.observations?.length > 0 && (
-          <>
-            <dt>画面观察</dt>
-            <dd className="auto-span auto-evidence">
-              {result.observations.map((i, n) => (
-                <div key={i.code || n}>· {i.evidence || i}</div>
-              ))}
-            </dd>
-          </>
-        )}
-        {result.issues?.length > 0 && (
-          <>
-            <dt>与目标冲突</dt>
-            <dd className="auto-span auto-evidence">
-              {result.issues.map((i) => (
-                <div key={i.code}>· {i.evidence}</div>
-              ))}
-            </dd>
-          </>
-        )}
       </dl>
 
+      {changes.length > 3 && (
+        <details className="auto-details">
+          <summary>其余 {changes.length - 3} 项参数变化</summary>
+          <div>
+            {changes.slice(3).map((c) => <span key={c.key} className="chip delta">{c.text}</span>)}
+          </div>
+        </details>
+      )}
+      {styleApplied.length > 0 && (
+        <details className="auto-details">
+          <summary>风格贡献 · {styleApplied.length} 项调整已计入候选</summary>
+          <div>
+            {styleApplied.map((c) => <span key={c.key} className="chip delta chip-style">{c.text}</span>)}
+          </div>
+        </details>
+      )}
+      {styleBlocked.length > 0 && (
+        <details className="auto-details auto-style-blocked">
+          <summary>风格被拦下 · {styleBlocked.length} 项提议未应用</summary>
+          <div className="auto-small">模型理解为以下调整，但未通过安全校验，没有计入候选：</div>
+          <div>
+            {styleBlocked.map((c) => <span key={c.key} className="chip chip-blocked">{c.text}</span>)}
+          </div>
+          {result.style_rejections?.length > 0 && (
+            <div className="auto-small">原因：{result.style_rejections.join('；')}</div>
+          )}
+        </details>
+      )}
+      {result.observations?.length > 0 && (
+        <details className="auto-details">
+          <summary>画面观察 · {result.observations.length} 项</summary>
+          <div className="auto-evidence">
+            {result.observations.map((item, index) => <div key={item.code || index}>· {item.evidence || item}</div>)}
+          </div>
+        </details>
+      )}
+      {result.issues?.length > 0 && (
+        <details className="auto-details">
+          <summary>与当次目标冲突 · {result.issues.length} 项</summary>
+          <div className="auto-evidence">
+            {result.issues.map((item, index) => <div key={item.code || index}>· {item.evidence}</div>)}
+          </div>
+        </details>
+      )}
       {result.steps?.length > 0 && (
         <details className="auto-details">
           <summary>完整分析过程({result.steps.length} 步)</summary>
@@ -166,10 +177,10 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
       )}
 
       {result.review ? (
-        <div className="auto-review">
-          <span className="auto-review-label">视觉复核</span>
-          <p>{result.review}</p>
-        </div>
+        <details className="auto-details">
+          <summary>视觉复核意见 · 主观评价</summary>
+          <div className="auto-review"><p>{result.review}</p></div>
+        </details>
       ) : (
         <div className="auto-review-skipped text-muted">
           {reviewSkipText(result.review_skip_reason)}

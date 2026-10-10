@@ -26,7 +26,7 @@ function CurveChannel({ channel, points, blocked, dragging, onBegin, onMove, onF
   useEffect(() => {
     setPointDraft({ x: percent(pointX), y: percent(pointY) })
     setPointError('')
-  }, [pointX, pointY, pointIndex])
+  }, [pointX, pointY, pointIndex, blocked])
 
   function add(event) {
     if (editingBlocked || points.length >= MAX_CURVE_POINTS) return

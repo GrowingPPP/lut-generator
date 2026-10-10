@@ -90,7 +90,7 @@ function ParameterShapes({ params }) {
   )
 }
 
-export default function DiagnosticsPanel({ image, params, compatible, sampleName }) {
+export default function DiagnosticsPanel({ image, params, compatible, sampleName, compact = false }) {
   const [measurement, setMeasurement] = useState(null)
   const [overlay, setOverlay] = useState(false)
   const [failure, setFailure] = useState('')
@@ -143,7 +143,7 @@ export default function DiagnosticsPanel({ image, params, compatible, sampleName
     return () => { cancelled = true; clearTimeout(timer); worker?.terminate() }
   }, [image, signature, measurable])
 
-  return (
+  const details = (
     <section className="diagnostics-panel" aria-label="样张可视化诊断">
       <header className="diagnostics-heading"><div><h3>图像诊断</h3><p>{sampleName || '尚未选择样张'}</p></div><span className="diagnostics-local-tag">本机预览统计</span></header>
       {!image ? <p className="diagnostics-empty">选择真实样张后显示图像统计。下方形状仅说明当前参数。</p>
@@ -175,4 +175,15 @@ export default function DiagnosticsPanel({ image, params, compatible, sampleName
       <ParameterShapes params={normalized} />
     </section>
   )
+  if (!compact) return details
+  const summary = !image ? '选择真实样张后可检查'
+    : !compatible ? '输入待确认，尚未测量'
+      : failure ? `诊断未完成：${failure}`
+        : !currentMeasurement ? '正在测量当前预览…'
+          : currentMeasurement.highlight_clip_delta_pct > 0.5 || currentMeasurement.shadow_clip_delta_pct > 0.5
+            ? '新增裁切需关注' : '未发现明显新增裁切'
+  return <details className="image-inspection">
+    <summary><strong>图像检查</strong><span>{summary}</span>{currentMeasurement && <small>相对技术基线 · 缩小预览统计</small>}</summary>
+    {details}
+  </details>
 }

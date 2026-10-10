@@ -310,5 +310,6 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 | [docs/specs/product-readiness-validation.md](docs/specs/product-readiness-validation.md) | 本轮完成清单、完整回归、浏览器与独立复核结果、部署边界和延期事项 |
 | [docs/specs/extended-grading-design.md](docs/specs/extended-grading-design.md) | 色彩管理、作业恢复、参考匹配、外部 LUT、自由曲线与照片导出的设计及参数契约 |
 | [docs/specs/extended-grading-validation.md](docs/specs/extended-grading-validation.md) | 扩展功能交付、1,020 项后端与 141 项前端回归、浏览器验收、复核修复及待办 |
+| [docs/specs/generation-layout-review.md](docs/specs/generation-layout-review.md) | 生成页布局评估、照片与任务工具的重构方案、AI 状态表达、实施任务及布局概念 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |
 | [docs/leftover-issues.md](docs/leftover-issues.md) | 已知问题的记录与处理结果 |

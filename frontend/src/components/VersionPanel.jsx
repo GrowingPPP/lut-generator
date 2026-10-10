@@ -11,6 +11,7 @@ export default function VersionPanel({
   onCompare,
   onCloseCompare,
   draft,
+  expanded = false,
 }) {
   const [name, setName] = useState('')
   const [open, setOpen] = useState(false)
@@ -25,9 +26,9 @@ export default function VersionPanel({
         <h3>
           命名版本 <span>{versions.length}/20</span>
         </h3>
-        <button className="btn" onClick={() => setOpen(!open)}>
+        {!expanded && <button className="btn" onClick={() => setOpen(!open)}>
           {open ? '收起版本' : '查看版本'}
-        </button>
+        </button>}
       </div>
       <div className="version-save-row">
         <input
@@ -87,7 +88,7 @@ export default function VersionPanel({
           </button>
         )}
       </div>
-      {open && (
+      {(expanded || open) && (
         <div className="version-list">
           {versions.map((v) => (
             <div key={v.id} className="version-row">

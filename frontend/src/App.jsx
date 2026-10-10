@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { defaultParams, normalizeParams } from './lib/lutEngine.js'
 import usePreview from './hooks/usePreview.js'
 import useWorkspace from './hooks/useWorkspace.js'
+import useModalFocus from './hooks/useModalFocus.js'
 import { inputContract, applyStyleRecipe } from './lib/styleRecipe.js'
 import { lockConflicts } from './lib/workspace.js'
 import { decodeSample, restoreSample, sampleMatches, sampleIsNormalized } from './lib/samples.js'
 import { diffParams } from './lib/autoGrade.js'
-import { parameterSignature, effectivePhases, versionSource, equivalentCandidate } from './lib/workspaceFlow.js'
+import { parameterSignature, effectivePhases, versionSource, equivalentCandidate, contextSignature, reportIsHistorical } from './lib/workspaceFlow.js'
 import WorkspaceToolbar from './components/WorkspaceToolbar.jsx'
 import InputConfirmationDialog from './components/InputConfirmationDialog.jsx'
 import SampleGallery from './components/SampleGallery.jsx'
@@ -34,6 +35,7 @@ import AuthView from './components/AuthView.jsx'
 import LibraryView from './components/LibraryView.jsx'
 import LandingView from './LandingView.jsx'
 import './Landing.css'
+import './GenerationWorkspace.css'
 
 const PARAM_GROUPS = [
   {
@@ -148,6 +150,19 @@ const PRESETS = [
   },
 ]
 
+const TOOL_TABS = [['ai', 'AI 创作'], ['manual', '手动调整'], ['versions', '版本']]
+const AI_INTENTS = [['optimize', '照片优化'], ['text', '文字微调'], ['reference', '参考匹配']]
+
+function WorkbenchDialog({ title, onClose, children }) {
+  const modal = useModalFocus(onClose)
+  return <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section ref={modal} className="workspace-modal workspace-history-drawer" role="dialog" aria-modal="true" aria-labelledby="workspace-history-title">
+      <div className="section-heading"><h2 id="workspace-history-title">{title}</h2><button className="btn" onClick={onClose}>关闭</button></div>
+      {children}
+    </section>
+  </div>
+}
+
 const DISPLAY_MODES = [
   { value: 'slider', label: '滑动对比' },
   { value: 'split', label: '独立展示' },
@@ -180,6 +195,7 @@ function GenerateView({ previewLut, user }) {
   const [sampleLoading, setSampleLoading] = useState(false)
   const [advancedLoading, setAdvancedLoading] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
+  const [referenceBusy, setReferenceBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [groupOpen, setGroupOpen] = useState(defaultGroupOpen)
   const [sessions, setSessions] = useState([])
@@ -189,7 +205,11 @@ function GenerateView({ previewLut, user }) {
   const [saveDialog, setSaveDialog] = useState(false)
   const [cameraGuide, setCameraGuide] = useState(null)
   const [inputConfirmation, setInputConfirmation] = useState(false)
-  const [referenceDialog, setReferenceDialog] = useState(false)
+  const [toolTab, setToolTab] = useState('ai')
+  const [aiIntent, setAiIntent] = useState('optimize')
+  const [curvesOpen, setCurvesOpen] = useState(false)
+  const [workspaceHistory, setWorkspaceHistory] = useState(false)
+  const [detailsRequest, setDetailsRequest] = useState(0)
   const [photoExport, setPhotoExport] = useState(false)
   const [resourceLoading, setResourceLoading] = useState(false)
   const [resourceError, setResourceError] = useState('')
@@ -306,6 +326,9 @@ function GenerateView({ previewLut, user }) {
     setSplitState(restoredSplit)
     setSplit(restoredSplit)
     setComparison(view.comparison || null)
+    setToolTab(TOOL_TABS.some(([key]) => key === view.tool_tab) ? view.tool_tab : 'ai')
+    setAiIntent(AI_INTENTS.some(([key]) => key === view.ai_intent) ? view.ai_intent : 'optimize')
+    setCurvesOpen(Boolean(view.curves_open))
     setSavedAsset(null)
     setBaselineFields([])
     ensureRemote(workspace)
@@ -381,10 +404,11 @@ function GenerateView({ previewLut, user }) {
       viewWorkspaceRef.current = workspace.id
       return
     }
-    const view = { display_mode: displayMode, split, selected_sample_id: selectedId, comparison }
+    const view = { display_mode: displayMode, split, selected_sample_id: selectedId, comparison,
+      tool_tab: toolTab, ai_intent: aiIntent, curves_open: curvesOpen }
     if (JSON.stringify(view) !== JSON.stringify(workspace.view_state))
       editor.setMeta({ view_state: view })
-  }, [ready, workspace.id, displayMode, split, selectedId, comparison, editor.setMeta])
+  }, [ready, workspace.id, displayMode, split, selectedId, comparison, toolTab, aiIntent, curvesOpen, editor.setMeta])
 
   useEffect(() => {
     if (!previewLut || busy || consumedPreviewRef.current === previewLut) return
@@ -401,17 +425,23 @@ function GenerateView({ previewLut, user }) {
         saveDialog ||
         inputConfirmation ||
         pendingAsset ||
-        referenceDialog ||
+        workspaceHistory ||
         photoExport ||
         /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
       )
         return
       e.preventDefault()
-      e.shiftKey ? editor.redo() : editor.undo()
+      if (e.shiftKey && editor.canRedo) {
+        editor.redo()
+        setStatus('已重做上一项调整')
+      } else if (!e.shiftKey && editor.canUndo) {
+        editor.undo()
+        setStatus('已撤销上一项调整')
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editor.undo, editor.redo, busy, saveDialog, inputConfirmation, pendingAsset, referenceDialog, photoExport])
+  }, [editor.undo, editor.redo, editor.canUndo, editor.canRedo, busy, saveDialog, inputConfirmation, pendingAsset, workspaceHistory, photoExport])
 
   const captureRequest = () => {
     const ws = currentRef.current
@@ -447,7 +477,9 @@ function GenerateView({ previewLut, user }) {
       main_sample_id: latest.primary_sample_id, source_digest: latestSample?.source_digest })) return false
     const report = { ...result, job_id: meta.jobId,
       _params_json: parameterSignature(result.params), _sample_id: ws.primary_sample_id,
-      _source_digest: sample?.source_digest }
+      _source_digest: sample?.source_digest, _sample_name: sample?.name,
+      _request_context: structuredClone(meta.requestSummary.context),
+      _context_json: contextSignature(meta.requestSummary.context), _applied_at: new Date().toISOString() }
     const next = editor.commit(result.params, { id: meta.jobId, source: 'auto', purpose: 'correction',
       phases: effectivePhases(result), report })
     if (!next) { setStatus('参数未应用，请查看草稿提示'); return false }
@@ -618,6 +650,7 @@ function GenerateView({ previewLut, user }) {
     const text = input.trim()
     if (!text || busy) return
     setSending(true)
+    setStatus('正在根据文字提取调整项…')
     const request = captureRequest()
     const history = messages
       .slice(-6)
@@ -637,14 +670,16 @@ function GenerateView({ previewLut, user }) {
         return
       }
       setMessages((m) => [...m, { role: 'agent', text: resp.reply }])
-      if (resp.params)
-        editor.commit(resp.params, {
+      if (resp.params) {
+        const next = editor.commit(resp.params, {
           source: 'chat',
           purpose: workspace.purpose,
           phases: resp.steps
             ? effectivePhases(resp, { chatPurpose: workspace.purpose })
             : undefined,
         })
+        setStatus(next ? (diffParams(params, next.params).length ? '文字调整已更新当前效果，可撤销；对话中的生成确认请按回复操作' : '本次没有改变参数，请查看回复') : '本次文字调整未应用，请查看草稿提示')
+      } else setStatus('已收到回复，当前参数未改变；请查看回复中的下一步')
       if (resp.session_id) {
         await editor.setMeta({ session_id: resp.session_id })
         await updateWorkspace(workspace.id, { session_id: resp.session_id })
@@ -654,6 +689,7 @@ function GenerateView({ previewLut, user }) {
       }
     } catch (e) {
       setMessages((m) => [...m, { role: 'agent', text: `生成失败：${e.message}` }])
+      setStatus(`文字调整未完成：${e.message}`)
     } finally {
       setSending(false)
     }
@@ -807,6 +843,8 @@ function GenerateView({ previewLut, user }) {
       if (currentRef.current.id !== ws.id) return
       await editor.setMeta({ samples: ws.samples.map((item) => item.id === id ? confirmed : item),
         validation: ws.validation ? { ...ws.validation, stale: true } : null })
+      if (currentRef.current.id === ws.id)
+        setStatus(`已确认 ${sample.name} 的 ${contract.base_photo_style} 照片输入`)
     } catch (failure) { setStatus(failure.message) }
     finally { setSampleLoading(false) }
   }
@@ -1028,80 +1066,15 @@ function GenerateView({ previewLut, user }) {
     }
   }
   const backup = () => saveTextFile(editor.backup(), `CHROMA_${workspace.id}.json`)
-  const reportHistorical =
-    gradeResult &&
-    (gradeResult._params_json !== parameterSignature(params) ||
-      gradeResult._sample_id !== primaryId ||
-      gradeResult._source_digest !== primarySample?.source_digest)
+  const reportHistorical = reportIsHistorical(gradeResult, { params, primaryId, sourceDigest: primarySample?.source_digest, context })
+  const curvesVisible = toolTab === 'manual' && curvesOpen
+  const curvesChanged = Object.values(params.curve_points).some(points => points.some(([x, y]) => Math.abs(x - y) > 1e-9))
+  const activeAiIntent = grading ? 'optimize' : sending ? 'text' : referenceBusy ? 'reference' : null
 
   return (
-    <div className="gen-layout">
-      <section className="chat-panel">
-        <div className="session-bar">
-          <button className="btn" onClick={newWorkspace} disabled={busy}>
-            ＋ 新会话
-          </button>
-          <div className="session-list">
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className={`session-item ${s.id === workspace.session_id ? 'active' : ''}`}
-              >
-                <button
-                  className="session-title"
-                  disabled={busy}
-                  onClick={() => openSession(s.id)}
-                  onDoubleClick={async () => {
-                    const title = window.prompt('会话名称', s.title)
-                    if (title?.trim()) {
-                      await updateSession(s.id, title.trim())
-                      listSessions().then(setSessions)
-                    }
-                  }}
-                >
-                  {s.title}
-                </button>
-                <button
-                  className="session-del"
-                  disabled={busy}
-                  onClick={() => removeSession(s.id)}
-                  title="删除会话"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="chat-messages">
-          {messages.map((m, i) => (
-            <div key={i} className={`msg ${m.role === 'user' ? 'msg-user' : 'msg-agent'}`}>
-              {m.text}
-            </div>
-          ))}
-          {sending && <div className="msg msg-agent">正在提取调整项…</div>}
-        </div>
-        <div className="preset-chips">
-          {PRESETS.map((p) => (
-            <button key={p.name} className="chip" disabled={busy} onClick={() => applyPreset(p)}>
-              {p.name}
-            </button>
-          ))}
-        </div>
-        <div className="chat-input-row">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && send()}
-            placeholder="描述你想要的风格…"
-            disabled={busy}
-          />
-          <button className="btn-primary" disabled={busy || !input.trim()} onClick={send}>
-            发送
-          </button>
-        </div>
-      </section>
-      <section className="right-col">
+    <div className="gen-workbench">
+      <header className="workbench-header">
+        <button className="btn workspace-history-toggle" aria-label="打开工作区历史" onClick={() => setWorkspaceHistory(true)}>历史</button>
         <label className="workspace-select">
           工作区
           <select
@@ -1124,7 +1097,25 @@ function GenerateView({ previewLut, user }) {
               ))}
           </select>
         </label>
-        <WorkspaceToolbar editor={editor} busy={busy} onNew={newWorkspace} onBackup={backup} />
+        <WorkspaceToolbar mode="header" editor={editor} busy={busy} onNew={newWorkspace} onBackup={backup}
+          onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
+        <div className="delivery-actions">
+          <button className="btn" onClick={() => setToolTab('versions')}>版本</button>
+          <button className="btn-primary" disabled={busy} onClick={() => setSaveDialog(true)}>保存至我的 LUT</button>
+          <details className="delivery-menu"><summary className="btn">导出 ▾</summary><div className="delivery-options">
+            <strong>LUT · 烘焙当前完整效果</strong>
+            <button className="btn" disabled={busy || !!resourceError} onClick={e => { e.currentTarget.closest('details').open = false; downloadCube('camera') }}>机内 LUT · .cube</button>
+            <button className="btn" disabled={busy || !!resourceError} onClick={e => { e.currentTarget.closest('details').open = false; downloadCube('software') }}>后期 LUT · .cube</button>
+            <strong>调整后照片</strong>
+            <button className="btn" disabled={busy || !compatible || !selectedMedia?.file || !!resourceError} onClick={e => { e.currentTarget.closest('details').open = false; setPhotoExport(true) }}>导出照片 · JPEG / PNG</button>
+            {(!compatible || !selectedMedia?.file) && <p>照片导出需要绑定原文件并确认输入；兼容缓存预览仍可用于手调与 LUT 导出。</p>}
+            <button className="btn" disabled={busy} onClick={e => { e.currentTarget.closest('details').open = false; setCameraGuide({ sample: selectedSample }) }}>相机导入说明</button>
+          </div></details>
+        </div>
+      </header>
+      {status && <div className="workbench-notice" role="status"><span>{status}</span>{activeAiIntent && !(toolTab === 'ai' && aiIntent === activeAiIntent) && <button className="btn" onClick={() => { setToolTab('ai'); setAiIntent(activeAiIntent) }}>{grading ? '查看作业与取消' : '查看当前操作'}</button>}</div>}
+      <div className="workbench-body">
+        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片工作区">
         <div className="preview-toolbar">
           <label className="mode-select">
             展示形式
@@ -1158,11 +1149,12 @@ function GenerateView({ previewLut, user }) {
             onChange={(e) => addSamples([...e.target.files])}
           />
         </div>
-        <p className="text-muted">
+        <p className="input-context">
           {params.base_photo_style === 'VLOG'
             ? '输入需为未经显示转换的 V-Log/V-Gamut 帧；普通 JPEG 不代表 V-Log 信号。'
             : `当前 LUT 需要 ${params.base_photo_style} Photo Style 的相机直出信号。`}
         </p>
+        <div className="photo-stage" style={{ '--photo-ratio': selectedMedia?.canvas ? selectedMedia.canvas.width / selectedMedia.canvas.height : 800 / 560 }}>
         {comparison && (
           <ComparisonPreview
             image={selectedMedia?.canvas}
@@ -1180,6 +1172,14 @@ function GenerateView({ previewLut, user }) {
                   ? '请先确认照片输入基准，确认后才显示 LUT 预览。'
                   : !sampleIsNormalized(selectedSample) ? '此样张来自旧色彩处理流程，请重新绑定原文件并确认输入。'
                   : `照片的 ${selectedSample.input_contract.base_photo_style} 输入与当前 ${params.base_photo_style} LUT 不一致，已暂停预览。`}
+              <div className="preview-empty-actions">
+                <button className="btn-primary" disabled={busy} onClick={() => {
+                  if (!selectedMedia || !sampleIsNormalized(selectedSample)) {
+                    setRebindingId(selectedSample.id); fileInputRef.current?.click()
+                  } else setDetailsRequest(value => value + 1)
+                }}>{!selectedMedia || !sampleIsNormalized(selectedSample) ? '重新绑定照片' : '查看照片详情'}</button>
+                <button className="btn" onClick={() => setToolTab('manual')}>检查 LUT 输入</button>
+              </div>
             </div>
           )}
           <div hidden={samples.length > 0 && (!selectedMedia || !compatible)}>
@@ -1218,7 +1218,9 @@ function GenerateView({ previewLut, user }) {
             )}
           </div>
         </div>
+        </div>
         <SampleGallery
+          detailsRequest={detailsRequest}
           samples={samples}
           media={media}
           selectedId={selectedSample?.id}
@@ -1246,19 +1248,38 @@ function GenerateView({ previewLut, user }) {
           onRetain={retain}
           onGuide={(sample) => setCameraGuide({ sample: sample || selectedSample })}
         />
-        <DiagnosticsPanel
-          image={selectedMedia?.canvas}
-          params={params}
-          compatible={compatible}
-          sampleName={selectedSample?.name}
-        />
-        {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
-        <div className="actions">
-          <button className="btn" disabled={busy || !primaryCompatible || !primaryMedia?.file || !!resourceError}
-            onClick={() => setReferenceDialog(true)}>参考图风格匹配</button>
-          <button className="btn" disabled={busy || !compatible || !selectedMedia?.file || !!resourceError}
-            onClick={() => setPhotoExport(true)}>导出调整后照片</button>
-        </div>
+          <DiagnosticsPanel compact image={selectedMedia?.canvas} params={params} compatible={compatible} sampleName={selectedSample?.name} />
+          {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
+          <div className="curve-workbench" id="curve-workbench" hidden={!curvesVisible}>
+            <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><button className="btn" onClick={() => setCurvesOpen(false)}>收起曲线</button></div>
+            <div className="curve-workbench-body">
+          <CurveEditor key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
+            onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
+            onPreview={editor.update}
+            onCommit={(patch) => editor.commit(patch, { source: 'curve', purpose: 'style' })}
+            onCancel={editor.cancel} />
+            </div>
+          </div>
+        </section>
+        <aside className="task-panel" aria-label="调色工具">
+          <div className="task-tabs" role="tablist" aria-label="调色任务">
+            {TOOL_TABS.map(([key, label], index) => <button key={key} id={`tool-${key}`} role="tab" aria-selected={toolTab === key} aria-controls={`tool-panel-${key}`} tabIndex={toolTab === key ? 0 : -1}
+              onClick={() => setToolTab(key)} onKeyDown={event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                event.preventDefault()
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? TOOL_TABS.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + TOOL_TABS.length) % TOOL_TABS.length
+                setToolTab(TOOL_TABS[next][0]); document.getElementById(`tool-${TOOL_TABS[next][0]}`)?.focus()
+              }}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</button>)}
+          </div>
+          <section className="tool-view" id="tool-panel-ai" role="tabpanel" aria-labelledby="tool-ai" hidden={toolTab !== 'ai'}>
+            <h2 className="tool-heading">形成你想要的效果</h2>
+            <div className="ai-intents" role="group" aria-label="创作方式">{AI_INTENTS.map(([key, label]) => <button key={key} aria-pressed={aiIntent === key} onClick={() => setAiIntent(key)}>{label}</button>)}</div>
+            <WorkspaceToolbar mode="context" editor={editor} busy={busy} onBackup={backup} />
+            <div className="ai-context"><span>AI 主样张</span><strong>{primarySample?.name || '尚未选择'}</strong>
+              {primaryId !== selectedSample?.id && primarySample && <p>当前正在查看 {selectedSample?.name}。照片优化与参考匹配使用主样张，开始时会切回该照片。</p>}
+            </div>
+            <div className="ai-method" hidden={aiIntent !== 'optimize'}>
+              <h3 className="tool-subheading">根据照片分析并应用调整</h3>
         <AutoRetouchBar
           file={primaryMedia?.file}
           params={params}
@@ -1296,93 +1317,62 @@ function GenerateView({ previewLut, user }) {
             AI 主样张需要确认输入并与当前基准一致；查看其他缩略图不会更换主样张。
           </p>
         )}
+            </div>
+            <div className="ai-method text-adjustment" hidden={aiIntent !== 'text'}>
+            <label className="text-adjustment-label" htmlFor="text-adjustment">描述想要的变化</label>
+            <textarea id="text-adjustment" value={input} onChange={e => setInput(e.target.value)} disabled={busy}
+              onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') send() }}
+              placeholder="例如：冷调一点，降低绿色饱和度，保留高光层次。" maxLength={4000} />
+            <button className="btn-primary" disabled={busy || !input.trim()} onClick={send}>{sending ? '正在提取调整项…' : '发送文字调整'}</button>
+            <p className="tool-note">按返回的调整项更新当前效果。对话中的生成确认与参数更新会分别提示。⌘ / Ctrl + Enter 发送。</p>
+            <details className="preset-options"><summary>从预设开始</summary><div className="preset-chips">
+              {PRESETS.map(p => <button key={p.name} className="chip" disabled={busy} onClick={() => applyPreset(p)}>{p.name}</button>)}
+            </div></details>
+            <div className="latest-reply" aria-live="polite">{sending ? '正在提取调整项…' : messages.filter(m => m.role === 'agent').at(-1)?.text}</div>
+            <details className="chat-history"><summary>查看本工作区对话记录 · {messages.length} 条</summary><div className="chat-messages">
+              {messages.map((m, i) => <div key={i} className={`msg ${m.role === 'user' ? 'msg-user' : 'msg-agent'}`}>{m.text}</div>)}
+            </div></details>
+            </div>
+            <div className="ai-method" hidden={aiIntent !== 'reference'}>
+      <ReferenceMatchDialog key={`reference:${workspace.id}`} inline visible={toolTab === 'ai' && aiIntent === 'reference'} disabled={busy} file={primaryMedia?.file} image={primaryMedia?.canvas}
+        params={params} context={context} workspaceId={workspace.id} sourceDigest={primarySample?.source_digest}
+        mainSampleId={primaryId} compatible={primaryCompatible} onClose={() => setAiIntent('optimize')}
+        onBusyChange={value => { setRemoteBusy(value); setReferenceBusy(value) }} onStatus={setStatus} onPrepare={async () => {
+          setSelectedId(primaryId)
+          setComparison(null)
+          const request = captureRequest()
+          if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
+          await ensureRemote()
+          return request
+        }} onApply={async (result, request) => {
+          if (!requestMatches(request)) return false
+          const next = editor.commit(result.params, { source: 'reference', purpose: 'style' })
+          if (!next) return false
+          if (!(await editor.flush())) throw new Error('候选未能保存，请重试草稿保存')
+          setSelectedId(primaryId); setComparison(null); setStatus('参考匹配候选已应用，可一次撤销')
+          return true
+        }} />
+            </div>
+            <div className="ai-result">
         {gradeResult && (
           <AutoRetouchReport
             result={gradeResult}
             beforeParams={gradeResult.before_params}
             historical={reportHistorical}
+            applied={Boolean(gradeResult.job_id && workspace.applied_auto_job_ids?.includes(gradeResult.job_id))}
             onUndo={
               !busy && !reportHistorical && editor.histories.past.at(-1)?.source === 'auto'
-                ? editor.undo
+                ? () => { editor.undo(); setStatus('已撤销本次 AI 调整') }
                 : undefined
             }
           />
         )}
-        <fieldset
-          className="param-groups"
-          disabled={busy}
-          style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-        >
-          <div className="controls">
-            <div className="slider ps-select">
-              <span>基准</span>
-              <select
-                aria-label="LUT 输入基准"
-                disabled={locked('base_photo_style')}
-                value={params.base_photo_style}
-                onChange={(e) =>
-                  editor.commit(
-                    { base_photo_style: e.target.value },
-                    { source: 'input', purpose: 'technical' },
-                  )
-                }
-              >
-                {PHOTO_STYLES.map((st) => (
-                  <option key={st.value} value={st.value}>
-                    {st.label}
-                  </option>
-                ))}
-              </select>
-              {lockButton('base_photo_style')}
             </div>
-            {params.base_photo_style === 'VLOG' && (
-              <div className="slider">
-                <span>V-Log 显示映射</span>
-                <input
-                  type="range"
-                  aria-label="V-Log 显示映射"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={params.tone_map}
-                  {...gesture}
-                  disabled={locked('tone_map') || (params.external_lut_id && params.external_lut_mode === 'input')}
-                  onChange={(e) => updateParam('tone_map', Number(e.target.value))}
-                />
-                <em>{params.tone_map.toFixed(2)}</em>
-                {lockButton('tone_map')}
-              </div>
-            )}
-          </div>
-          <p className="text-muted">
-            冷暖是相对 RGB 偏移，风格强度为 0
-            仍保留输入转换、曝光和白平衡。参数保护仅禁止字段修改，不能保证某个区域像素完全不变。
-          </p>
-          {workspace.input_status === 'pending_confirmation' && (
-            <div className="draft-error">
-              输入或显示映射已改变，旧配方需要重新确认。
-              <button
-                className="btn"
-                disabled={!compatible || !selectedMedia}
-                onClick={() => setInputConfirmation(true)}
-              >
-                预览并确认配方的新输入
-              </button>
-            </div>
-          )}
-          <p className="workspace-note">自由曲线与外部 LUT 由手动控制，AI 自动修图和参考匹配会保留这些设置。</p>
-          <ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
-            locked={workspace.locked_fields} onError={(error) => setStatus(error.message)} onReady={() => setResourceError('')}
-            onCommit={(patch) => editor.commit(patch, { source: 'external_lut', purpose: 'style' })} />
-          <CurveEditor key={`curves:${workspace.id}`} params={params} disabled={busy} locked={workspace.locked_fields}
-            onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
-            onPreview={editor.update}
-            onCommit={(patch) => editor.commit(patch, { source: 'curve', purpose: 'style' })}
-            onCancel={editor.cancel} />
-          <div className="advanced-locks">
-            <button className="parameter-lock" onClick={() => toggleLock(['curve_points'])}>{locked('curve_points') ? '解除自由曲线保护' : '保护自由曲线'}</button>
-            <button className="parameter-lock" onClick={() => toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode'])}>{locked('external_lut_id') ? '解除外部 LUT 保护' : '保护外部 LUT'}</button>
-          </div>
+          </section>
+          <section className="tool-view" id="tool-panel-manual" role="tabpanel" aria-labelledby="tool-manual" hidden={toolTab !== 'manual'}>
+        <fieldset className="params param-groups" disabled={busy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+          <h3 className="tool-heading">微调当前效果</h3>
+          <p className="tool-note">基础调整优先；已调整或受保护的高级项会在标题中提示。</p>
           {PARAM_GROUPS.map((g) => {
             const fields =
               g.id === 'rgb' ? RGB_GROUPS.map((r) => r.key) : g.sliders.map((s) => s.key)
@@ -1397,7 +1387,7 @@ function GenerateView({ previewLut, user }) {
                   >
                     <span className="param-group-arrow">{groupOpen[g.id] ? '▾' : '▸'}</span>
                     <span className="param-group-label">{g.label}</span>
-                    <span className="param-group-hint">{groupSummary(g, params)}</span>
+                    <span className="param-group-hint">{groupSummary(g, params)}{fields.filter(locked).length ? ` · ${fields.filter(locked).length} 项已保护` : ''}</span>
                   </button>
                   <button className="parameter-lock" onClick={() => toggleLock(fields)}>
                     {fields.every(locked) ? '解锁组' : '保护组'}
@@ -1489,7 +1479,96 @@ function GenerateView({ previewLut, user }) {
               复位全部未保护调色项
             </button>
           </div>
+          <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => setCurvesOpen(value => !value)}>
+            <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>
+          </button>
+          <details className="professional-settings">
+            <summary>外部 LUT · {params.external_lut_id ? `${Math.round(params.external_lut_strength * 100)}% 已叠加` : '未叠加'}{locked('external_lut_id') ? ' · 已保护' : ''}</summary>
+          <ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
+            locked={workspace.locked_fields} onError={(error) => setStatus(error.message)} onReady={() => setResourceError('')}
+            onCommit={(patch) => editor.commit(patch, { source: 'external_lut', purpose: 'style' })} />
+          </details>
+          <div className="advanced-locks">
+            <button className="parameter-lock" onClick={() => toggleLock(['curve_points'])}>{locked('curve_points') ? '解除自由曲线保护' : '保护自由曲线'}</button>
+            <button className="parameter-lock" onClick={() => toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode'])}>{locked('external_lut_id') ? '解除外部 LUT 保护' : '保护外部 LUT'}</button>
+          </div>
+          <details className="professional-settings" open={workspace.input_status === 'pending_confirmation'}>
+            <summary>输入技术设置 · {params.base_photo_style}{locked('base_photo_style') ? ' · 已保护' : ''}</summary>
+          <div className="controls">
+            <div className="slider ps-select">
+              <span>基准</span>
+              <select
+                aria-label="LUT 输入基准"
+                disabled={locked('base_photo_style')}
+                value={params.base_photo_style}
+                onChange={(e) =>
+                  editor.commit(
+                    { base_photo_style: e.target.value },
+                    { source: 'input', purpose: 'technical' },
+                  )
+                }
+              >
+                {PHOTO_STYLES.map((st) => (
+                  <option key={st.value} value={st.value}>
+                    {st.label}
+                  </option>
+                ))}
+              </select>
+              {lockButton('base_photo_style')}
+            </div>
+            {params.base_photo_style === 'VLOG' && (
+              <div className="slider">
+                <span>V-Log 显示映射</span>
+                <input
+                  type="range"
+                  aria-label="V-Log 显示映射"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={params.tone_map}
+                  {...gesture}
+                  disabled={locked('tone_map') || (params.external_lut_id && params.external_lut_mode === 'input')}
+                  onChange={(e) => updateParam('tone_map', Number(e.target.value))}
+                />
+                <em>{params.tone_map.toFixed(2)}</em>
+                {lockButton('tone_map')}
+              </div>
+            )}
+          </div>
+          <p className="text-muted">
+            冷暖是相对 RGB 偏移，风格强度为 0
+            仍保留输入转换、曝光和白平衡。参数保护仅禁止字段修改，不能保证某个区域像素完全不变。
+          </p>
+          {workspace.input_status === 'pending_confirmation' && (
+            <div className="draft-error">
+              输入或显示映射已改变，旧配方需要重新确认。
+              <button
+                className="btn"
+                disabled={!compatible || !selectedMedia}
+                onClick={() => setInputConfirmation(true)}
+              >
+                预览并确认配方的新输入
+              </button>
+            </div>
+          )}
+          </details>
         </fieldset>
+          </section>
+          <section className="tool-view" id="tool-panel-versions" role="tabpanel" aria-labelledby="tool-versions" hidden={toolTab !== 'versions'}>
+            <label className="workspace-name-label">工作区 / LUT 名称<input className="name-input" value={workspace.name} onChange={e => editor.setMeta({ name: e.target.value })} placeholder="为当前效果命名" aria-label="LUT 名称" disabled={busy} /></label>
+        <VersionPanel
+          expanded
+          versions={versions}
+          busy={busy}
+          draft={workspace}
+          comparison={comparison}
+          onSave={saveVersion}
+          onCompare={compare}
+          onCloseCompare={() => setComparison(null)}
+          onRestore={restoreVersion}
+          onRename={changeVersion}
+          onDelete={(id) => changeVersion(id)}
+        />
         {workspace.baseline?.classification === 'unclassified' && (
           <details className="baseline-confirmation">
             <summary>旧完整效果的来源未分类：保存可复用风格前需要确认</summary>
@@ -1528,67 +1607,43 @@ function GenerateView({ previewLut, user }) {
             </button>
           </details>
         )}
-        <VersionPanel
-          versions={versions}
-          busy={busy}
-          draft={workspace}
-          comparison={comparison}
-          onSave={saveVersion}
-          onCompare={compare}
-          onCloseCompare={() => setComparison(null)}
-          onRestore={restoreVersion}
-          onRename={changeVersion}
-          onDelete={(id) => changeVersion(id)}
-        />
-        <div className="actions">
-          <input
-            className="name-input"
-            value={workspace.name}
-            onChange={(e) => editor.setMeta({ name: e.target.value })}
-            placeholder="LUT 名称"
-            aria-label="LUT 名称"
-            disabled={busy}
-          />
-          <button className="btn-primary" disabled={busy} onClick={() => setSaveDialog(true)}>
-            保存风格 / 完整效果
-          </button>
-          <button className="btn" disabled={busy} onClick={() => downloadCube('camera')}>
-            直接下载机内版
-          </button>
-          <button className="btn" disabled={busy} onClick={() => downloadCube('software')}>
-            直接下载后期版
-          </button>
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() => setCameraGuide({ sample: selectedSample })}
-          >
-            相机导入说明
-          </button>
-          <span className="text-muted">
-            直接下载烘焙当前完整效果。可复用风格在保存面板中单独生成，不自动包含单张校正。
-          </span>
-          <span className="status" role="status">
-            {status}
-          </span>
-        </div>
-      </section>
-      {referenceDialog && <ReferenceMatchDialog file={primaryMedia?.file} image={primaryMedia?.canvas}
-        params={params} context={context} workspaceId={workspace.id} sourceDigest={primarySample?.source_digest}
-        mainSampleId={primaryId} compatible={primaryCompatible} onClose={() => setReferenceDialog(false)}
-        onBusyChange={setRemoteBusy} onPrepare={async () => {
-          const request = captureRequest()
-          if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
-          await ensureRemote()
-          return request
-        }} onApply={async (result, request) => {
-          if (!requestMatches(request)) return false
-          const next = editor.commit(result.params, { source: 'reference', purpose: 'style' })
-          if (!next) return false
-          if (!(await editor.flush())) throw new Error('候选未能保存，请重试草稿保存')
-          setSelectedId(primaryId); setComparison(null); setStatus('参考匹配候选已应用，可一次撤销')
-          return true
-        }} />}
+          </section>
+        </aside>
+      </div>
+      {workspaceHistory && <WorkbenchDialog title="工作区历史" onClose={() => setWorkspaceHistory(false)}>
+        <p className="tool-note">从顶部选择工作区，或在这里打开此前对话对应的调色工作区。</p>
+          <div className="session-list">
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className={`session-item ${s.id === workspace.session_id ? 'active' : ''}`}
+              >
+                <button
+                  className="session-title"
+                  disabled={busy}
+                  onClick={async () => { await openSession(s.id); setWorkspaceHistory(false) }}
+                  onDoubleClick={async () => {
+                    const title = window.prompt('历史对话名称', s.title)
+                    if (title?.trim()) {
+                      await updateSession(s.id, title.trim())
+                      listSessions().then(setSessions)
+                    }
+                  }}
+                >
+                  {s.title}
+                </button>
+                <button
+                  className="session-del"
+                  disabled={busy}
+                  onClick={() => removeSession(s.id)}
+                  title="删除历史对话"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+      </WorkbenchDialog>}
       {photoExport && <PhotoExportDialog sample={selectedSample} media={selectedMedia} params={params}
         compatible={compatible} onClose={() => setPhotoExport(false)} onBusyChange={setRemoteBusy} />}
       {inputConfirmation && (

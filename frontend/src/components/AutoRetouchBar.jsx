@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { startAutoJob, getAutoJob, cancelAutoJob } from '../lib/api.js'
 import { captureAutoRequest, sameAutoConditions, sameAutoMetadata, bindAutoRequest, jobProgressSteps,
   pollAutoJob, ensureAutoJob, continuationRequest, matchingAutoResult, waitRestoredAutoJob,
@@ -10,6 +10,7 @@ export default function AutoRetouchBar({
   userId, workspaceReady = true, hasRealPhoto, running, setRunning, setStatus,
   context, workspaceId, sourceDigest, mainSampleId, sampleName, disabled, jobStorage,
 }) {
+  const inputId = useId()
   const [style, setStyle] = useState('')
   const [useVision, setUseVision] = useState(true)
   const [job, setJob] = useState(null)
@@ -266,14 +267,14 @@ export default function AutoRetouchBar({
   return (
     <>
       <div className="auto-bar">
-        <span className="auto-bar-icon" aria-hidden="true">✦</span>
-        <input className="auto-style-input" value={style} onChange={(e) => setStyle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && canRun) run() }}
-          placeholder={context?.goal_mode === 'style_only' ? '请输入风格描述，例如日系清透一点' : '风格(可选):日系清透一点'}
-          maxLength={200} disabled={running || disabled} aria-label="风格描述" />
+        <label className="auto-input-label" htmlFor={inputId}>风格与保留要求{context?.goal_mode === 'style_only' ? '（必填）' : '（可选）'}</label>
+        <textarea id={inputId} className="auto-style-input" value={style} onChange={(e) => setStyle(e.target.value)} rows={3}
+          onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canRun) run() }}
+          placeholder={context?.goal_mode === 'style_only' ? '例如：日系清透，降低饱和度，保留暖色高光。' : '例如：保留夕阳的暖色，改善暗部偏色。'}
+          maxLength={200} disabled={running || disabled} aria-label="照片优化补充要求" />
         <button type="button" className="btn-primary auto-go" onClick={() => run()}
           disabled={!canRun} title={hasRealPhoto ? '' : '请先上传样张'}>
-          {running ? '修图中…' : 'AI 自动修图'}
+          {running ? '正在分析与调整…' : '分析并应用'}
         </button>
         {running && <button type="button" className="btn" onClick={cancel}
           disabled={(!recoveryMissing && !job?.can_cancel) || cancelling} title={job?.progress?.stage === 'save' ? '保存已开始，不能取消' : ''}>
