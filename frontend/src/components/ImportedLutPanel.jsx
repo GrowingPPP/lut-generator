@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import SelectField from './SelectField.jsx'
 import { importLut, listImportedLuts, preloadExternalLut } from '../lib/importedLuts.js'
 import { MAX_CUBE_BYTES } from '../lib/cubeLut.js'
 import ParameterHelp from './ParameterHelp.jsx'
@@ -81,13 +82,13 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
     <div className="imported-lut-heading"><h3>外部 LUT</h3><button type="button" disabled={blocked || loading} onClick={() => setShowImport(value => !value)}>导入 .cube</button></div>
     <ParameterHelp parameter="external_lut_id" />
     <label className="imported-lut-choice">账号导入库
-      <select aria-label="外部 LUT 选择" disabled={blocked || loading} value={params.external_lut_id || ''} onChange={event => select(event.target.value)}>
+      <SelectField aria-label="外部 LUT 选择" disabled={blocked || loading} value={params.external_lut_id || ''} onChange={event => select(event.target.value)}>
         <option value="">不使用外部 LUT</option>
         {params.external_lut_id && !selected && <option value={params.external_lut_id}>当前引用（载入中）</option>}
         {artifacts.map(artifact => <option key={artifact.id} value={artifact.id} disabled={!compatibleImportedLut(artifact, params)}>
           {artifact.name} · {artifact.input_encoding} → {artifact.output_encoding}{compatibleImportedLut(artifact, params) ? '' : '（输入不兼容）'}
         </option>)}
-      </select>
+      </SelectField>
     </label>
     <ParameterHelp parameter="external_lut_mode" />
     {params.external_lut_id && <>
@@ -104,8 +105,8 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
     {showImport && <form className="imported-lut-form" onSubmit={upload}>
       <label>三维 .cube 文件<input aria-label="选择 cube 文件" type="file" accept=".cube" disabled={loading} onChange={event => { setFile(event.target.files?.[0] || null); setConfirmed(false) }} /></label>
       <div className="imported-lut-signals">
-        <label>输入信号<select required disabled={loading} value={input} onChange={event => { setInput(event.target.value); setConfirmed(false) }}><option value="">请选择</option>{SIGNALS.map(signal => <option key={signal}>{signal}</option>)}</select></label>
-        <label>输出信号<select required disabled={loading} value={output} onChange={event => { setOutput(event.target.value); setConfirmed(false) }}><option value="">请选择</option>{SIGNALS.filter(signal => signal !== 'VLOG').map(signal => <option key={signal}>{signal}</option>)}</select></label>
+        <label>输入信号<SelectField aria-label="外部 LUT 输入信号" required disabled={loading} value={input} onChange={event => { setInput(event.target.value); setConfirmed(false) }}><option value="">请选择</option>{SIGNALS.map(signal => <option key={signal}>{signal}</option>)}</SelectField></label>
+        <label>输出信号<SelectField aria-label="外部 LUT 输出信号" required disabled={loading} value={output} onChange={event => { setOutput(event.target.value); setConfirmed(false) }}><option value="">请选择</option>{SIGNALS.filter(signal => signal !== 'VLOG').map(signal => <option key={signal}>{signal}</option>)}</SelectField></label>
       </div>
       <label className="imported-lut-confirm"><input type="checkbox" checked={confirmed} disabled={loading} onChange={event => setConfirmed(event.target.checked)} />我已依据 LUT 来源确认信号声明，且文件为 SDR。</label>
       <p className="imported-lut-help">支持纯3D 2–65点、R最快、DOMAIN。仅接受 sRGB→sRGB、Rec709→Rec709 或 VLOG→Rec709；不支持1D、混合及HDR。账号保存解析网格，不保存照片；导出33点可能降低高密度 LUT 细节。</p>

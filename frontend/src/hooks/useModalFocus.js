@@ -17,6 +17,7 @@ export default function useModalFocus(onClose, allowClose = true, active = true)
         node.getAttribute('aria-disabled') !== 'true' && node.getClientRects().length > 0)
     controls()[0]?.focus()
     function onKey(event) {
+      if (event.defaultPrevented || panel?.querySelector('[data-chroma-select-trigger][data-state="open"]')) return
       if (event.key === 'Escape' && allowClose) {
         event.preventDefault()
         close.current()

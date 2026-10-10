@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import SelectField from './SelectField.jsx'
 import useModalFocus from '../hooks/useModalFocus.js'
 import { cameraFileName, saveTextFile } from '../lib/api.js'
 import {
@@ -31,7 +32,7 @@ export default function CameraGuideDialog({ params, name, sample, onClose, onDow
         </div>
         <label>
           参考机型
-          <select
+          <SelectField
             aria-label="相机引导机型"
             value={model}
             onChange={(e) => setModel(e.target.value)}
@@ -39,7 +40,7 @@ export default function CameraGuideDialog({ params, name, sample, onClose, onDow
             <option value="s5ii">LUMIX S5II</option>
             <option value="s5iix">LUMIX S5IIX</option>
             <option value="other">其他 / 尚未确认</option>
-          </select>
+          </SelectField>
         </label>
         <p className="workspace-note">
           相机信息只用于核对。请手动确认照片拍摄时的 Photo Style；网页无法仅凭 EXIF

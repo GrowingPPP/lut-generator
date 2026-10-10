@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import SelectField from './SelectField.jsx'
 import useModalFocus from '../hooks/useModalFocus.js'
 import { exportPhoto, savePhotoFile } from '../lib/photoApi.js'
 import { sampleIsNormalized } from '../lib/samples.js'
@@ -49,11 +50,11 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
         </p>
         <div className="photo-export-options">
           <label>文件格式
-            <select aria-label="照片导出格式" value={format} disabled={saving}
+            <SelectField aria-label="照片导出格式" value={format} disabled={saving}
               onChange={(e) => setFormat(e.target.value)}>
               <option value="jpeg">JPEG · 体积较小</option>
               <option value="png">PNG · 无损保存结果</option>
-            </select>
+            </SelectField>
           </label>
           {format === 'jpeg' && <label>JPEG 质量 <output>{quality}</output>
             <input type="range" aria-label="JPEG 导出质量" min="80" max="100" step="1"

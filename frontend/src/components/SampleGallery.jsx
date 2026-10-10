@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import SelectField from './SelectField.jsx'
 import { inputContract } from '../lib/styleRecipe.js'
 import { photoMetadataNotes } from '../lib/photoMetadata.js'
 import { sampleIsNormalized } from '../lib/samples.js'
@@ -39,9 +40,9 @@ function SampleDetails({ sample, media, primary, result, stale, busy, onPrimary,
       <dt>原文件</dt><dd>{media?.file ? '已绑定，可用于照片分析及原尺寸导出' : media?.canvas ? '仅有缩小预览，原文件需重新绑定' : '图像未恢复，需重新绑定原文件'}</dd>
     </dl>
     {metadata.warning && <p className="sg-warning">{metadata.warning}</p>}
-    <div className="sg-input-row"><label>照片输入<select aria-label={sample.name + ' 输入基准'} value={style} onChange={(event) => setStyle(event.target.value)} disabled={busy}>
+    <div className="sg-input-row"><label>照片输入<SelectField aria-label={sample.name + ' 输入基准'} value={style} onChange={(event) => setStyle(event.target.value)} disabled={busy}>
       <option value="STD">Standard</option><option value="NAT">Natural</option><option value="VIVD">Vivid</option><option value="VLOG">V-Log / V-Gamut</option>
-    </select></label>
+    </SelectField></label>
       {needsConfirmation ? <button className="btn sg-action" disabled={busy || (needsDecode && !media?.file)}
         onClick={() => onConfirm({ ...inputContract({ base_photo_style: style, tone_map: 1 }), tone_map: sample.input_contract?.tone_map ?? 1 })}>确认照片输入基准</button>
         : <span className="sg-confirmed">已确认 · {style}</span>}

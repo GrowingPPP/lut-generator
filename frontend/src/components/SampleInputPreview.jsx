@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import SelectField from './SelectField.jsx'
 import { inputContract } from '../lib/styleRecipe.js'
 import { sampleIsNormalized } from '../lib/samples.js'
 import { photoMetadataNotes } from '../lib/photoMetadata.js'
@@ -19,9 +20,9 @@ export default function SampleInputPreview({ sample, media, params, busy, onConf
         : pending ? '照片已载入。请按拍摄时的 Photo Style 确认输入，确认后显示 LUT 对比。'
           : `照片输入为 ${sample.input_contract.base_photo_style}，当前 LUT 输入为 ${params.base_photo_style}，请核对输入后再对比。`}</p>
       {pending && normalized ? <div className="sample-input-actions">
-        <label>照片输入<select aria-label="预览照片输入基准" value={style} disabled={busy} onChange={event => setStyle(event.target.value)}>
+        <label>照片输入<SelectField aria-label="预览照片输入基准" value={style} disabled={busy} onChange={event => setStyle(event.target.value)}>
           <option value="STD">Standard</option><option value="NAT">Natural</option><option value="VIVD">Vivid</option><option value="VLOG">V-Log / V-Gamut</option>
-        </select></label>
+        </SelectField></label>
         <button className="btn-primary" disabled={busy} onClick={() => onConfirm({ ...inputContract({ base_photo_style: style, tone_map: 1 }), tone_map: sample.input_contract?.tone_map ?? 1 })}>确认并查看对比</button>
       </div> : <div className="sample-input-actions">
         <button className="btn-primary" disabled={busy} onClick={normalized ? onDetails : onRebind}>{normalized ? '查看照片输入' : '重新绑定照片'}</button>

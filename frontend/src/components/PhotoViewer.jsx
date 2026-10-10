@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import SelectField from './SelectField.jsx'
 import useModalFocus from '../hooks/useModalFocus.js'
 import { generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
@@ -301,7 +302,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
 
   const key = event => {
     if (event.defaultPrevented) return
-    const formField = event.target.closest?.('input, select, textarea, [contenteditable="true"]')
+    const formField = event.target.closest?.('input, select, textarea, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="option"]')
     const nativeUndo = formField && !(formField.tagName === 'INPUT' && formField.type === 'range')
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z' && !nativeUndo && historyAvailable) {
       event.preventDefault()
@@ -342,10 +343,10 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
           <button type="button" className="photo-viewer-button" onClick={fit}>适应窗口</button>
           <button type="button" className="photo-viewer-button" disabled={sourceLoading} onClick={() => loadOriginal(true)}>{file ? '1:1 像素' : sample ? '预览 1:1' : '示意图 1:1'}</button>
           <button type="button" className="photo-viewer-button photo-viewer-step" aria-label="缩小照片" onClick={() => zoom(view.scale / 1.25)} disabled={view.scale <= 0.25}>−</button>
-          <label className="photo-viewer-scale"><span className="photo-viewer-sr-only">缩放比例</span><select aria-label="照片缩放比例" value={String(percent)} onChange={event => zoom(Number(event.target.value) / 100)}>
+          <label className="photo-viewer-scale"><span className="photo-viewer-sr-only">缩放比例</span><SelectField aria-label="照片缩放比例" value={String(percent)} onChange={event => zoom(Number(event.target.value) / 100)}>
             {![25, 50, 75, 100, 150, 200, 300, 400].includes(percent) && <option value={percent}>{percent}%</option>}
             {[25, 50, 75, 100, 150, 200, 300, 400].map(value => <option value={value} key={value}>{value}%</option>)}
-          </select></label>
+          </SelectField></label>
           <button type="button" className="photo-viewer-button photo-viewer-step" aria-label="放大照片" onClick={() => zoom(view.scale * 1.25)} disabled={view.scale >= 4}>+</button>
         </div>
       </div>

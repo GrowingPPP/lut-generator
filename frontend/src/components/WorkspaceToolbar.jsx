@@ -1,3 +1,4 @@
+import SelectField from './SelectField.jsx'
 const GOALS = [
   ['preserve', '保留氛围', '基础校正保留全局曝光、冷暖与绿洋红；明确的风格要求可调整未锁定项。'],
   ['natural', '自然校正', '按照片测量结果克制地校正亮度、色偏和影调。'],
@@ -31,7 +32,7 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
   const purposeControl = (
     <label className="purpose-select">
       本次手调与对话用途
-      <select
+      <SelectField
         aria-label="本次调整用途"
         value={workspace.purpose || 'default'}
         onChange={(e) => setPurpose(e.target.value)}
@@ -40,7 +41,7 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
         <option value="default">按参数组默认</option>
         <option value="correction">单张校正</option>
         <option value="style">风格调整</option>
-      </select>
+      </SelectField>
     </label>
   )
   return (
@@ -48,7 +49,7 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
       <div className="workspace-toolbar-row">
         {showContext && <label>
           创作目标
-          <select
+          <SelectField
             aria-label="创作目标"
             value={workspace.goal_mode}
             onChange={(e) => setGoal(e.target.value)}
@@ -59,7 +60,7 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
                 {l}
               </option>
             ))}
-          </select>
+          </SelectField>
         </label>}
         {showHeader && <span className={`draft-status ${saveStatus}`} role="status">
           {SAVE_STATES[saveStatus] || saveStatus}

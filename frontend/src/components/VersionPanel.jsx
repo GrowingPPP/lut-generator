@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import SelectField from './SelectField.jsx'
 
 export default function VersionPanel({
   versions,
@@ -51,7 +52,7 @@ export default function VersionPanel({
       <div className="comparison-controls">
         <label>
           A
-          <select
+          <SelectField
             aria-label="比较版本 A"
             value={comparison?.a?.id || ''}
             onChange={(e) => select('a', e.target.value)}
@@ -62,11 +63,11 @@ export default function VersionPanel({
                 {v.name}
               </option>
             ))}
-          </select>
+          </SelectField>
         </label>
         <label>
           B
-          <select
+          <SelectField
             aria-label="比较版本 B"
             value={comparison?.b?.id || ''}
             onChange={(e) => select('b', e.target.value)}
@@ -77,7 +78,7 @@ export default function VersionPanel({
                 {v.name}
               </option>
             ))}
-          </select>
+          </SelectField>
         </label>
         <button className="btn" onClick={() => onCompare('b', choices[0])}>
           更新 B 为当前草稿

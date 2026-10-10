@@ -29,6 +29,7 @@ import { preloadExternalLut, clearExternalLutCache } from './lib/importedLuts.js
 import CurveEditor from './components/CurveEditor.jsx'
 import ParameterControls from './components/ParameterControls.jsx'
 import ParameterHelp from './components/ParameterHelp.jsx'
+import SelectField from './components/SelectField.jsx'
 import { defaultGroupOpen, parameterLabel } from './lib/parameterControls.js'
 import ImportedLutPanel from './components/ImportedLutPanel.jsx'
 import ReferenceMatchDialog from './components/ReferenceMatchDialog.jsx'
@@ -344,6 +345,7 @@ function GenerateView({ previewLut, user }) {
   useEffect(() => {
     const onKey = (e) => {
       if (
+        e.defaultPrevented ||
         !(e.ctrlKey || e.metaKey) ||
         e.key.toLowerCase() !== 'z' ||
         busy ||
@@ -353,7 +355,8 @@ function GenerateView({ previewLut, user }) {
         workspaceHistory ||
         photoExport ||
         photoViewer ||
-        /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
+        /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) ||
+        e.target.closest?.('[role="combobox"], [role="listbox"], [role="option"]')
       )
         return
       e.preventDefault()
@@ -1021,13 +1024,13 @@ function GenerateView({ previewLut, user }) {
         <button className="btn workspace-history-toggle" aria-label="打开工作区历史" onClick={() => setWorkspaceHistory(true)}>历史</button>
         <label className="workspace-select">
           工作区
-          <select
+          <SelectField
             value={workspace.id}
             aria-label="工作区"
             onChange={(e) => openWorkspace(e.target.value)}
             disabled={busy}
           >
-            <option value={workspace.id}>
+            <option value={workspace.id} description="正在编辑的草稿">
               {workspace.name ||
                 remoteWorkspaces.find((w) => w.id === workspace.id)?.name ||
                 '当前调色工作区'}
@@ -1035,11 +1038,11 @@ function GenerateView({ previewLut, user }) {
             {remoteWorkspaces
               .filter((w) => w.id !== workspace.id)
               .map((w) => (
-                <option key={w.id} value={w.id}>
+                <option key={w.id} value={w.id} description="切换到此工作区">
                   {w.name || `工作区 ${w.id.slice(0, 8)}`}
                 </option>
               ))}
-          </select>
+          </SelectField>
         </label>
         <WorkspaceToolbar mode="header" editor={editor} busy={busy} onNew={newWorkspace} onBackup={backup}
           onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
@@ -1063,13 +1066,13 @@ function GenerateView({ previewLut, user }) {
         <div className="preview-toolbar">
           <label className="mode-select">
             展示形式
-            <select value={displayMode} onChange={(e) => setDisplayMode(e.target.value)}>
+            <SelectField aria-label="展示形式" value={displayMode} onChange={(e) => setDisplayMode(e.target.value)}>
               {DISPLAY_MODES.map((m) => (
-                <option key={m.value} value={m.value}>
+                <option key={m.value} value={m.value} description={m.value === 'slider' ? '在同一画面拖动分界比较' : '同时查看原图与当前效果'}>
                   {m.label}
                 </option>
               ))}
-            </select>
+            </SelectField>
           </label>
           <span className="text-muted">
             {selectedSample ? `正在查看：${selectedSample.name}` : '合成示意图 · 不参与 AI 分析'}
@@ -1359,9 +1362,9 @@ function GenerateView({ previewLut, user }) {
           <div className="controls">
             <div className="slider ps-select">
               <span>基准</span>
-              <select
+              <SelectField
                 aria-label="LUT 输入基准"
-                disabled={locked('base_photo_style')}
+                disabled={busy || locked('base_photo_style')}
                 value={params.base_photo_style}
                 onChange={(e) =>
                   editor.commit(
@@ -1375,7 +1378,7 @@ function GenerateView({ previewLut, user }) {
                     {st.label}
                   </option>
                 ))}
-              </select>
+              </SelectField>
               {lockButton('base_photo_style')}
             </div>
             <ParameterHelp parameter="base_photo_style" />

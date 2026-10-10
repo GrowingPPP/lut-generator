@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import SelectField from './SelectField.jsx'
 import { defaultParams } from '../lib/lutEngine.js'
 import {
   applyStyleRecipe,
@@ -138,7 +139,7 @@ export default function StyleSaveDialog({
           </label>
           <label>
             封面
-            <select
+            <SelectField
               aria-label="资产封面"
               value={cover}
               onChange={(e) => setCover(e.target.value)}
@@ -149,7 +150,7 @@ export default function StyleSaveDialog({
               <option value="teal">青调</option>
               <option value="mono">黑白</option>
               <option value="dusk">暮色</option>
-            </select>
+            </SelectField>
           </label>
           <label className="favorite-option">
             <input
@@ -216,7 +217,7 @@ export default function StyleSaveDialog({
                       {op.dependency ? '（作用范围）' : ''}
                     </span>
                   </label>
-                  <select
+                  <SelectField
                     aria-label={`${PARAM_LABELS[key]?.[0] || key} 配方语义`}
                     value={op.mode}
                     disabled={op.dependency || excluded.includes(key) || saving}
@@ -238,7 +239,7 @@ export default function StyleSaveDialog({
                       追加增量
                     </option>
                     <option value="set">固定目标</option>
-                  </select>
+                  </SelectField>
                   <code>{JSON.stringify(op.value)}</code>
                 </div>
               ))}

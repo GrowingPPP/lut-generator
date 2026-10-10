@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import SelectField from './SelectField.jsx'
 
 import {
   deleteLut,
@@ -270,18 +271,20 @@ export default function LibraryView({ onPreview }) {
         <div className="library-filters">
           <label>
             种类
-            <select
+            <SelectField
+              aria-label="资产种类"
               value={filters.kind}
               onChange={(e) => changeFilter('kind', e.target.value)}
             >
               <option value="">全部种类</option>
               <option value="full_snapshot">完整效果</option>
               <option value="portable_style">可复用风格</option>
-            </select>
+            </SelectField>
           </label>
           <label>
             输入基准
-            <select
+            <SelectField
+              aria-label="资产输入基准"
               value={filters.input}
               onChange={(e) => changeFilter('input', e.target.value)}
             >
@@ -289,11 +292,12 @@ export default function LibraryView({ onPreview }) {
               {['STD', 'NAT', 'VIVD', 'VLOG'].map((input) => (
                 <option key={input}>{input}</option>
               ))}
-            </select>
+            </SelectField>
           </label>
           <label>
             分组
-            <select
+            <SelectField
+              aria-label="资产分组筛选"
               value={filters.group}
               onChange={(e) => changeFilter('group', e.target.value)}
             >
@@ -304,22 +308,24 @@ export default function LibraryView({ onPreview }) {
                   {group}
                 </option>
               ))}
-            </select>
+            </SelectField>
           </label>
           <label>
             收藏
-            <select
+            <SelectField
+              aria-label="资产收藏筛选"
               value={filters.favorite}
               onChange={(e) => changeFilter('favorite', e.target.value)}
             >
               <option value="">全部资产</option>
               <option value="true">已收藏</option>
               <option value="false">未收藏</option>
-            </select>
+            </SelectField>
           </label>
           <label>
             排序
-            <select
+            <SelectField
+              aria-label="资产排序"
               value={filters.sort}
               onChange={(e) => changeFilter('sort', e.target.value)}
             >
@@ -329,7 +335,7 @@ export default function LibraryView({ onPreview }) {
               <option value="updated_asc">最早更新</option>
               <option value="name_asc">名称升序</option>
               <option value="name_desc">名称降序</option>
-            </select>
+            </SelectField>
           </label>
         </div>
       </section>
