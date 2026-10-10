@@ -463,9 +463,9 @@ def test_concurrent_rename_preserves_new_params_and_source(headers,monkeypatch):
     assert current["params"]["exposure"] == .7
     assert current["source"] == {"value":2}
     revisions = client.get(route+"/revisions",headers=headers).json()
-    assert [r["revision_number"] for r in revisions] == [3,2,1]
+    assert [r["revision_number"] for r in revisions] == [2,1]
     assert revisions[0]["params"]["exposure"] == .7 and revisions[0]["source"] == {"value":2}
-    assert revisions[1]["params"]["exposure"] == .7 and revisions[2]["params"]["exposure"] == 0
+    assert revisions[1]["params"]["exposure"] == 0
 
 
 def test_asset_revision_cas_rejects_stale_update_without_revision(headers):

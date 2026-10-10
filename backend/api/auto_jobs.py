@@ -1,0 +1,441 @@
+"""短期自动修图作业；照片与未完成候选只存在执行线程内存中。"""
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from dataclasses import dataclass, field
+import hashlib
+from io import BytesIO
+import json
+import logging
+import os
+import shlex
+import sys
+from threading import Event, RLock
+import time
+from typing import Callable, Literal, Optional
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+
+from agent.auto import AutoGradeCancelled
+from api import auth
+
+logger = logging.getLogger("chroma.auto_jobs")
+TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+STAGES = ("measure", "optimize", "style", "rules", "review", "save")
+
+
+class JobNotFound(Exception):
+    pass
+
+
+class JobLimitExceeded(Exception):
+    pass
+
+
+class JobContinuationRejected(Exception):
+    pass
+
+
+class JobRequestConflict(Exception):
+    pass
+
+
+class JobRequestExpired(Exception):
+    pass
+
+
+@dataclass
+class _Job:
+    id: str
+    user_id: int
+    workspace_id: Optional[str]
+    source_digest: Optional[str]
+    main_sample_id: Optional[str]
+    created_at: float
+    updated_at: float
+    expires_at: float
+    status: str = "queued"
+    stages: dict = field(default_factory=lambda: {
+        stage: {"stage": stage, "state": "pending", "round": 0} for stage in STAGES})
+    progress: dict = field(default_factory=lambda: {"stage": "measure", "state": "pending", "round": 0})
+    cancelled: Event = field(default_factory=Event)
+    committing: bool = False
+    result: Optional[dict] = None
+    error: Optional[dict] = None
+    persisted: bool = False
+    request_data: dict = field(default_factory=dict)
+    continuation_stages: list = field(default_factory=list)
+    continued_from: Optional[str] = None
+    fingerprint: Optional[str] = None
+
+
+class AutoJobRegistry:
+    """一个服务进程内的有界作业集，取消与开始保存共享同一判定锁。"""
+
+    def __init__(self, max_active=2, max_per_user=1, ttl_seconds=900,
+                 active_seconds=600, max_retained=200, clock=time.time, executor=None):
+        self.max_active = max_active
+        self.max_per_user = max_per_user
+        self.ttl_seconds = ttl_seconds
+        self.active_seconds = active_seconds
+        self.max_retained = max_retained
+        self.clock = clock
+        self.executor = executor or ThreadPoolExecutor(max_workers=max_active, thread_name_prefix="auto-grade")
+        self._jobs = {}
+        self._expired = {}
+        self._lock = RLock()
+
+    def _forget(self, job, now):
+        self._expired[job.id] = (job.user_id, job.fingerprint, now + 86400)
+        del self._jobs[job.id]
+
+    def _snapshot(self, job):
+        return deepcopy({
+            "id": job.id, "status": job.status, "progress": job.progress,
+            "stages": list(job.stages.values()), "workspace_id": job.workspace_id,
+            "source_digest": job.source_digest, "main_sample_id": job.main_sample_id,
+            "created_at": job.created_at, "updated_at": job.updated_at,
+            "expires_at": job.expires_at, "result": job.result,
+            "error": job.error, "persisted": job.persisted,
+            "can_cancel": job.status not in TERMINAL_STATUSES and not job.committing,
+            "continuation_stages": job.continuation_stages, "continued_from": job.continued_from,
+        })
+
+    def _finish(self, job, status, error=None):
+        job.status = status
+        job.error = error
+        job.updated_at = self.clock()
+        job.expires_at = job.updated_at + self.ttl_seconds
+
+    def cleanup(self):
+        with self._lock:
+            now = self.clock()
+            for job_id, job in list(self._jobs.items()):
+                if job.status in TERMINAL_STATUSES and job.expires_at <= now:
+                    self._forget(job, now)
+                elif job.status not in TERMINAL_STATUSES and not job.committing and job.expires_at <= now:
+                    job.cancelled.set()
+                    job.status = "cancelling"
+            terminal = sorted((j for j in self._jobs.values() if j.status in TERMINAL_STATUSES),
+                              key=lambda j: j.updated_at)
+            while len(self._jobs) >= self.max_retained and terminal:
+                self._forget(terminal.pop(0), now)
+            self._expired = {key: value for key, value in self._expired.items() if value[2] > now}
+            while len(self._expired) > 2000:
+                del self._expired[next(iter(self._expired))]
+
+    def replay(self, request_id, user_id, fingerprint):
+        with self._lock:
+            self.cleanup()
+            if request_id in self._jobs:
+                previous = self._owned(request_id, user_id)
+                if previous.fingerprint != fingerprint:
+                    raise JobRequestConflict()
+                return self._snapshot(previous)
+            expired = self._expired.get(request_id)
+            if expired:
+                if expired[0] != user_id:
+                    raise JobNotFound()
+                if expired[1] != fingerprint:
+                    raise JobRequestConflict()
+                raise JobRequestExpired()
+            return None
+
+    def submit(self, user_id, workspace_id, source_digest, main_sample_id,
+               run: Callable, persist: Callable, reserve: Optional[Callable] = None,
+               request_data=None, continued_from=None, request_id=None, fingerprint=None):
+        with self._lock:
+            self.cleanup()
+            repeated = self.replay(request_id, user_id, fingerprint)
+            if repeated is not None:
+                return repeated
+            active = [j for j in self._jobs.values() if j.status not in TERMINAL_STATUSES]
+            if (len(active) >= self.max_active
+                    or sum(j.user_id == user_id for j in active) >= self.max_per_user):
+                raise JobLimitExceeded()
+            if reserve is not None:
+                reserve()
+            now = self.clock()
+            job = _Job(request_id or str(uuid4()), user_id, workspace_id, source_digest, main_sample_id,
+                       now, now, now + self.active_seconds,
+                       request_data=deepcopy(request_data or {}), continued_from=continued_from,
+                       fingerprint=fingerprint)
+            self._jobs[job.id] = job
+            initial = self._snapshot(job)
+            try:
+                self.executor.submit(self._execute, job, run, persist)
+            except Exception:
+                del self._jobs[job.id]
+                raise
+            return initial
+
+    def _owned(self, job_id, user_id):
+        job = self._jobs.get(job_id)
+        if job is None or job.user_id != user_id:
+            raise JobNotFound()
+        return job
+
+    def get(self, job_id, user_id):
+        with self._lock:
+            self.cleanup()
+            return self._snapshot(self._owned(job_id, user_id))
+
+    def cancel(self, job_id, user_id):
+        with self._lock:
+            self.cleanup()
+            job = self._owned(job_id, user_id)
+            if job.status not in TERMINAL_STATUSES and not job.committing:
+                job.cancelled.set()
+                job.status = "cancelling"
+                job.updated_at = self.clock()
+            return self._snapshot(job)
+
+    def cancel_all(self):
+        with self._lock:
+            for job in self._jobs.values():
+                if job.status not in TERMINAL_STATUSES and not job.committing:
+                    job.cancelled.set()
+                    job.status = "cancelling"
+                    job.updated_at = self.clock()
+
+    def continuation_request(self, job_id, user_id, params, context, workspace_id,
+                             source_digest, main_sample_id, actual_digest):
+        with self._lock:
+            self.cleanup()
+            job = self._owned(job_id, user_id)
+            if (job.status != "succeeded" or not job.persisted or not job.continuation_stages
+                    or not job.workspace_id or not job.source_digest or not job.main_sample_id):
+                raise JobContinuationRejected("该作业没有可继续的已应用阶段，请使用当前条件重新开始")
+            if (params != job.result.get("params") or context != job.request_data.get("context")
+                    or workspace_id != job.workspace_id or source_digest != job.source_digest
+                    or main_sample_id != job.main_sample_id
+                    or actual_digest != job.request_data.get("actual_digest")):
+                raise JobContinuationRejected("已应用候选、上下文或来源已变化，不能继续原阶段")
+            data = deepcopy(job.request_data)
+            data["resume"] = {
+                "skip_correction": "optimize" not in job.continuation_stages,
+                "skip_style": "style" not in job.continuation_stages,
+                "completed_style_targets": job.result.get("style_applied_params")
+                                           or job.request_data.get("resume", {}).get("completed_style_targets") or {},
+                "style_rejections": job.result.get("style_rejections") or [],
+                "blocked_reasons": job.result.get("blocked_reasons") or [],
+            }
+            return data
+
+    def _execute(self, job, run, persist):
+        def cancelled():
+            if self.clock() >= job.expires_at and not job.committing:
+                job.cancelled.set()
+            return job.cancelled.is_set()
+
+        def progress(event):
+            with self._lock:
+                if job.status in TERMINAL_STATUSES or job.cancelled.is_set():
+                    return
+                stage, state = event.get("stage"), event.get("state")
+                if stage not in STAGES or state not in {"pending", "running", "done", "skipped"}:
+                    return
+                value = {"stage": stage, "state": state,
+                         "round": event.get("round") or job.stages[stage]["round"]}
+                if event.get("reason") in {"goal", "locked", "no_issues", "no_client", "disabled",
+                                           "not_requested", "not_needed", "failed", "blocked", "unchanged",
+                                           "no_writable_fields", "continued"}:
+                    value["reason"] = event["reason"]
+                job.progress = value
+                job.stages[stage] = value
+                job.updated_at = self.clock()
+
+        try:
+            with self._lock:
+                if cancelled():
+                    self._finish(job, "cancelled")
+                    return
+                job.status = "running"
+            result = run(progress, cancelled)
+            with self._lock:
+                if cancelled():
+                    self._finish(job, "cancelled")
+                    return
+                job.continuation_stages = result.pop("_continuation_stages", [])
+                job.committing = True
+                progress({"stage": "save", "state": "running"})
+            saved = persist(result)
+            with self._lock:
+                job.result = deepcopy(saved)
+                job.persisted = True
+                progress({"stage": "save", "state": "done"})
+                self._finish(job, "succeeded")
+        except AutoGradeCancelled:
+            with self._lock:
+                self._finish(job, "cancelled")
+        except Exception:
+            logger.exception("自动修图作业失败，作业 %s", job.id)
+            with self._lock:
+                if cancelled() and not job.committing:
+                    self._finish(job, "cancelled")
+                else:
+                    self._finish(job, "failed", {"code": "save_failed" if job.committing else "analysis_failed",
+                        "message": "结果保存失败，请重试" if job.committing else "来源、额度或分析服务未能完成，请核对后重试"})
+
+
+registry = AutoJobRegistry()
+router = APIRouter(prefix="/api/auto/jobs")
+
+
+@router.on_event("shutdown")
+def cancel_pending_jobs():
+    registry.cancel_all()
+
+
+def require_single_worker():
+    tokens = sys.argv[1:] + shlex.split(os.environ.get("GUNICORN_CMD_ARGS", ""))
+    counts = [os.environ.get("WEB_CONCURRENCY", "1"), os.environ.get("CHROMA_AUTO_JOB_WORKERS", "1")]
+    for i, token in enumerate(tokens):
+        if token in {"--workers", "-w"} and i + 1 < len(tokens):
+            counts.append(tokens[i + 1])
+        elif token.startswith("--workers="):
+            counts.append(token.split("=", 1)[1])
+        elif token.startswith("-w") and token[2:].isdigit():
+            counts.append(token[2:])
+    if any(value != "1" for value in counts):
+        raise HTTPException(503, {"code": "single_worker_required", "accepted": False,
+                                  "message": "自动修图作业要求单个服务 worker，请按单进程部署后重试"})
+
+
+def continuation_stages(img, out, style, context, resume=None):
+    """只为有正式贡献的部分完成结果提供可写、仍未完成的调色阶段。"""
+    from agent.editing import application_reasons, normalize_context, writable_fields
+    from photo import quality, render, stats
+    if out.goal_status != "partially_met" or not any(step.applied for step in out.steps):
+        return []
+    ctx = normalize_context(context)
+    result = out.params.model_dump()
+    before_style = next((step.params_before for step in out.steps
+                         if step.stage == "style" and step.params_before), result)
+    stages = []
+    if ctx.goal_mode != "style_only" and writable_fields(ctx, "correction"):
+        measured = stats.analyze(render.render_lut(render.lut_from_params(before_style), img))
+        if not quality.is_goal_met(measured, ctx.goal_mode):
+            stages.append("optimize")
+    targets = out.style_applied_params or (resume or {}).get("completed_style_targets") or out.style_params or {}
+    style_done = bool(targets) and not out.style_rejections and all(result.get(k) == v for k, v in targets.items())
+    permission_blocked = any("已锁定" in reason or "在自动修图中只读" in reason for reason in out.style_rejections)
+    if style and not style_done and not permission_blocked and writable_fields(ctx, "style"):
+        candidate = {**result, **targets}
+        if not application_reasons(result, candidate, ctx, "style"):
+            stages.append("style")
+    return stages
+
+
+def _job_response(action, job_id, user_id):
+    try:
+        return action(job_id, user_id)
+    except JobNotFound as exc:
+        raise HTTPException(404, {"code": "expired_or_restarted",
+                                  "message": "作业不存在、已过期或服务已重启；当前草稿未应用该结果"}) from exc
+
+
+@router.post("", status_code=202)
+def create_job(request: Request, file: UploadFile = File(...),
+               base_params: str = Form(..., max_length=8192), style: Optional[str] = Form(None),
+               use_vision: bool = Form(True), max_rounds: int = Form(2),
+               workspace_id: Optional[str] = Form(None, max_length=36),
+               context: Optional[str] = Form(None, max_length=8192),
+               source_digest: Optional[str] = Form(None, max_length=128),
+               main_sample_id: Optional[str] = Form(None, max_length=128),
+               continue_from: Optional[str] = Form(None, max_length=36),
+               request_id: Optional[str] = Form(None, max_length=36),
+               sample_origin: Literal["source", "restored_preview"] = Form("source"),
+               user: dict = Depends(auth.get_current_user)):
+    from api.main import (LutParamsModel, MAX_AUTO_IMAGE_BYTES, _prepare_auto_grade,
+                          _compute_auto_grade, _persist_auto_grade, _reserve_auto_grade)
+    from agent.editing import EditingContext, normalize_context
+    require_single_worker()
+    try:
+        parsed = LutParamsModel.model_validate(json.loads(base_params))
+        ctx = EditingContext.model_validate(json.loads(context)) if context else None
+        job_id = str(UUID(request_id)) if request_id else str(uuid4())
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "参数、上下文或请求标识无效") from exc
+    raw = file.file.read(MAX_AUTO_IMAGE_BYTES + 1)
+    if len(raw) > MAX_AUTO_IMAGE_BYTES:
+        raise HTTPException(413, "图片过大，请压缩到 32MB 以内")
+    actual_digest = hashlib.sha256(raw).hexdigest()
+    if source_digest and source_digest != actual_digest:
+        raise HTTPException(409, "来源文件摘要不一致，请重新绑定主样张")
+    request_data = {"style": (style or "").strip()[:200] or None,
+                    "use_vision": use_vision, "max_rounds": max_rounds,
+                    "context": normalize_context(ctx).model_dump(), "actual_digest": actual_digest}
+    fingerprint = hashlib.sha256(json.dumps({
+        **request_data, "params": parsed.model_dump(), "workspace_id": workspace_id,
+        "source_digest": source_digest, "main_sample_id": main_sample_id,
+        "sample_origin": sample_origin, "continue_from": continue_from,
+    }, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    try:
+        repeated = registry.replay(job_id, user["id"], fingerprint)
+        if repeated is not None:
+            return repeated
+    except JobNotFound as exc:
+        raise HTTPException(404, "作业不存在") from exc
+    except JobRequestConflict as exc:
+        raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始") from exc
+    except JobRequestExpired as exc:
+        raise HTTPException(410, "原请求已失效，当前草稿未应用该结果；请明确重新开始") from exc
+    if continue_from:
+        try:
+            previous = registry.continuation_request(continue_from, user["id"], parsed.model_dump(),
+                       request_data["context"], workspace_id, source_digest, main_sample_id, actual_digest)
+        except JobNotFound as exc:
+            raise HTTPException(404, "来源作业不存在或已过期，不能继续") from exc
+        except JobContinuationRejected as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if any(request_data[key] != previous[key] for key in ("style", "use_vision", "max_rounds")):
+            raise HTTPException(409, "原请求设置已变化，请使用当前条件重新开始")
+        request_data = previous
+
+    def run(progress, cancel_check):
+        if cancel_check():
+            raise AutoGradeCancelled()
+        prepared = _prepare_auto_grade(request, UploadFile(file=BytesIO(raw)), base_params, context,
+                                        workspace_id, sample_origin, user)
+        if cancel_check():
+            raise AutoGradeCancelled()
+        _reserve_auto_grade(user["id"])
+        out = _compute_auto_grade(prepared[0], prepared[1], prepared[2], request_data["style"], use_vision,
+                                   max_rounds, workspace_id, source_digest, main_sample_id,
+                                   progress=progress, cancel_check=cancel_check,
+                                   resume=request_data.get("resume"), continued_from=continue_from)
+        return {**out.model_dump(), "_continuation_stages": continuation_stages(
+            prepared[0], out, request_data["style"], prepared[2], request_data.get("resume"))}
+
+    def persist(data):
+        from api.main import AutoGradeOut
+        out = AutoGradeOut.model_validate(data)
+        out.session_id = _persist_auto_grade(user["id"], out)
+        return out.model_dump()
+
+    try:
+        return registry.submit(user["id"], workspace_id, source_digest, main_sample_id,
+                               run, persist, request_data=request_data, continued_from=continue_from,
+                               request_id=job_id, fingerprint=fingerprint)
+    except JobLimitExceeded as exc:
+        raise HTTPException(429, "已有自动修图正在运行，请等待或取消后重试",
+                            headers={"Retry-After": "2"}) from exc
+    except JobNotFound as exc:
+        raise HTTPException(404, "作业不存在") from exc
+    except JobRequestConflict as exc:
+        raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始") from exc
+    except JobRequestExpired as exc:
+        raise HTTPException(410, "原请求已失效，当前草稿未应用该结果；请明确重新开始") from exc
+
+
+@router.get("/{job_id}")
+def get_job(job_id: str, user: dict = Depends(auth.get_current_user)):
+    require_single_worker()
+    return _job_response(registry.get, job_id, user["id"])
+
+
+@router.delete("/{job_id}")
+def cancel_job(job_id: str, user: dict = Depends(auth.get_current_user)):
+    require_single_worker()
+    return _job_response(registry.cancel, job_id, user["id"])

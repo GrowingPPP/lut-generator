@@ -13,6 +13,12 @@
 - **命名版本与 A/B**:每个工作区最多 20 个账号版本，选择时固定 A/B 快照；查看不改参数，恢复版本是一条可撤销事务
 - **AI 自动修图**:以主样张和当前参数分析，可叠加自然语言风格；报告分别展示画面观察、目标冲突、实际调整与受阻原因
 - **精细调色**:30 个参数,按单张校正、风格强度、影调、全局与局部色彩、阴影/中间调/高光染色、RGB 分通道和输入基准分组。风格强度可在技术转换与完整效果之间调整
+- **输入与相机引导**:本机读取可用的相机型号和 EXIF 色彩空间供核对；Photo Style 仍由用户确认。提供当前输入/输出说明、S5II/S5IIX 导入参考、异常排查与使用说明下载
+- **图像诊断**:选中真实样张并确认匹配输入后，显示缩小预览的亮度/RGB 直方图、裁切风险与技术中性基线差异；提供风险叠加和现有曲线/局部色相范围示意
+- **资产库组织**:搜索名称/描述/标签，按种类、输入、收藏和分组筛选，并按时间/名称排序；标签、描述、收藏、分组、内置封面编辑独立保存，纯信息修改不新增调色修订
+- **自动修图过程控制**:显示服务端真实阶段，支持请求取消、安全重试与部分完成结果续跑；请求幂等恢复，续跑核对当前参数与照片来源；取消在安全边界确认后生效，保存开始后会明确提示不能取消
+
+本轮使用完善方案见 [设计文档](docs/specs/product-readiness-design.md)，完成清单与检查结果见 [验收记录](docs/specs/product-readiness-validation.md)。真实模型效果矩阵与相机实拍验收按用户要求延期。
 
 ## 技术栈
 
@@ -208,10 +214,14 @@ key 优先级:`CHROMA_LLM_API_KEY`(环境变量或项目根 `.env`)> `OPENAI_API
 |---|---|
 | 工作区身份 | `/api/workspaces` 与 `/api/workspaces/{workspace_id}` |
 | 对话与自动修图 | `POST /api/session/chat`、`POST /api/auto/grade`；可携带工作区、创作上下文与主样张来源 |
+| 自动修图作业 | `POST /api/auto/jobs` 创建，`GET /api/auto/jobs/{id}` 查询真实阶段，`DELETE` 请求取消 |
 | 命名版本 | `/api/workspaces/{workspace_id}/versions`；支持创建、查询、改名、删除与显式恢复候选 |
 | 多样张统计 | `POST /api/workspaces/{workspace_id}/validate`、`GET /api/workspaces/{workspace_id}/validation` |
 | 资产应用与修订 | `/api/luts/{id}/apply`、`/apply-validated`、`/revisions` |
+| 资产组织与检索 | `GET /api/luts` 支持查询筛选排序，`GET /api/luts/summary` 提供总数与分组，`PATCH /api/luts/{id}/metadata` 编辑信息 |
 | 明确目标导出 | `GET /api/luts/{id}/download` 下载保存效果或 `neutral` 风格；`POST` 提交 `target: "current"` 和当前完整参数 |
+
+自动修图作业注册表保存在服务进程内，当前部署须使用 **单个 Uvicorn worker**（项目的 `make dev` 已采用此方式）。每账号最多一个、全局最多两个活跃作业，终态保留 15 分钟；重启或过期后需核对草稿并重新开始。数据库限流仍跨进程共享，但这不意味着作业状态可以跨进程查询。多 worker 或多实例部署前需将作业状态、幂等标识与取消信号迁移到共享存储。
 
 ## 松下相机适配说明
 
@@ -257,7 +267,9 @@ make admin          # 创建/重置本地账号
 PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider backend/tests/test_recipe_parity.py -q
 ```
 
-2026-10-10 的已完成验证记录：一轮 `make check` 通过 804 项后端测试、61 项前端测试、21 组引擎参数的 7,875 个通道采样，以及 11 组 `.cube` 的 1,185,921 个数值比较；之后受影响后端回归 284 项通过，最终自动修图接口回归 40 项、前端纯函数 75 项通过，最终前端生产构建成功。
+2026-10-10 六项工作区能力的先前验证记录：一轮 `make check` 通过 804 项后端测试、61 项前端测试、21 组引擎参数的 7,875 个通道采样，以及 11 组 `.cube` 的 1,185,921 个数值比较；之后受影响后端回归 284 项通过，自动修图接口回归 40 项、前端纯函数 75 项通过，前端生产构建成功。
+
+同日后续使用完善的最终完整 `make check`：**894 项后端、109 项前端、21 组引擎与 11 组 `.cube` 全部通过**，生产构建成功。新增输入引导、诊断、资产组织和作业控制的浏览器流程及独立复核结果见[本轮验收记录](docs/specs/product-readiness-validation.md)。
 
 浏览器使用真实 JPEG 验证了正常调色预览、本机缩小预览恢复、原文件重新绑定、双样张统计、参数保护、撤销/重做和固定 A/B；另验证跨标签冲突另存副本、全参数保护时自动修图跳过、风格候选不改稿与重复追加取消、版本恢复后撤销，以及 STD 的 33³ 机内文件下载。390px 手机布局已验证两幅比较预览尺寸一致、滑动裁切正确且无横向溢出；撤销当前草稿后，冻结 A/B 的参数差异仍保持正确。模型约束与失败路径使用模拟响应覆盖；本轮没有现场重测真实模型生成的艺术效果，因此上述验证不代表对风格审美的验收。
 
@@ -283,5 +295,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 | [docs/specs/technical.md](docs/specs/technical.md) | 接口签名、数据结构、阈值常量、精度包络、API 契约 |
 | [docs/specs/ui-design.md](docs/specs/ui-design.md) | 线框、组件规格、状态机、完整微文案 |
 | [docs/specs/style-workspace-design.md](docs/specs/style-workspace-design.md) | 已实现的六项工作区能力：用户流程、保存边界、参数/配方契约、实际 API 与验收记录 |
+| [docs/specs/product-readiness-design.md](docs/specs/product-readiness-design.md) | 输入引导、调色诊断、资产组织与 AI 过程控制的设计与范围 |
+| [docs/specs/product-readiness-validation.md](docs/specs/product-readiness-validation.md) | 本轮完成清单、完整回归、浏览器与独立复核结果、部署边界和延期事项 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |
 | [docs/leftover-issues.md](docs/leftover-issues.md) | 已知问题的记录与处理结果 |

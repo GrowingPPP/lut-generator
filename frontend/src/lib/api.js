@@ -1,4 +1,6 @@
 // 后端 API client。认证用 httpOnly cookie,前端不持有 token。
+import { libraryQuery } from './assetLibrary.js'
+
 const BASE = '/api'
 
 async function jsonFetch(url, opts = {}) {
@@ -7,18 +9,27 @@ async function jsonFetch(url, opts = {}) {
   const res = await fetch(url, { ...rest, headers, credentials: 'include' })
   if (res.status === 401 && !skip401Redirect) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
-    throw new Error('登录已过期,请重新登录')
+    throw Object.assign(new Error('登录已过期,请重新登录'), { status: 401 })
   }
   if (!res.ok) {
     let detail = `请求失败: ${res.status}`
+    let code
+    let accepted
     try {
       const data = await res.json()
-      if (data.detail)
-        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+      if (data.detail) {
+        detail = typeof data.detail === 'string' ? data.detail : data.detail.message || JSON.stringify(data.detail)
+        code = data.detail?.code
+        accepted = data.detail?.accepted
+      }
     } catch {
       // 忽略非 JSON 错误体
     }
-    throw new Error(detail)
+    const error = new Error(detail)
+    error.status = res.status
+    error.code = code
+    error.accepted = accepted
+    throw error
   }
   if (res.status === 204) return null
   return res.json()
@@ -64,7 +75,11 @@ export function cameraFileName(name) {
 }
 
 // LUT
-export const listLuts = () => jsonFetch(`${BASE}/luts`)
+export const listLuts = (filters = {}) => {
+  const query = new URLSearchParams(libraryQuery(filters)).toString()
+  return jsonFetch(`${BASE}/luts${query ? `?${query}` : ''}`)
+}
+export const getLibrarySummary = () => jsonFetch(`${BASE}/luts/summary`)
 export const createLut = (name, description, params, metadata = {}) =>
   jsonFetch(`${BASE}/luts`, {
     method: 'POST',
@@ -72,6 +87,8 @@ export const createLut = (name, description, params, metadata = {}) =>
   })
 export const updateLut = (id, data) =>
   jsonFetch(`${BASE}/luts/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const updateLutMetadata = (id, data) =>
+  jsonFetch(`${BASE}/luts/${id}/metadata`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteLut = (id) => jsonFetch(`${BASE}/luts/${id}`, { method: 'DELETE' })
 export const listLutRevisions = (id) => jsonFetch(`${BASE}/luts/${id}/revisions`)
 
@@ -92,7 +109,7 @@ export async function downloadLut(id, mode = 'camera', target = 'neutral', param
   )
   if (res.status === 401) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
-    throw new Error('登录已过期,请重新登录')
+    throw Object.assign(new Error('登录已过期,请重新登录'), { status: 401 })
   }
   if (!res.ok) throw new Error(`下载失败: ${res.status}`)
   const blob = await res.blob()
@@ -157,7 +174,7 @@ export async function getAutoReport(workspaceId) {
 export const undoAutoGrade = () => jsonFetch(`${BASE}/auto/undo`, { method: 'POST' })
 
 // 自动修图。multipart 提交,base_params 必填(服务端拒绝默认值兜底)。
-export async function autoGrade({
+async function submitAutoGrade(path, {
   file,
   params,
   style,
@@ -167,6 +184,9 @@ export async function autoGrade({
   workspace_id,
   source_digest,
   main_sample_id,
+  sample_origin = 'source',
+  request_id,
+  continue_from,
 }) {
   const fd = new FormData()
   fd.append('file', file)
@@ -178,29 +198,46 @@ export async function autoGrade({
   if (workspace_id) fd.append('workspace_id', workspace_id)
   if (source_digest) fd.append('source_digest', source_digest)
   if (main_sample_id) fd.append('main_sample_id', main_sample_id)
+  fd.append('sample_origin', sample_origin)
+  if (request_id) fd.append('request_id', request_id)
+  if (continue_from) fd.append('continue_from', continue_from)
   // 不要手写 Content-Type:让浏览器带上 multipart boundary
-  const res = await fetch(`${BASE}/auto/grade`, {
+  const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     body: fd,
     credentials: 'include',
   })
   if (res.status === 401) {
     window.dispatchEvent(new Event('chroma:unauthorized'))
-    throw new Error('登录已过期,请重新登录')
+    throw Object.assign(new Error('登录已过期,请重新登录'), { status: 401 })
   }
   if (!res.ok) {
     let detail = `修图失败: ${res.status}`
+    let code, accepted
     try {
       const data = await res.json()
-      if (data.detail)
-        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+      if (data.detail) {
+        detail = typeof data.detail === 'string' ? data.detail : data.detail.message || JSON.stringify(data.detail)
+        code = data.detail?.code
+        accepted = data.detail?.accepted
+      }
     } catch {
       // 忽略非 JSON 错误体
     }
-    throw new Error(detail)
+    const error = new Error(detail)
+    error.status = res.status
+    error.code = code
+    error.accepted = accepted
+    throw error
   }
   return res.json()
 }
+
+export const autoGrade = (request) => submitAutoGrade('/auto/grade', request)
+export const startAutoJob = (request) => submitAutoGrade('/auto/jobs', request)
+export const getAutoJob = (id) => jsonFetch(`${BASE}/auto/jobs/${encodeURIComponent(id)}`)
+export const cancelAutoJob = (id) =>
+  jsonFetch(`${BASE}/auto/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 export const listWorkspaces = () => jsonFetch(`${BASE}/workspaces`)
 export const createWorkspace = (data) =>

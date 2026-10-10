@@ -8,6 +8,8 @@ import {
 } from '../lib/styleRecipe.js'
 import { RenderedImage } from './ComparisonPreview.jsx'
 import { diffParams, PARAM_LABELS } from '../lib/autoGrade.js'
+import useModalFocus from '../hooks/useModalFocus.js'
+import { parseTags } from '../lib/assetLibrary.js'
 
 export default function StyleSaveDialog({
   workspace,
@@ -19,11 +21,17 @@ export default function StyleSaveDialog({
 }) {
   const [kind, setKind] = useState('full_snapshot')
   const [name, setName] = useState(workspace.name || '')
+  const [description, setDescription] = useState(savedAsset?.description || '')
+  const [tags, setTags] = useState((savedAsset?.tags || []).join(', '))
+  const [group, setGroup] = useState(savedAsset?.group || '')
+  const [favorite, setFavorite] = useState(savedAsset?.favorite || false)
+  const [cover, setCover] = useState(savedAsset?.cover_id || 'engine')
   const [operations, setOperations] = useState(null)
   const [excluded, setExcluded] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [replace, setReplace] = useState(false)
+  const modalRef = useModalFocus(onClose, !saving)
   const eligibility = recipeCanSave(workspace)
   const originalOperations = workspace.recipe_projection?.operations || {}
   const candidate = useMemo(() => {
@@ -49,12 +57,19 @@ export default function StyleSaveDialog({
     setSaving(true)
     setError('')
     try {
+      const originalTags = savedAsset?.tags || []
+      const tagList = parseTags(tags === originalTags.join(', ') ? originalTags : tags)
       await onSave({
         name: name.trim() || '未命名 LUT',
         kind,
         params: candidate.params,
         recipe: candidate.recipe,
         replace,
+        description: description.trim(),
+        tags: tagList,
+        group: group.trim() || null,
+        favorite,
+        cover_id: cover,
       })
       onClose()
     } catch (e) {
@@ -66,6 +81,7 @@ export default function StyleSaveDialog({
   return (
     <div className="modal-backdrop">
       <section
+        ref={modalRef}
         className="workspace-modal"
         role="dialog"
         aria-modal="true"
@@ -86,6 +102,65 @@ export default function StyleSaveDialog({
             maxLength={100}
           />
         </label>
+        <div className="asset-save-metadata">
+          <label>
+            描述 / 适用场景
+            <textarea
+              aria-label="资产描述"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={1000}
+              rows={2}
+              disabled={saving}
+            />
+          </label>
+          <label>
+            标签（以逗号分隔，最多 12 个）
+            <input
+              aria-label="资产标签"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              maxLength={310}
+              disabled={saving}
+              placeholder="日系, 户外, 低饱和"
+            />
+          </label>
+          <label>
+            分组
+            <input
+              aria-label="资产分组"
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+              maxLength={48}
+              disabled={saving}
+              placeholder="例如：旅行"
+            />
+          </label>
+          <label>
+            封面
+            <select
+              aria-label="资产封面"
+              value={cover}
+              onChange={(e) => setCover(e.target.value)}
+              disabled={saving}
+            >
+              <option value="engine">调色引擎示意图</option>
+              <option value="amber">暖调</option>
+              <option value="teal">青调</option>
+              <option value="mono">黑白</option>
+              <option value="dusk">暮色</option>
+            </select>
+          </label>
+          <label className="favorite-option">
+            <input
+              type="checkbox"
+              checked={favorite}
+              onChange={(e) => setFavorite(e.target.checked)}
+              disabled={saving}
+            />
+            收藏此资产
+          </label>
+        </div>
         <div className="asset-kind-options">
           <label>
             <input

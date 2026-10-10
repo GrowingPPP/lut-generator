@@ -77,7 +77,7 @@ def test_happy_path_returns_params(auth):
 def test_persistence_failure_does_not_report_success(auth, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("database unavailable")
-    monkeypatch.setattr(db, "add_message", fail)
+    monkeypatch.setattr(db, "persist_auto_grade", fail)
     r = _post(auth)
     assert r.status_code == 503
     assert "保存失败" in r.json()["detail"]

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { inputContract } from '../lib/styleRecipe.js'
+import { photoMetadataNotes } from '../lib/photoMetadata.js'
 
 function SampleCard({
   sample,
@@ -13,8 +14,10 @@ function SampleCard({
   onRemove,
   onConfirm,
   onRebind,
+  onGuide,
 }) {
   const [style, setStyle] = useState(sample.input_contract?.base_photo_style || 'STD')
+  const metadata = photoMetadataNotes(sample.photo_metadata)
   return (
     <article className={`sample-card ${selected ? 'selected' : ''}`}>
       <button className="sample-image" onClick={onSelect} aria-label={`查看 ${sample.name}`}>
@@ -26,6 +29,11 @@ function SampleCard({
         <span className="sample-tag">{primary ? '★ AI 主样张' : '验证图'}</span>
       </button>
       <strong title={sample.name}>{sample.name}</strong>
+      <div className="sample-input-note">
+        <strong>{metadata.camera}</strong>
+        <div>{metadata.color}</div>
+        {metadata.warning && <div className="metadata-warning">{metadata.warning}</div>}
+      </div>
       <label>
         照片输入
         <select
@@ -55,6 +63,14 @@ function SampleCard({
         </button>
       ) : (
         <span className="sample-status">已确认 · {style}</span>
+      )}
+      {!sample.input_confirmed && (
+        <div className="sample-input-help">
+          {metadata.input}
+          <button className="btn" onClick={onGuide}>
+            如何核对输入与相机设置
+          </button>
+        </div>
       )}
       <div className="sample-actions">
         <button className="btn" onClick={onPrimary} disabled={busy || primary}>
@@ -111,6 +127,7 @@ export default function SampleGallery({
   onValidate,
   retainPreviews,
   onRetain,
+  onGuide,
 }) {
   return (
     <section className="sample-gallery">
@@ -125,6 +142,9 @@ export default function SampleGallery({
           </button>
           <button className="btn" onClick={onValidate} disabled={busy || !samples.length}>
             验证当前效果
+          </button>
+          <button className="btn" onClick={() => onGuide()} disabled={busy}>
+            输入与相机引导
           </button>
         </div>
       </div>
@@ -152,6 +172,7 @@ export default function SampleGallery({
             onRemove={() => onRemove(sample.id)}
             onConfirm={(c) => onConfirm(sample.id, c)}
             onRebind={() => onRebind(sample.id)}
+            onGuide={() => onGuide(sample)}
           />
         ))}
       </div>

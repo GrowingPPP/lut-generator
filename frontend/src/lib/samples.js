@@ -1,4 +1,5 @@
 import { inputContract } from './styleRecipe.js'
+import { readPhotoMetadata } from './photoMetadata.js'
 
 export async function contentDigest(value) {
   const bytes =
@@ -13,6 +14,7 @@ export async function contentDigest(value) {
 export async function decodeSample(file, params, existing) {
   if (file.size > 32 * 1024 * 1024) throw new Error('单张图片需小于 32MB')
   const digest = await contentDigest(file)
+  const photoMetadata = await readPhotoMetadata(file)
   if (existing && digest !== existing.source_digest)
     throw new Error('照片内容与原样张不同，请添加为新的样张')
   const url = URL.createObjectURL(file)
@@ -41,6 +43,7 @@ export async function decodeSample(file, params, existing) {
         preview_digest: await contentDigest(blob),
         width: canvas.width,
         height: canvas.height,
+        photo_metadata: photoMetadata,
       },
       file,
       canvas,

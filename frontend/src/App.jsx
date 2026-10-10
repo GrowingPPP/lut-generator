@@ -12,6 +12,8 @@ import InputConfirmationDialog from './components/InputConfirmationDialog.jsx'
 import SampleGallery from './components/SampleGallery.jsx'
 import VersionPanel from './components/VersionPanel.jsx'
 import StyleSaveDialog from './components/StyleSaveDialog.jsx'
+import CameraGuideDialog from './components/CameraGuideDialog.jsx'
+import DiagnosticsPanel from './components/DiagnosticsPanel.jsx'
 import ComparisonPreview, { RenderedImage } from './components/ComparisonPreview.jsx'
 import {
   createLut, chatSession,
@@ -178,6 +180,7 @@ function GenerateView({ previewLut, user }) {
   const [versions, setVersions] = useState([])
   const [comparison, setComparison] = useState(null)
   const [saveDialog, setSaveDialog] = useState(false)
+  const [cameraGuide, setCameraGuide] = useState(null)
   const [inputConfirmation, setInputConfirmation] = useState(false)
   const [savedAsset, setSavedAsset] = useState(null)
   const [pendingAsset, setPendingAsset] = useState(null)
@@ -829,17 +832,21 @@ function GenerateView({ previewLut, user }) {
       input_contract: inputContract(params),
       workspace_id: workspace.id,
       source,
+      tags: data.tags,
+      group: data.group,
+      favorite: data.favorite,
+      cover_id: data.cover_id,
     }
     const asset =
       data.replace && savedAsset
         ? await updateLut(savedAsset.id, {
             name: data.name,
             revision_id: savedAsset.revision_id,
-            description: '',
+            description: data.description,
             params: data.params,
             ...metadata,
           })
-        : await createLut(data.name, '', data.params, metadata)
+        : await createLut(data.name, data.description, data.params, metadata)
     setSavedAsset(asset)
     setStatus(`已保存「${data.name}」，当前草稿保持原效果`)
   }
@@ -1162,6 +1169,13 @@ function GenerateView({ previewLut, user }) {
           onValidate={validate}
           retainPreviews={retainPreviews}
           onRetain={retain}
+          onGuide={(sample) => setCameraGuide({ sample: sample || selectedSample })}
+        />
+        <DiagnosticsPanel
+          image={selectedMedia?.canvas}
+          params={params}
+          compatible={compatible}
+          sampleName={selectedSample?.name}
         />
         <AutoRetouchBar
           file={primaryMedia?.file}
@@ -1231,7 +1245,7 @@ function GenerateView({ previewLut, user }) {
             beforeParams={gradeResult.before_params}
             historical={reportHistorical}
             onUndo={
-              !reportHistorical && editor.histories.past.at(-1)?.source === 'auto'
+              !busy && !reportHistorical && editor.histories.past.at(-1)?.source === 'auto'
                 ? editor.undo
                 : undefined
             }
@@ -1474,6 +1488,13 @@ function GenerateView({ previewLut, user }) {
           <button className="btn" disabled={busy} onClick={() => downloadCube('software')}>
             直接下载后期版
           </button>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => setCameraGuide({ sample: selectedSample })}
+          >
+            相机导入说明
+          </button>
           <span className="text-muted">
             直接下载烘焙当前完整效果。可复用风格在保存面板中单独生成，不自动包含单张校正。
           </span>
@@ -1490,6 +1511,15 @@ function GenerateView({ previewLut, user }) {
           onConfirm={() => {
             if (editor.confirmRecipeInput()) setInputConfirmation(false)
           }}
+        />
+      )}
+      {cameraGuide && (
+        <CameraGuideDialog
+          params={params}
+          name={workspace.name}
+          sample={cameraGuide.sample}
+          onClose={() => setCameraGuide(null)}
+          onDownload={() => downloadCube('camera')}
         />
       )}
       {saveDialog && (

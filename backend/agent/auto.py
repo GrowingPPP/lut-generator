@@ -41,6 +41,15 @@ CONSERVATIVE_TEMP_BUDGET_K = 1200.0
 READONLY_FIELDS = ("base_photo_style", "tone_map")
 
 
+class AutoGradeCancelled(Exception):
+    """调用方已取消；当前候选不得被应用或保存。"""
+
+
+def _check_cancelled(cancel_check):
+    if cancel_check is not None and cancel_check():
+        raise AutoGradeCancelled()
+
+
 # --------------------------------------------------------------------------
 # 参数合并与限幅
 # --------------------------------------------------------------------------
@@ -204,7 +213,8 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
                            skin_mask: Optional[np.ndarray] = None,
                            budget_origin: Optional[Dict[str, Any]] = None,
                            context: Optional[Dict[str, Any]] = None,
-                           blocked_reasons: Optional[List[str]] = None) -> Tuple[Dict[str, Any], PhotoStats]:
+                           blocked_reasons: Optional[List[str]] = None,
+                           cancel_check: Optional[Callable[[], bool]] = None) -> Tuple[Dict[str, Any], PhotoStats]:
     """迭代保守解:每轮重测,直到收敛或用尽轮数。
 
     为什么需要迭代:温标单轮预算 1200K 只能修正约 0.01 的全局色偏,
@@ -219,6 +229,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
 
     stats_baseline 用于限幅(见 conservative_solution);不传则用当前图的测量。
     """
+    _check_cancelled(cancel_check)
     params = clamp_params(dict(base))
     ctx = normalize_context(context)
     stats = S.analyze(R.render_lut(R.lut_from_params(params), img), skin_mask)
@@ -229,6 +240,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
         return best_params, best_stats
 
     for _ in range(max_rounds):
+        _check_cancelled(cancel_check)
         candidate = conservative_solution(best_stats, best_params, stats_ref=baseline,
                                           budget_origin=budget_origin, context=ctx)
         if candidate == best_params:
@@ -242,6 +254,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
                 blocked_reasons.extend(reasons)
             break
         cand_stats = S.analyze(R.render_lut(R.lut_from_params(candidate), img), skin_mask)
+        _check_cancelled(cancel_check)
         cand_count = len(Q.diagnose_for_goal(cand_stats, ctx.goal_mode))
         if cand_count > best_count:
             break                      # 这一步会制造新问题,停下并保留当前最好结果
@@ -441,6 +454,8 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
         usage = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
         content = resp.choices[0].message.content if resp.choices else None
         return (content.strip() or None if isinstance(content, str) else None), usage, None
+    except AutoGradeCancelled:
+        raise
     except Exception:
         return None, {}, "failed"
 
@@ -460,6 +475,9 @@ def auto_grade(
     style_extractor: Optional[Callable[[Any, str, Dict[str, Any]], Dict[str, Any]]] = None,
     proposer: Optional[Callable[..., Tuple[Dict[str, Any], str, Dict[str, Any]]]] = None,
     context: Optional[Dict[str, Any]] = None,
+    progress: Optional[Callable[[Dict[str, Any]], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    resume: Optional[Dict[str, Any]] = None,
 ) -> AutoGradeResult:
     """基于当前参数执行目标允许的校正与风格,每个候选整体校验。
 
@@ -469,7 +487,18 @@ def auto_grade(
     """
     from .schemas import ExtractResult
 
+    def notify(stage, state, round_no=0, reason=None):
+        _check_cancelled(cancel_check)
+        if progress is not None:
+            progress({"stage": stage, "state": state, "round": round_no,
+                      **({"reason": reason} if reason else {})})
+        _check_cancelled(cancel_check)
+
+    notify("measure", "running")
     ctx = normalize_context(context)
+    resume = resume or {}
+    skip_correction = bool(resume.get("skip_correction"))
+    skip_style = bool(resume.get("skip_style"))
     base = clamp_params(parameter_snapshot(base_params))
     baseline_img = R.render_lut(R.lut_from_params(base), img)
     skin_mask = S.skin_mask_of(baseline_img)
@@ -477,10 +506,11 @@ def auto_grade(
     observations = Q.diagnose(stats0)
     issues = Q.diagnose_for_goal(stats0, ctx.goal_mode)
     limits = Q.limits_for(stats0)
+    notify("measure", "done")
     params = parameter_snapshot(base)
     stats_current = stats0
     steps: List[StepReport] = []
-    blocked: List[str] = []
+    blocked: List[str] = list(resume.get("blocked_reasons") or [])
     rejections: List[str] = []
     usage_total: Dict[str, Any] = {}
     model_attempted = False
@@ -502,11 +532,12 @@ def auto_grade(
     can_correct = bool(writable_fields(ctx, "correction"))
     if issues and ctx.goal_mode != "style_only" and not can_correct:
         blocked.append("基础校正的可调参数全部已锁定")
-    if client is not None and issues and can_correct:
+    if client is not None and issues and can_correct and not skip_correction:
         for round_no in range(1, max_rounds + 1):
             if len(steps) >= MAX_TOTAL_STEPS:
                 break
             model_attempted = True
+            notify("optimize", "running", round_no)
             try:
                 if proposer is None:
                     delta, diagnosis, usage = propose_correction(
@@ -517,12 +548,16 @@ def auto_grade(
                         client, stats_current, Q.diagnose_for_goal(stats_current, ctx.goal_mode),
                         parameter_snapshot(params), list(rejections))
                 model_succeeded = True
+            except AutoGradeCancelled:
+                raise
             except Exception as exc:
+                _check_cancelled(cancel_check)
                 model_failed = True
                 reason = f"模型调用失败({type(exc).__name__})"
                 blocked.append(reason)
                 report("optimize", round_no, reason)
                 break
+            _check_cancelled(cancel_check)
             _accumulate_usage(usage_total, usage)
             if not delta:
                 report("optimize", round_no, "模型未给出有效提议")
@@ -543,21 +578,28 @@ def auto_grade(
             report("optimize", round_no, diagnosis, delta, params != before, before=before)
             if Q.is_goal_met(stats_current, ctx.goal_mode):
                 break
+        correction_steps = [step for step in steps if step.stage == "optimize"]
+        notify("optimize", "done", reason=None if any(step.applied for step in correction_steps)
+               else "failed" if model_failed else "blocked" if rejections else "unchanged")
+    else:
+        notify("optimize", "skipped", reason=("continued" if skip_correction else "goal" if ctx.goal_mode == "style_only"
+               else "locked" if not can_correct else "no_issues" if not issues else "no_client"))
 
     style_params = None
     style_applied = False
     style_applied_params = None
-    style_rejections: List[str] = []
+    style_rejections: List[str] = list(resume.get("style_rejections") or [])
     can_style = bool(writable_fields(ctx, "style"))
     if ctx.goal_mode == "style_only" and not style:
         blocked.append("只调整风格模式需要提供风格描述")
     if style and not can_style:
         blocked.append("风格阶段的可调参数全部已锁定")
-    if style and client is not None and style_extractor is not None and can_style:
+    if style and client is not None and style_extractor is not None and can_style and not skip_style:
         for round_no in range(1, MAX_STYLE_ROUNDS + 1):
             if len(steps) >= MAX_TOTAL_STEPS:
                 break
             model_attempted = True
+            notify("style", "running", round_no)
             text = style
             if style_rejections:
                 text += "\n上一轮未应用的原因:" + ";".join(style_rejections) + "。请重新提出合法目标。"
@@ -570,13 +612,17 @@ def auto_grade(
                     {"intent": "describe", **extracted}).model_dump(exclude_none=True)
                 extracted.pop("intent", None)
                 model_succeeded = True
+            except AutoGradeCancelled:
+                raise
             except Exception as exc:
+                _check_cancelled(cancel_check)
                 model_failed = True
                 reason = f"风格提取失败({type(exc).__name__})"
                 style_rejections = [reason]
                 blocked.append(reason)
                 report("style", round_no, reason, reasons=style_rejections)
                 continue
+            _check_cancelled(cancel_check)
             if not extracted:
                 break
             style_params = {key: value for key, value in extracted.items()
@@ -601,15 +647,24 @@ def auto_grade(
             report("style", round_no, f"风格:{style}", style_params,
                    params != before, before=before)
             break
+        style_steps = [step for step in steps if step.stage == "style"]
+        notify("style", "done", reason=None if any(step.applied for step in style_steps)
+               else "failed" if any("失败" in reason for reason in style_rejections)
+               else "blocked" if style_rejections else "unchanged")
+    else:
+        notify("style", "skipped", reason="continued" if skip_style else "not_requested" if not style
+               else "locked" if not can_style else "no_client")
 
     # 仅在没有生效提议时应用规则,避免在风格成果上再次补偿。
     needs_rules = not any(step.applied for step in steps) and not Q.is_goal_met(stats_current, ctx.goal_mode)
-    if ctx.goal_mode == "natural" and needs_rules:
+    if ctx.goal_mode == "natural" and needs_rules and not skip_correction:
         if writable_fields(ctx, "rules"):
+            notify("rules", "running")
             before = parameter_snapshot(params)
             params, stats_current = conservative_iterative(
                 img, params, stats_baseline=stats0, skin_mask=skin_mask,
-                budget_origin=base, context=ctx, blocked_reasons=blocked)
+                budget_origin=base, context=ctx, blocked_reasons=blocked,
+                cancel_check=cancel_check)
             reasons = application_reasons(base, params, ctx, "rules")
             if reasons:
                 blocked.extend(reasons)
@@ -619,8 +674,14 @@ def auto_grade(
             if rules_applied:
                 diagnosis = "未启用模型,采用规则化保守调整" if client is None else "模型提议未生效,采用规则化保守调整"
                 report("optimize", 1 if client is None else 0, diagnosis, applied=True, before=before)
+            notify("rules", "done", reason=None if rules_applied else "blocked" if reasons else "unchanged")
         elif set(ctx.locked_fields) & {"exposure", "temp"}:
             blocked.append("规则兜底的可调参数已锁定")
+            notify("rules", "skipped", reason="locked")
+        else:
+            notify("rules", "skipped", reason="no_writable_fields")
+    else:
+        notify("rules", "skipped", reason="continued" if skip_correction else "goal" if ctx.goal_mode != "natural" else "not_needed")
 
     review = None
     review_skip_reason = None
@@ -633,15 +694,23 @@ def auto_grade(
     elif not can_correct and not (style and can_style):
         review_skip_reason = "locked"
     else:
+        notify("review", "running")
         after_img = R.render_lut(R.lut_from_params(params), img)
         review, usage, review_skip_reason = vision_review(
             client, baseline_img, after_img, style=style, context=ctx)
         _accumulate_usage(usage_total, usage)
+        notify("review", "done" if review_skip_reason is None else "skipped",
+               reason=review_skip_reason)
+    if review_skip_reason and review_skip_reason != "failed":
+        notify("review", "skipped", reason=review_skip_reason)
 
     changed = params != base
+    inherited_targets = resume.get("completed_style_targets") or {}
+    style_target_met = style_applied or (skip_style and bool(inherited_targets)
+                       and all(params.get(key) == value for key, value in inherited_targets.items()))
     if ctx.goal_mode == "style_only":
-        goal_status = "met" if style_applied else "unchanged" if style else "not_evaluated"
-    elif Q.is_goal_met(stats_current, ctx.goal_mode) and (not style or style_applied):
+        goal_status = "met" if style_target_met else "unchanged" if style else "not_evaluated"
+    elif Q.is_goal_met(stats_current, ctx.goal_mode) and (not style or style_target_met):
         goal_status = "met"
     else:
         goal_status = "partially_met" if changed else "unchanged"
@@ -655,6 +724,7 @@ def auto_grade(
         execution_status = "model"
     else:
         execution_status = "skipped"
+    _check_cancelled(cancel_check)
     return AutoGradeResult(
         params=params, steps=steps, issues=issues, observations=observations,
         style_params=style_params, style_applied=style_applied,

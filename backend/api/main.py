@@ -14,11 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api import auth, ratelimit
 from api.models import LutParamsModel, checked_metadata
+from api.asset_metadata import OrganizationFields, MetadataPatch
+from storage.library_metadata import organization_changes, normalized_text
+from fastapi import Query
 from agent.editing import EditingContext
 from lut_engine import RecipeError, apply_recipe, input_contract, neutral_recipe_params, validate_recipe, validate_input_contract
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
 from api.workspaces import router as workspace_router, require_workspace, recipe_http_error, ENGINE_VERSION, validation_slot
+from api.auto_jobs import router as auto_jobs_router
 
 logger = logging.getLogger("chroma.api")
 
@@ -36,14 +40,19 @@ class AssetMetadata(BaseModel):
         return checked_metadata(value)
 
 
-class LutCreate(AssetMetadata):
+class LutCreate(AssetMetadata, OrganizationFields):
     name: str = Field(min_length=1, max_length=255)
     description: str = Field("", max_length=4000)
     params: Optional[LutParamsModel] = None
     kind: Literal["full_snapshot", "portable_style"] = "full_snapshot"
 
+    @field_validator("name",mode="before")
+    @classmethod
+    def name_valid(cls,value):
+        return normalized_text(value,255)
 
-class LutUpdate(AssetMetadata):
+
+class LutUpdate(AssetMetadata, MetadataPatch):
     revision_id: Optional[int] = Field(None,ge=1)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=4000)
@@ -63,6 +72,11 @@ class LutOut(BaseModel):
     source: Optional[dict] = None
     workspace_id: Optional[str] = None
     revision_id: Optional[int] = None
+    tags: List[str] = Field(default_factory=list)
+    group: Optional[str] = None
+    favorite: bool = False
+    cover_id: str = "engine"
+    updated_at: str = ""
 
 
 class AssetApply(BaseModel):
@@ -153,12 +167,16 @@ def _record_to_out(rec: dict) -> LutOut:
         recipe=json.loads(rec["recipe_json"]) if rec.get("recipe_json") else None,
         input_contract=json.loads(rec["input_contract_json"]) if rec.get("input_contract_json") else None,
         source=json.loads(rec["source_json"]) if rec.get("source_json") else None,
+        tags=json.loads(rec["tags_json"]) if rec.get("tags_json") else [],
+        group=rec.get("group_name"),favorite=bool(rec.get("favorite",False)),
+        cover_id=rec.get("cover_id") or "engine",updated_at=rec.get("updated_at") or rec["created_at"],
     )
 
 
 app = FastAPI(title="CHROMA LUT API")
 db.init_db()
 app.include_router(workspace_router)
+app.include_router(auto_jobs_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -238,13 +256,29 @@ def create_lut(body: LutCreate, user: dict = Depends(auth.get_current_user)):
     if body.workspace_id:
         require_workspace(body.workspace_id,user["id"])
     params_json,metadata = _asset_content(body)
+    metadata.update(organization_changes(body.model_dump(exclude_unset=True)))
     lut_id = db.create_lut(user["id"],body.name,body.description,params_json,**metadata)
     return _record_to_out(db.get_lut(lut_id,user["id"]))
 
 
 @app.get("/api/luts", response_model=List[LutOut])
-def list_luts(user: dict = Depends(auth.get_current_user)):
-    return [_record_to_out(r) for r in db.list_luts(user["id"])]
+def list_luts(q: Optional[str]=Query(None,max_length=200),
+              kind: Optional[Literal["full_snapshot","portable_style"]]=None,
+              input: Optional[Literal["STD","NAT","VIVD","VLOG"]]=None,
+              favorite: Optional[bool]=None,group: Optional[str]=Query(None,max_length=48),
+              sort: Literal["created_desc","created_asc","updated_desc","updated_asc","name_asc","name_desc"]="created_desc",
+              user: dict=Depends(auth.get_current_user)):
+    try:
+        records = db.list_luts(user["id"],q=q,kind=kind,input_style=input,
+                              favorite=favorite,group=group,sort=sort)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+    return [_record_to_out(r) for r in records]
+
+
+@app.get("/api/luts/summary")
+def library_summary(user: dict=Depends(auth.get_current_user)):
+    return db.library_summary(user["id"])
 
 
 @app.get("/api/luts/{lut_id}", response_model=LutOut)
@@ -259,10 +293,33 @@ def get_lut(lut_id: int, user: dict = Depends(auth.get_current_user)):
 def update_lut(lut_id: int,body: LutUpdate,user: dict=Depends(auth.get_current_user)):
     if body.workspace_id:
         require_workspace(body.workspace_id,user["id"])
+    organization = organization_changes(body.model_dump(exclude_unset=True))
+    content_fields = {"params","kind","recipe","input_contract","source","workspace_id"}
+    supplied = body.model_dump(exclude_unset=True)
+    for key in ("params","kind"):
+        if supplied.get(key) is None:
+            supplied.pop(key,None)
+    def content(locked):
+        params_json,metadata = _asset_content(body,locked)
+        return params_json,{**metadata,**organization}
     try:
         rec = db.update_lut(lut_id,user["id"],name=body.name,description=body.description,
-                            build_content=lambda locked: _asset_content(body,locked),
-                            expected_revision_id=body.revision_id)
+                            build_content=content if content_fields & set(supplied) else None,
+                            expected_revision_id=body.revision_id,**organization)
+    except db.RevisionConflictError as exc:
+        raise HTTPException(409,{"code":"revision_conflict","message":str(exc),
+                                 "current_revision_id":exc.current_revision_id}) from exc
+    if not rec:
+        raise HTTPException(404,"LUT not found")
+    return _record_to_out(rec)
+
+
+@app.patch("/api/luts/{lut_id}/metadata",response_model=LutOut)
+def update_asset_metadata(lut_id: int,body: MetadataPatch,user: dict=Depends(auth.get_current_user)):
+    values = body.model_dump(exclude_unset=True)
+    try:
+        rec = db.update_lut(lut_id,user["id"],name=values.get("name"),description=values.get("description"),
+                            expected_revision_id=values.get("revision_id"),**organization_changes(values))
     except db.RevisionConflictError as exc:
         raise HTTPException(409,{"code":"revision_conflict","message":str(exc),
                                  "current_revision_id":exc.current_revision_id}) from exc
@@ -587,6 +644,7 @@ class AutoGradeOut(BaseModel):
     execution_status: str = "skipped"
     blocked_reasons: List[str] = Field(default_factory=list)
     observations: List[AutoGradeIssueOut] = Field(default_factory=list)
+    continued_from: Optional[str] = None
 
 
 class AutoGradeReportOut(AutoGradeOut):
@@ -632,10 +690,22 @@ def auto_grade_endpoint(
 
     `base_params` **必填且不接受默认值**:增量语义下「用默认值兜底」会把用户手调静默抹掉。
     """
-    from photo import render as photo_render
+    img, parsed, ctx = _prepare_auto_grade(request, file, base_params, context,
+                                           workspace_id, sample_origin, user)
+    _reserve_auto_grade(user["id"])
+    out = _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
+                              workspace_id, source_digest, main_sample_id)
+    try:
+        out.session_id = _persist_auto_grade(user["id"], out)
+    except Exception as exc:
+        logger.exception("auto/grade 结果保存失败")
+        raise HTTPException(status_code=503, detail="修图结果保存失败,请稍后重试") from exc
+    return out
+
+
+def _prepare_auto_grade(request, file, base_params, context, workspace_id, sample_origin, user,
+                        *, include_digest=False):
     from photo import stats as photo_stats
-    from agent.auto import auto_grade as run_auto_grade
-    from agent.llm import BudgetExhaustedError
     from photo.types import ImageTooLargeError, PhotoError
 
     # 1) 参数解析(base_params 非法直接 422)
@@ -667,9 +737,14 @@ def auto_grade_endpoint(
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except PhotoError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if include_digest:
+        import hashlib
+        return img, parsed, ctx, hashlib.sha256(raw).hexdigest()
+    return img, parsed, ctx
 
-    # 校验通过后才扣配额；先原子预留再执行昂贵的模型调用。
-    retry = db.reserve_auto_grade_call(user["id"], ratelimit.AUTO_MAX_PER_WINDOW,
+
+def _reserve_auto_grade(user_id):
+    retry = db.reserve_auto_grade_call(user_id, ratelimit.AUTO_MAX_PER_WINDOW,
                                        ratelimit.AUTO_WINDOW_SECONDS)
     if retry:
         raise HTTPException(
@@ -678,7 +753,13 @@ def auto_grade_endpoint(
             headers={"Retry-After": str(retry)},
         )
 
-    # 3) 编排
+
+def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
+                        workspace_id, source_digest, main_sample_id,
+                        *, progress=None, cancel_check=None, resume=None, continued_from=None):
+    from agent.auto import AutoGradeCancelled, auto_grade as run_auto_grade
+    from agent.llm import BudgetExhaustedError
+
     style_text = (style or "").strip()[:200] or None
     client = None
     style_extractor = None
@@ -702,7 +783,12 @@ def auto_grade_endpoint(
             max_rounds=max(1, min(3, int(max_rounds))),
             style_extractor=style_extractor,
             **({"context":ctx} if ctx is not None else {}),
+            **({"progress": progress} if progress is not None else {}),
+            **({"cancel_check": cancel_check} if cancel_check is not None else {}),
+            **({"resume": resume} if resume is not None else {}),
         )
+    except AutoGradeCancelled:
+        raise
     except BudgetExhaustedError as exc:
         # 可操作提示:这不是「服务挂了」,而是预算配置需要调整
         logger.warning("auto/grade 预算耗尽: %s", exc)
@@ -749,20 +835,13 @@ def auto_grade_endpoint(
         blocked_reasons=result.blocked_reasons,
         observations=[AutoGradeIssueOut(code=i.code,severity=i.severity,evidence=i.evidence)
                       for i in result.observations],
+        continued_from=continued_from,
     )
-    # 4) 落库(图片不落库,只存参数与说明摘要)
-    try:
-        out.session_id = _persist_auto_grade(user["id"], out)
-    except Exception as exc:
-        logger.exception("auto/grade 结果保存失败")
-        raise HTTPException(status_code=503, detail="修图结果保存失败,请稍后重试") from exc
     return out
 
 
 def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> int:
     """按工作区关联保存报告;旧客户端仍使用原有自动会话。"""
-    sid = db.workspace_session(out.workspace_id,user_id) if out.workspace_id else db.get_or_create_auto_session(user_id)
-    out.session_id = sid
     goal_labels = {"met": "已满足本次可测目标", "partially_met": "目标部分完成",
                    "unchanged": "保留原参数", "not_evaluated": "尚未评估"}
     execution_labels = {"model": "模型执行", "rules_only": "仅规则调整",
@@ -780,10 +859,9 @@ def _persist_auto_grade(user_id: int, out: AutoGradeOut) -> int:
         lines.append(f"  视觉复核:{out.review}")
     elif out.review_skip_reason:
         lines.append(f"  视觉复核未执行({out.review_skip_reason})")
-    db.add_message(user_id, sid, "agent", "\n".join(lines),
-                   out.params.model_dump_json(),None,out.model_dump_json())
-    if out.workspace_id:
-        db.add_workspace_report(out.workspace_id,user_id,"auto",out.model_dump_json())
+    sid = db.persist_auto_grade(user_id, out.workspace_id, "\n".join(lines),
+                                out.params.model_dump_json(), out.model_dump())
+    out.session_id = sid
     return sid
 
 

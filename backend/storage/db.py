@@ -9,6 +9,7 @@ from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 from pymysql.cursors import DictCursor
+from .library_metadata import CONTENT_COLUMNS, ORGANIZATION_COLUMNS, query_parts, values_equal
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -158,12 +159,18 @@ def init_db():
                 "ALTER TABLE luts ADD COLUMN source_json MEDIUMTEXT",
                 "ALTER TABLE luts ADD COLUMN workspace_id CHAR(36)",
                 "ALTER TABLE luts ADD COLUMN revision_id BIGINT",
+                "ALTER TABLE luts ADD COLUMN tags_json TEXT",
+                "ALTER TABLE luts ADD COLUMN group_name VARCHAR(48)",
+                "ALTER TABLE luts ADD COLUMN favorite TINYINT NOT NULL DEFAULT 0",
+                "ALTER TABLE luts ADD COLUMN cover_id VARCHAR(32) NOT NULL DEFAULT 'engine'",
+                "ALTER TABLE luts ADD COLUMN updated_at VARCHAR(64) NOT NULL DEFAULT ''",
             ):
                 try:
                     cur.execute(ddl)
                 except pymysql.err.OperationalError as exc:
                     if exc.args[0] != 1060:
                         raise
+            cur.execute("UPDATE luts SET updated_at=created_at WHERE updated_at=''")
             cur.execute("""CREATE TABLE IF NOT EXISTS workspaces (
                 id CHAR(36) PRIMARY KEY, user_id INT NOT NULL, session_id INT,
                 name VARCHAR(255) NOT NULL, created_at VARCHAR(64) NOT NULL,
@@ -200,7 +207,10 @@ def _lut_snapshot(record):
             "recipe": json.loads(record["recipe_json"]) if record.get("recipe_json") else None,
             "input_contract": json.loads(record["input_contract_json"]) if record.get("input_contract_json") else None,
             "source": json.loads(record["source_json"]) if record.get("source_json") else None,
-            "workspace_id": record.get("workspace_id")}
+            "workspace_id":record.get("workspace_id"),
+            "tags":json.loads(record["tags_json"]) if record.get("tags_json") else [],
+            "group":record.get("group_name"),"favorite":bool(record.get("favorite",False)),
+            "cover_id":record.get("cover_id") or "engine","updated_at":record.get("updated_at") or record["created_at"]}
 
 
 def _append_lut_revision(cur, record, number):
@@ -214,14 +224,17 @@ def _append_lut_revision(cur, record, number):
 
 def create_lut(user_id: int, name: str, description: str, params_json: str, *,
                kind="full_snapshot", recipe_json=None, input_contract_json=None,
-               source_json=None, workspace_id=None) -> int:
+               source_json=None,workspace_id=None,tags_json=None,group_name=None,
+               favorite=False,cover_id="engine") -> int:
     created_at = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("INSERT INTO luts (user_id,name,description,params_json,created_at,kind,recipe_json,"
-                        "input_contract_json,source_json,workspace_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "input_contract_json,source_json,workspace_id,tags_json,group_name,favorite,cover_id,updated_at) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (user_id,name,description,params_json,created_at,kind,recipe_json,
-                         input_contract_json,source_json,workspace_id))
+                         input_contract_json,source_json,workspace_id,tags_json or "[]",group_name,
+                         favorite,cover_id,created_at))
             last_id = cur.lastrowid
             cur.execute("SELECT * FROM luts WHERE id=%s", (last_id,))
             revision_id = _append_lut_revision(cur, cur.fetchone(), 1)
@@ -230,11 +243,24 @@ def create_lut(user_id: int, name: str, description: str, params_json: str, *,
     return last_id
 
 
-def list_luts(user_id: int):
+def list_luts(user_id: int,**query):
+    filters,values,order = query_parts(**query)
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM luts WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+            sql = "SELECT * FROM luts WHERE user_id=%s"
+            if filters:
+                sql += " AND " + " AND ".join(filters)
+            cur.execute(sql+" ORDER BY "+order,(user_id,*values))
             return cur.fetchall()
+
+
+def library_summary(user_id):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM luts WHERE user_id=%s",(user_id,))
+            total = cur.fetchone()["total"]
+            cur.execute("SELECT DISTINCT group_name FROM luts WHERE user_id=%s AND group_name IS NOT NULL ORDER BY group_name",(user_id,))
+            return {"total":total,"groups":[row["group_name"] for row in cur.fetchall()]}
 
 
 def get_lut(lut_id: int, user_id: int):
@@ -266,20 +292,30 @@ def update_lut(lut_id: int,user_id: int,name=None,description=None,params_json=N
             changes = {key:value for key,value in {"name":name,"description":description,
                        "params_json":params_json}.items() if value is not None}
             changes.update({key:value for key,value in metadata.items()
-                            if key in {"kind","recipe_json","input_contract_json","source_json","workspace_id"}})
-            cur.execute("SELECT MAX(revision_number) AS n FROM lut_revisions WHERE lut_id=%s",(lut_id,))
-            number = cur.fetchone()["n"] or 0
-            if not number:
-                _append_lut_revision(cur,record,1)
-                number = 1
+                            if key in CONTENT_COLUMNS | ORGANIZATION_COLUMNS})
+            changes = {key:value for key,value in changes.items() if not values_equal(key,record.get(key),value)}
+            if not changes:
+                return record
+            new_revision = bool(set(changes) & CONTENT_COLUMNS)
+            number = 0
+            if new_revision:
+                cur.execute("SELECT MAX(revision_number) AS n FROM lut_revisions WHERE lut_id=%s",(lut_id,))
+                number = cur.fetchone()["n"] or 0
+                if not number:
+                    _append_lut_revision(cur,record,1)
+                    number = 1
             record.update(changes)
+            record["updated_at"] = datetime.now(timezone.utc).isoformat()
             cur.execute("UPDATE luts SET name=%s,description=%s,params_json=%s,kind=%s,recipe_json=%s,"
-                        "input_contract_json=%s,source_json=%s,workspace_id=%s WHERE id=%s AND user_id=%s",
+                        "input_contract_json=%s,source_json=%s,workspace_id=%s,tags_json=%s,group_name=%s,"
+                        "favorite=%s,cover_id=%s,updated_at=%s WHERE id=%s AND user_id=%s",
                         (record["name"],record["description"],record["params_json"],record["kind"],record["recipe_json"],
-                         record["input_contract_json"],record["source_json"],record["workspace_id"],lut_id,user_id))
-            revision_id = _append_lut_revision(cur,record,number+1)
-            cur.execute("UPDATE luts SET revision_id=%s WHERE id=%s",(revision_id,lut_id))
-            record["revision_id"] = revision_id
+                         record["input_contract_json"],record["source_json"],record["workspace_id"],record["tags_json"],
+                         record["group_name"],record["favorite"],record["cover_id"],record["updated_at"],lut_id,user_id))
+            if new_revision:
+                revision_id = _append_lut_revision(cur,record,number+1)
+                cur.execute("UPDATE luts SET revision_id=%s WHERE id=%s",(revision_id,lut_id))
+                record["revision_id"] = revision_id
         conn.commit()
     return record
 
@@ -600,6 +636,62 @@ def add_message(
             last_id = cur.lastrowid
         conn.commit()
         return last_id
+
+
+def persist_auto_grade(user_id, workspace_id, content, params_json, payload):
+    """报告、消息及新会话关联共同提交；失败不留下可恢复的候选。"""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM users WHERE id=%s FOR UPDATE", (user_id,))
+                if not cur.fetchone():
+                    raise ValueError("user_not_found")
+                if workspace_id:
+                    cur.execute("SELECT * FROM workspaces WHERE id=%s AND user_id=%s FOR UPDATE",
+                                (workspace_id, user_id))
+                    workspace = cur.fetchone()
+                    if not workspace:
+                        raise ValueError("workspace_not_found")
+                    sid = workspace["session_id"]
+                    if sid:
+                        cur.execute("SELECT id FROM sessions WHERE id=%s AND user_id=%s FOR UPDATE",
+                                    (sid, user_id))
+                        if not cur.fetchone():
+                            sid = None
+                    if not sid:
+                        cur.execute("INSERT INTO sessions (user_id,title,is_auto,created_at) VALUES (%s,%s,0,%s)",
+                                    (user_id, workspace["name"], now))
+                        sid = cur.lastrowid
+                        cur.execute("UPDATE workspaces SET session_id=%s WHERE id=%s AND user_id=%s",
+                                    (sid, workspace_id, user_id))
+                else:
+                    cur.execute("SELECT id FROM sessions WHERE user_id=%s AND is_auto=1 ORDER BY id ASC LIMIT 1 FOR UPDATE",
+                                (user_id,))
+                    session = cur.fetchone()
+                    if session:
+                        sid = session["id"]
+                    else:
+                        cur.execute("INSERT INTO sessions (user_id,title,is_auto,created_at) VALUES (%s,%s,1,%s)",
+                                    (user_id, "自动修图", now))
+                        sid = cur.lastrowid
+                payload_json = json.dumps({**payload, "session_id": sid}, ensure_ascii=False, allow_nan=False)
+                cur.execute("INSERT INTO messages (user_id,session_id,role,content,params_json,cube_text,payload_json,created_at) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                            (user_id, sid, "agent", content, params_json, None, payload_json, now))
+                if workspace_id:
+                    cur.execute("INSERT INTO workspace_reports (user_id,workspace_id,kind,payload_json,created_at) "
+                                "VALUES (%s,%s,%s,%s,%s)", (user_id, workspace_id, "auto", payload_json, now))
+                    cur.execute("SELECT id FROM workspace_reports WHERE user_id=%s AND workspace_id=%s AND kind=%s "
+                                "ORDER BY id DESC LIMIT 50,1000", (user_id, workspace_id, "auto"))
+                    old = [row["id"] for row in cur.fetchall()]
+                    if old:
+                        cur.execute("DELETE FROM workspace_reports WHERE id IN (" + ",".join(["%s"] * len(old)) + ")", old)
+            conn.commit()
+            return sid
+        except BaseException:
+            conn.rollback()
+            raise
 
 
 def list_messages(session_id: int, user_id: int):

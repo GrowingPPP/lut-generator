@@ -1,0 +1,343 @@
+.diagnostics-panel {
+  min-width: 0;
+  color: var(--text, #e9e9ec);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.diagnostics-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.diagnostics-heading h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.diagnostics-heading p {
+  margin: 0;
+  color: var(--muted, #9a9aa5);
+  overflow-wrap: anywhere;
+}
+
+.diagnostics-local-tag {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid #725235;
+  border-radius: 5px;
+  color: #efbb7a;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.diagnostics-empty {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #26262e);
+  border-radius: 8px;
+  background: var(--panel, #16161a);
+  color: var(--muted, #9a9aa5);
+}
+
+.diagnostics-empty[role='alert'] {
+  border-color: #765646;
+  color: #e8b498;
+}
+
+.diagnostics-measure-note {
+  margin-bottom: 12px;
+  color: var(--muted, #9a9aa5);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.diagnostics-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.diagnostics-metric {
+  padding: 12px 14px;
+  border: 1px solid var(--line, #26262e);
+  border-radius: 8px;
+  background: var(--panel, #16161a);
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnostics-metric.attention {
+  border-color: #795632;
+  background: #211c17;
+}
+
+.diagnostics-metric h4 {
+  margin: 0 0 4px;
+  color: var(--muted, #9a9aa5);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.diagnostics-metric strong {
+  display: block;
+  color: #efbb7a;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.diagnostics-metric p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.diagnostics-metric > span {
+  color: var(--muted, #9a9aa5);
+  font-size: 11px;
+}
+
+.diagnostics-plot-legend,
+.diagnostics-mask-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 15px;
+  color: var(--muted, #9a9aa5);
+  font-size: 11px;
+}
+
+.diagnostics-plot-legend {
+  margin-bottom: 10px;
+}
+
+.diagnostics-plot-legend span,
+.diagnostics-mask-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.diagnostics-plot-legend i {
+  display: inline-block;
+  width: 17px;
+  border-top: 2px solid #efbb7a;
+}
+
+.diagnostics-plot-legend i.baseline {
+  border-top: 2px dashed #b6b6c0;
+}
+
+.diagnostics-plot-legend small {
+  font-size: inherit;
+}
+
+.diagnostics-histograms,
+.diagnostics-shapes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.diagnostics-histogram,
+.diagnostics-shape {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #26262e);
+  border-radius: 8px;
+  background: var(--panel, #16161a);
+}
+
+.diagnostics-histogram figcaption {
+  margin-bottom: 7px;
+  color: var(--diagnostics-channel);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diagnostics-panel svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.diagnostics-panel svg text {
+  fill: var(--muted, #9a9aa5);
+  font-family: inherit;
+  font-size: 10px;
+}
+
+.diagnostics-grid {
+  fill: none;
+  stroke: var(--line, #26262e);
+  stroke-width: 1;
+}
+
+.diagnostics-histogram-fill {
+  fill: var(--diagnostics-channel);
+  opacity: 0.13;
+}
+
+.diagnostics-histogram-current {
+  fill: none;
+  stroke: var(--diagnostics-channel);
+  stroke-width: 1.8;
+}
+
+.diagnostics-histogram-baseline,
+.diagnostics-reference {
+  fill: none;
+  stroke: #b6b6c0;
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+  opacity: 0.8;
+}
+
+.diagnostics-risk-details {
+  margin-top: 15px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line, #26262e);
+  border-bottom: 1px solid var(--line, #26262e);
+}
+
+.diagnostics-risk-details summary {
+  color: var(--text, #e9e9ec);
+  cursor: pointer;
+}
+
+.diagnostics-risk-details summary:focus-visible,
+.diagnostics-overlay-control input:focus-visible {
+  outline: 2px solid var(--accent, #e2a35a);
+  outline-offset: 4px;
+}
+
+.diagnostics-overlay-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin: 12px 0;
+  cursor: pointer;
+}
+
+.diagnostics-overlay-control input {
+  margin: 0;
+  accent-color: var(--accent, #e2a35a);
+}
+
+.diagnostics-risk-preview {
+  position: relative;
+  width: 100%;
+  margin: 0 auto 12px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #09090c;
+}
+
+.diagnostics-risk-preview canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.diagnostics-risk-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.diagnostics-risk-overlay[hidden] {
+  display: none;
+}
+
+.diagnostics-mask-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #ffbe50;
+}
+
+.diagnostics-mask-legend i.shadow {
+  background: #5fa5ff;
+}
+
+.diagnostics-footnote {
+  margin: 12px 0 20px;
+  color: var(--muted, #9a9aa5);
+  font-size: 11px;
+}
+
+.diagnostics-shapes {
+  margin-top: 18px;
+}
+
+.diagnostics-shape figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.diagnostics-shape figcaption strong {
+  font-weight: 600;
+}
+
+.diagnostics-shape figcaption span {
+  color: var(--muted, #9a9aa5);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnostics-shape p {
+  margin: 8px 0 0;
+  color: var(--muted, #9a9aa5);
+  font-size: 11px;
+}
+
+.diagnostics-shape-line {
+  fill: none;
+  stroke: #efbb7a;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.diagnostics-hue-area {
+  fill: #efbb7a;
+  opacity: 0.12;
+}
+
+.diagnostics-hue-center {
+  stroke: #f2f2f4;
+  stroke-width: 1.2;
+  stroke-dasharray: 2 3;
+  opacity: 0.8;
+}
+
+@media (max-width: 480px) {
+  .diagnostics-shapes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diagnostics-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .diagnostics-histogram,
+  .diagnostics-metric {
+    padding: 9px 10px;
+  }
+}
+
+@media (max-width: 340px) {
+  .diagnostics-histograms,
+  .diagnostics-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
