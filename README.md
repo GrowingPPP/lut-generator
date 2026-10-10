@@ -247,5 +247,6 @@ make admin          # 创建/重置本地账号
 | [docs/lut-design-remediation.md](docs/lut-design-remediation.md) | LUT 参数设计问题、修订任务、验收与设备校准限制 |
 | [docs/specs/technical.md](docs/specs/technical.md) | 接口签名、数据结构、阈值常量、精度包络、API 契约 |
 | [docs/specs/ui-design.md](docs/specs/ui-design.md) | 线框、组件规格、状态机、完整微文案 |
+| [docs/specs/style-workspace-design.md](docs/specs/style-workspace-design.md) | 待实施方案：创作目标、参数保护、草稿与撤销、可复用风格、多样张验证、版本比较 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |
 | [docs/leftover-issues.md](docs/leftover-issues.md) | 已知问题的记录与处理结果 |
