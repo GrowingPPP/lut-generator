@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import ThemePicker from './components/ThemePicker.jsx'
 import { applyLUTToImageData, defaultParams, generateLUT } from './lib/lutEngine.js'
 
 // 首屏展示的样张与用它演示的影调。参数刻意选成产品 UI 里也能手调出来的值,
@@ -240,6 +241,7 @@ export default function LandingView({ onEnter }) {
           <a href="#lumix">机内烧录</a>
           <a href="#faq">常见问题</a>
         </div>
+        <ThemePicker />
         <button className="btn btn-primary" onClick={onEnter}>开始生成</button>
       </nav>
 

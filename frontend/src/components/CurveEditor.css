@@ -1,34 +1,36 @@
 .curve-editor { display: grid; gap: 12px; min-width: 0; container-type: inline-size; }
 .curve-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.curve-editor-heading h3 { margin: 0; font-size: 15px; font-weight: 600; color: #e7e4df; }
-.curve-editor-heading span, .curve-editor-help { color: #bbb9c5; font-size: 12px; line-height: 1.6; }
+.curve-editor-heading h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.curve-editor-heading span, .curve-editor-help { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .curve-editor-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.curve-channel { --curve-color: #f0c68d; display: grid; align-content: start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid #45414b; border-radius: 8px; background: #1c1b21; }
+.curve-channel { --curve-color: #f0c68d; display: grid; align-content: start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--linestrong); border-radius: 8px; background: var(--panel2); }
 .curve-channel.channel-r { --curve-color: #f0a09c; }
 .curve-channel.channel-g { --curve-color: #a1d8b3; }
 .curve-channel.channel-b { --curve-color: #a6c5f4; }
 .curve-channel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.curve-channel-heading h4 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--curve-color); font-size: 14px; font-weight: 600; }
-.curve-channel-heading > span { color: #b5b2bf; font-size: 11px; }
+.curve-channel-heading h4 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+.curve-channel-heading > span { color: var(--muted); font-size: 11px; }
 .curve-channel-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--curve-color); flex: 0 0 auto; }
-.curve-editor button { border: 1px solid #46434a; border-radius: 6px; background: #29282e; padding: 7px 10px; color: #d6d6de; font: inherit; font-size: 12px; cursor: pointer; }
-.curve-editor button:disabled { color: #a2a1aa; cursor: default; }
-.curve-editor button:focus-visible, .curve-point:focus-visible { outline: 2px solid var(--curve-color); outline-offset: 3px; }
-.curve-editor-graph { display: block; width: calc(100% - 16px); max-width: 320px; justify-self: center; aspect-ratio: 1; margin: 8px; overflow: visible; background: #222127; border: 1px solid #55515e; border-radius: 2px; touch-action: none; color: var(--curve-color); }
-.curve-grid { stroke: #45424e; stroke-width: .3; fill: none; }
-.curve-identity { stroke: #77727f; stroke-width: .35; stroke-dasharray: 2 2; fill: none; }
+.curve-editor button { border: 1px solid var(--linestrong); border-radius: 6px; background: var(--field); padding: 7px 10px; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.curve-editor button:hover:not(:disabled) { background: var(--hover); }
+.curve-editor button:disabled { color: var(--muted); cursor: default; }
+.curve-editor button:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.curve-point:focus-visible { outline: 2px solid var(--curve-color); outline-offset: 3px; }
+.curve-editor-graph { display: block; width: calc(100% - 16px); max-width: 320px; justify-self: center; aspect-ratio: 1; margin: 8px; overflow: visible; background: var(--photo-surround); border: 1px solid var(--photo-line); border-radius: 2px; touch-action: none; color: var(--curve-color); }
+.curve-grid { stroke: var(--photo-line); stroke-width: .3; fill: none; }
+.curve-identity { stroke: var(--photo-muted); stroke-width: .35; stroke-dasharray: 2 2; fill: none; }
 .curve-line { stroke: currentColor; stroke-width: .8; fill: none; pointer-events: none; }
-.curve-point { stroke: #222127; stroke-width: .65; fill: currentColor; cursor: grab; }
+.curve-point { stroke: var(--photo-surround); stroke-width: .65; fill: currentColor; cursor: grab; }
 .curve-point[aria-disabled="true"] { cursor: default; }
 .curve-point:active { cursor: grabbing; }
 .curve-editor-help { margin: 0; }
 .curve-editor-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.curve-editor-coordinates label { display: grid; gap: 6px; color: #d6d6de; font-size: 12px; }
-.curve-editor-coordinates input { width: 100%; min-width: 0; box-sizing: border-box; color: var(--curve-color); background: #25242b; border: 1px solid #55505e; border-radius: 6px; padding: 8px; font: inherit; font-variant-numeric: tabular-nums; }
-.curve-editor-coordinates input:focus-visible { outline: 2px solid var(--curve-color); outline-offset: 3px; }
-.curve-editor-coordinates input:disabled { color: #aaa7b0; }
+.curve-editor-coordinates label { display: grid; gap: 6px; color: var(--text); font-size: 12px; }
+.curve-editor-coordinates input { width: 100%; min-width: 0; box-sizing: border-box; color: var(--accent-strong); background: var(--field); border: 1px solid var(--linestrong); border-radius: 6px; padding: 8px; font: inherit; font-variant-numeric: tabular-nums; }
+.curve-editor-coordinates input:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.curve-editor-coordinates input:disabled { color: var(--muted); }
 .curve-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.curve-editor-actions span { flex: 1 1 100%; font-size: 12px; color: #c5c2cb; font-variant-numeric: tabular-nums; }
+.curve-editor-actions span { flex: 1 1 100%; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 @container (min-width: 960px) {
   .curve-editor-panels { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

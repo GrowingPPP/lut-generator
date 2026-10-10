@@ -1,19 +1,19 @@
 .imported-lut-panel { display: grid; gap: 12px; min-width: 0; }
 .imported-lut-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.imported-lut-heading h3 { margin: 0; font-size: 15px; color: #e7e4df; }
-.imported-lut-panel button { border: 1px solid #756047; color: #f0c68d; background: #332c26; border-radius: 6px; font: inherit; font-size: 12px; padding: 7px 10px; cursor: pointer; }
-.imported-lut-panel button:disabled { color: #a9a3a0; border-color: #514943; cursor: default; }
-.imported-lut-panel label { font-size: 13px; color: #d6d6de; line-height: 1.5; }
+.imported-lut-heading h3 { margin: 0; font-size: 15px; color: var(--text); }
+.imported-lut-panel button { border: 1px solid var(--accent-line); color: var(--accent-strong); background: var(--accent-soft); border-radius: 6px; font: inherit; font-size: 12px; padding: 7px 10px; cursor: pointer; }
+.imported-lut-panel button:disabled { color: var(--muted); border-color: var(--linestrong); cursor: default; }
+.imported-lut-panel label { font-size: 13px; color: var(--text); line-height: 1.5; }
 .imported-lut-choice, .imported-lut-form > label, .imported-lut-signals label { display: grid; gap: 6px; min-width: 0; }
-.imported-lut-panel select, .imported-lut-panel input[type="file"] { min-width: 0; width: 100%; box-sizing: border-box; color: #d6d6de; background: #25242b; border: 1px solid #4a4650; border-radius: 6px; padding: 8px; font: inherit; font-size: 12px; }
+.imported-lut-panel select, .imported-lut-panel input[type="file"] { min-width: 0; width: 100%; box-sizing: border-box; color: var(--text); background: var(--field); border: 1px solid var(--linestrong); border-radius: 6px; padding: 8px; font: inherit; font-size: 12px; }
 .imported-lut-panel select { text-overflow: ellipsis; }
-.imported-lut-panel :focus-visible { outline: 2px solid #f0c68d; outline-offset: 3px; }
-.imported-lut-help { margin: 0; font-size: 12px; line-height: 1.65; color: #b8b4be; }
+.imported-lut-panel :focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.imported-lut-help { margin: 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
 .imported-lut-strength { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.imported-lut-strength output { color: #f0c68d; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.imported-lut-strength input { grid-column: 1 / -1; width: 100%; min-width: 0; accent-color: #d9ad78; }
-.imported-lut-form { display: grid; gap: 12px; padding: 12px; border: 1px solid #514943; border-radius: 8px; background: #26232a; }
+.imported-lut-strength output { color: var(--accent-strong); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.imported-lut-strength input { grid-column: 1 / -1; width: 100%; min-width: 0; accent-color: var(--accent); }
+.imported-lut-form { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--linestrong); border-radius: 8px; background: var(--panel2); }
 .imported-lut-signals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .imported-lut-form .imported-lut-confirm { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; }
-.imported-lut-confirm input { flex: 0 0 auto; margin: 4px 0 0; accent-color: #d9ad78; }
-.imported-lut-status { color: #e2bb8b; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; margin: 0; }
+.imported-lut-confirm input { flex: 0 0 auto; margin: 4px 0 0; accent-color: var(--accent); }
+.imported-lut-status { color: var(--warn); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; margin: 0; }

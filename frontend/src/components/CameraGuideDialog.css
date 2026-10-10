@@ -1,5 +1,5 @@
 .camera-guide {
-  color: #e7e6eb;
+  color: var(--text);
 }
 .camera-guide p,
 .camera-guide li {
@@ -10,7 +10,7 @@
   font-size: 15px;
 }
 .camera-guide a {
-  color: #f3bd76;
+  color: var(--accent-strong);
   text-underline-offset: 3px;
 }
 .camera-guide summary {
@@ -19,9 +19,9 @@
 }
 .camera-guide select {
   margin-left: 12px;
-  color: #f1f0f4;
-  background: #222229;
-  border: 1px solid #55545f;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--linestrong);
   padding: 7px 10px;
   border-radius: 6px;
 }
@@ -29,13 +29,13 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  background: #202025;
-  border: 1px solid #44434e;
+  background: var(--panel2);
+  border: 1px solid var(--linestrong);
   border-radius: 10px;
   padding: 16px;
 }
 .camera-contract dt {
-  color: #bdbbc6;
+  color: var(--muted);
   font-size: 12px;
 }
 .camera-contract dd {
@@ -45,25 +45,25 @@
 }
 .camera-sources {
   font-size: 12px;
-  color: #c2c0ca;
+  color: var(--muted);
 }
 .sample-input-note {
   margin: 8px 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #c9c7d0;
+  color: var(--muted);
 }
 .sample-input-note strong {
   font-size: 12px;
-  color: #e6e3ee;
+  color: var(--text);
 }
 .sample-input-note .metadata-warning {
-  color: #f3bd76;
+  color: var(--warn);
 }
 .sample-input-help {
   font-size: 12px;
   line-height: 1.6;
-  color: #d9d6e0;
+  color: var(--muted);
 }
 .sample-input-help button {
   margin-top: 6px;
@@ -73,13 +73,13 @@
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #494754;
+  border: 1px solid var(--linestrong);
   border-radius: 8px;
 }
 .asset-save-metadata label {
   display: grid;
   gap: 6px;
-  color: #dcd9e5;
+  color: var(--text);
 }
 .asset-save-metadata input,
 .asset-save-metadata textarea,
@@ -87,9 +87,9 @@
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  background: #212128;
-  color: #f1eef7;
-  border: 1px solid #575360;
+  background: var(--field);
+  color: var(--text);
+  border: 1px solid var(--linestrong);
   border-radius: 6px;
 }
 .asset-save-metadata .favorite-option {

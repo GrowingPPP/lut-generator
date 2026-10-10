@@ -17,6 +17,7 @@
 - **图像诊断**:选中真实样张并确认匹配输入后，显示缩小预览的亮度/RGB 直方图、裁切风险与技术中性基线差异；提供风险叠加和现有曲线/局部色相范围示意
 - **资产库组织**:搜索名称/描述/标签，按种类、输入、收藏和分组筛选，并按时间/名称排序；标签、描述、收藏、分组、内置封面编辑独立保存，纯信息修改不新增调色修订
 - **自动修图过程控制**:显示服务端真实阶段，支持请求取消、安全重试与部分完成结果续跑；请求幂等恢复，续跑核对当前参数与照片来源；取消在安全边界确认后生效，保存开始后会明确提示不能取消
+- **界面主题**：右上角可选择深色、中性灰、浅色或跟随系统；立即切换并保存本机偏好，跨标签页同步。照片舞台与图表保持固定中性背景，切换不改变照片像素、参数或导出结果。
 
 新增图像与调色扩展：
 
@@ -60,7 +61,8 @@
 │   ├── src/components/    # 工作区工具条、样张、版本、保存候选、比较与自动修图报告
 │   ├── src/hooks/         # useWorkspace(草稿与历史)、usePreview(WebGL 预览生命周期)
 │   ├── src/App.jsx        # 生成页编排
-│   ├── src/App.css        # 全部样式
+│   ├── src/App.css        # 通用布局与控件样式
+│   ├── src/themes.css     # 深色、中性灰、浅色语义配色
 │   ├── scripts/           # 一致性与前端单测脚本
 │   └── prototype/         # UI 原型(HTML,含可交互的自动修图原型)
 ├── docs/                  # 设计文档与遗留问题清单
@@ -313,5 +315,6 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 | [docs/specs/generation-layout-review.md](docs/specs/generation-layout-review.md) | 生成页布局评估、照片与任务工具的重构方案、AI 状态表达、实施任务及布局概念 |
 | [docs/specs/sample-photo-compatibility.md](docs/specs/sample-photo-compatibility.md) | 相机 JPEG 主照片与缩略图兼容、明确 Adobe RGB 转换、上传确认及实际样张验收 |
 | [docs/specs/ai-retouch-photo-consistency.md](docs/specs/ai-retouch-photo-consistency.md) | 实际模型修图、预览与原尺寸导出的像素核对、JPEG 压缩边界及修图质量发现 |
+| [docs/specs/theme-design.md](docs/specs/theme-design.md) | 四种界面主题选择、偏好恢复、照片与图表配色边界、对比度与浏览器验收 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |
 | [docs/leftover-issues.md](docs/leftover-issues.md) | 已知问题的记录与处理结果 |

@@ -2,6 +2,7 @@
 import { useState } from 'react'
 
 import { login, register } from '../lib/api.js'
+import ThemePicker from './ThemePicker.jsx'
 
 export default function AuthView({ onAuthed }) {
   const [mode, setMode] = useState('login')
@@ -29,6 +30,7 @@ export default function AuthView({ onAuthed }) {
 
   return (
     <div className="auth-wrap">
+      <div className="auth-theme"><ThemePicker /></div>
       <div className="auth-card">
         <div className="brand auth-brand"><span className="logo">C</span>CHROMA</div>
         <h1>{mode === 'login' ? '登录' : '注册'}</h1>

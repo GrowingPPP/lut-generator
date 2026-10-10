@@ -1,7 +1,4 @@
-/* 落地页样式。
-   仅使用 App.css 已声明的令牌与既有组件类(.btn/.btn-primary/.brand/.logo),
-   不新增颜色、不新增字体族、不覆盖全局元素选择器。
-   定位:登录门之前的独立整页,自带导航与页脚,不复用 .app 外壳。 */
+/* 首页使用全局主题，照片叠加层保留固定配色。 */
 
 .landing {
   --landing-gutter: 24px;
@@ -35,6 +32,10 @@
   gap: 28px;
   margin-left: auto;
   font-size: 14px;
+}
+
+.landing-nav > .theme-picker {
+  margin-left: auto;
 }
 
 .landing-nav-links a {
@@ -208,7 +209,7 @@
   left: var(--ba-at, 50%);
   width: 2px;
   margin-left: -1px;
-  background: var(--accent);
+  background: #e2a35a;
   pointer-events: none;
 }
 
@@ -222,9 +223,9 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 2px solid var(--ink);
-  background: var(--accent);
-  color: var(--ink);
+  border: 2px solid #222;
+  background: #e2a35a;
+  color: #191410;
   font-size: 11px;
   line-height: 1;
   /* 旋钮只是视觉装饰:必须放行指针事件,否则会挡住下层透明 range 的拖拽 */
@@ -249,9 +250,9 @@
   position: absolute;
   bottom: 14px;
   padding: 5px 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--photo-line);
   border-radius: 6px;
-  background: rgba(10, 10, 12, 0.72);
+  background: var(--photo-overlay);
   font-size: 11px;
   letter-spacing: 0.04em;
   pointer-events: none;
@@ -259,12 +260,12 @@
 
 .landing-ba-tag-before {
   left: 14px;
-  color: var(--muted);
+  color: var(--photo-text);
 }
 
 .landing-ba-tag-after {
   right: 14px;
-  color: var(--accent);
+  color: #f4c68e;
 }
 
 /* ---------- 卡片 / 图标字形 ---------- */
@@ -433,7 +434,7 @@
 .landing-badge {
   padding: 4px 8px;
   border-radius: 6px;
-  background: rgba(226, 163, 90, 0.12);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: 11px;
 }
@@ -704,7 +705,6 @@
   margin: 28px auto 0;
   color: var(--muted);
   font-size: 12px;
-  opacity: 0.75;
 }
 
 /* ---------- 窄屏:与产品同一断点 ---------- */
@@ -770,5 +770,23 @@
   .landing-footer-inner {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .landing-nav {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    height: auto;
+    padding: 12px var(--landing-gutter);
+  }
+
+  .landing-nav > .theme-picker {
+    justify-self: end;
+  }
+
+  .landing-nav > .btn-primary {
+    grid-column: 1 / -1;
   }
 }

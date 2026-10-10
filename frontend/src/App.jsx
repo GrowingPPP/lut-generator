@@ -35,6 +35,7 @@ import AutoRetouchReport from './components/AutoRetouchReport.jsx'
 import AuthView from './components/AuthView.jsx'
 import LibraryView from './components/LibraryView.jsx'
 import LandingView from './LandingView.jsx'
+import ThemePicker from './components/ThemePicker.jsx'
 import './Landing.css'
 import './GenerationWorkspace.css'
 
@@ -1797,6 +1798,7 @@ export default function App() {
               </button>
             </nav>
             <div className="topbar-user">
+              <ThemePicker />
               <span>{user}</span>
               <button className="btn" onClick={handleLogout}>
                 退出

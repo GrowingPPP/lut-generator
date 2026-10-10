@@ -1,8 +1,24 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark" data-theme-preference="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        let preference = 'dark'
+        try {
+          const saved = window.localStorage.getItem('chroma-theme')
+          if (['dark', 'gray', 'light', 'system'].includes(saved)) preference = saved
+        } catch {}
+        let theme = preference
+        if (preference === 'system') {
+          try { theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }
+          catch { theme = 'dark' }
+        }
+        document.documentElement.setAttribute('data-theme', theme)
+        document.documentElement.setAttribute('data-theme-preference', preference)
+      })()
+    </script>
     <title>CHROMA — 松下 LUT 生成器</title>
     <meta
       name="description"

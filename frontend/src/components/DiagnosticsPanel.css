@@ -1,6 +1,6 @@
 .diagnostics-panel {
   min-width: 0;
-  color: var(--text, #e9e9ec);
+  color: var(--text);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -20,16 +20,17 @@
 
 .diagnostics-heading p {
   margin: 0;
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 
 .diagnostics-local-tag {
   flex-shrink: 0;
   padding: 3px 8px;
-  border: 1px solid #725235;
+  border: 1px solid var(--accent-line);
   border-radius: 5px;
-  color: #efbb7a;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
   font-size: 11px;
   line-height: 1.7;
 }
@@ -37,20 +38,21 @@
 .diagnostics-empty {
   margin: 0 0 18px;
   padding: 12px 14px;
-  border: 1px solid var(--line, #26262e);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel, #16161a);
-  color: var(--muted, #9a9aa5);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .diagnostics-empty[role='alert'] {
-  border-color: #765646;
-  color: #e8b498;
+  border-color: var(--danger-line);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .diagnostics-measure-note {
   margin-bottom: 12px;
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 11px;
   overflow-wrap: anywhere;
 }
@@ -64,27 +66,27 @@
 
 .diagnostics-metric {
   padding: 12px 14px;
-  border: 1px solid var(--line, #26262e);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel, #16161a);
+  background: var(--panel);
   font-variant-numeric: tabular-nums;
 }
 
 .diagnostics-metric.attention {
-  border-color: #795632;
-  background: #211c17;
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
 }
 
 .diagnostics-metric h4 {
   margin: 0 0 4px;
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 500;
 }
 
 .diagnostics-metric strong {
   display: block;
-  color: #efbb7a;
+  color: var(--accent-strong);
   font-size: 25px;
   font-weight: 600;
   line-height: 1.4;
@@ -96,7 +98,7 @@
 }
 
 .diagnostics-metric > span {
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -106,7 +108,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 15px;
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -124,11 +126,11 @@
 .diagnostics-plot-legend i {
   display: inline-block;
   width: 17px;
-  border-top: 2px solid #efbb7a;
+  border-top: 2px solid var(--accent-strong);
 }
 
 .diagnostics-plot-legend i.baseline {
-  border-top: 2px dashed #b6b6c0;
+  border-top: 2px dashed var(--muted);
 }
 
 .diagnostics-plot-legend small {
@@ -147,33 +149,48 @@
   min-width: 0;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--line, #26262e);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel, #16161a);
+  background: var(--panel);
 }
 
 .diagnostics-histogram figcaption {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin-bottom: 7px;
-  color: var(--diagnostics-channel);
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
+}
+
+.diagnostics-histogram figcaption::before {
+  content: '';
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--diagnostics-channel);
 }
 
 .diagnostics-panel svg {
   display: block;
   width: 100%;
   overflow: visible;
+  background: var(--photo-surround);
+  border: 1px solid var(--photo-line);
+  border-radius: 4px;
 }
 
 .diagnostics-panel svg text {
-  fill: var(--muted, #9a9aa5);
+  fill: var(--photo-muted);
   font-family: inherit;
   font-size: 10px;
 }
 
 .diagnostics-grid {
   fill: none;
-  stroke: var(--line, #26262e);
+  stroke: var(--photo-line);
   stroke-width: 1;
 }
 
@@ -191,7 +208,7 @@
 .diagnostics-histogram-baseline,
 .diagnostics-reference {
   fill: none;
-  stroke: #b6b6c0;
+  stroke: var(--photo-muted);
   stroke-width: 1.2;
   stroke-dasharray: 4 4;
   opacity: 0.8;
@@ -200,18 +217,18 @@
 .diagnostics-risk-details {
   margin-top: 15px;
   padding: 11px 0;
-  border-top: 1px solid var(--line, #26262e);
-  border-bottom: 1px solid var(--line, #26262e);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .diagnostics-risk-details summary {
-  color: var(--text, #e9e9ec);
+  color: var(--text);
   cursor: pointer;
 }
 
 .diagnostics-risk-details summary:focus-visible,
 .diagnostics-overlay-control input:focus-visible {
-  outline: 2px solid var(--accent, #e2a35a);
+  outline: 2px solid var(--accent-strong);
   outline-offset: 4px;
 }
 
@@ -226,7 +243,7 @@
 
 .diagnostics-overlay-control input {
   margin: 0;
-  accent-color: var(--accent, #e2a35a);
+  accent-color: var(--accent);
 }
 
 .diagnostics-risk-preview {
@@ -235,7 +252,7 @@
   margin: 0 auto 12px;
   overflow: hidden;
   border-radius: 6px;
-  background: #09090c;
+  background: var(--photo-surround);
 }
 
 .diagnostics-risk-preview canvas {
@@ -267,7 +284,7 @@
 
 .diagnostics-footnote {
   margin: 12px 0 20px;
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -289,14 +306,14 @@
 }
 
 .diagnostics-shape figcaption span {
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
 .diagnostics-shape p {
   margin: 8px 0 0;
-  color: var(--muted, #9a9aa5);
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -313,7 +330,7 @@
 }
 
 .diagnostics-hue-center {
-  stroke: #f2f2f4;
+  stroke: var(--photo-text);
   stroke-width: 1.2;
   stroke-dasharray: 2 3;
   opacity: 0.8;
