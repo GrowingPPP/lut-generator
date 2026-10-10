@@ -20,41 +20,81 @@ function RawPixels({ image, label }) {
 
 function EffectPixels({ image, params, label, onStatus }) {
   const ref = useRef(null)
+  const resource = useRef(null)
   const signature = JSON.stringify(params)
   const snapshot = useMemo(() => JSON.parse(signature), [signature])
   useEffect(() => {
     const canvas = ref.current
-    let renderer, cancelled = false
-    const status = state => onStatus({ ...state, image, signature })
+    const current = { image, renderer: null, ready: false, error: '', lastLut: null, encoding: 'sRGB' }
+    resource.current = current
+    try {
+      current.renderer = new LUTRenderer(canvas)
+      const gl = current.renderer.gl
+      const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS)
+      const limit = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), ...viewport)
+      if (Math.max(image.width, image.height) > limit)
+        throw new Error(`照片尺寸超过当前设备的 GPU 上限 ${limit}px，保留原图。请使用当前预览分辨率。`)
+      current.renderer.setImage(image)
+      current.renderer.setSplitMode(false)
+      if (gl.getError() !== gl.NO_ERROR) throw new Error('设备无法载入此尺寸的照片，请使用当前预览分辨率。')
+    } catch (error) {
+      current.renderer?.dispose(); current.renderer = null
+      current.error = error.message || '照片载入失败'
+    }
+    return () => {
+      if (resource.current === current) resource.current = null
+      current.renderer?.dispose()
+      canvas.width = 1; canvas.height = 1
+    }
+  }, [image])
+  useEffect(() => {
+    const current = resource.current
+    let cancelled = false, scheduled = 0
+    const status = state => onStatus({ ...state, ready: current?.ready || false, image, signature })
+    if (!current?.renderer) {
+      status({ loading: false, error: current?.error || '照片载入失败' })
+      return undefined
+    }
     status({ loading: true, error: '' })
     const render = async () => {
+      let changedLut = false
       try {
-        renderer = new LUTRenderer(canvas)
-        const gl = renderer.gl
-        const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS)
-        const limit = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), ...viewport)
-        if (Math.max(image.width, image.height) > limit)
-          throw new Error(`照片尺寸超过当前设备的 GPU 上限 ${limit}px，保留原图。请使用当前预览分辨率。`)
         await preloadExternalLut(snapshot.external_lut_id)
-        if (cancelled) return
-        const lut = generateLUT(snapshot, 33)
-        renderer.setImage(image)
-        renderer.setLUT(lut.data, lut.size)
-        renderer.setSplitMode(false)
-        renderer.setDisplayEncoding(snapshot.base_photo_style === 'VLOG' ? 'Rec709' : 'sRGB')
-        renderer.render()
-        if (gl.getError() !== gl.NO_ERROR) throw new Error('设备无法渲染此尺寸的照片，已保留原图。请使用当前预览分辨率。')
-        if (!cancelled) status({ loading: false, error: '' })
-      } catch (error) {
-        if (!cancelled) {
-          renderer?.clear(); renderer?.dispose()
-          canvas.width = 1; canvas.height = 1
-          status({ loading: false, error: error.message || '效果载入失败，已保留原图' })
-        }
+        if (cancelled || resource.current !== current) return
+        scheduled = requestAnimationFrame(() => {
+          if (cancelled || resource.current !== current) return
+          try {
+            const renderer = current.renderer, gl = renderer.gl
+            const lut = generateLUT(snapshot, 33)
+            const encoding = snapshot.base_photo_style === 'VLOG' ? 'Rec709' : 'sRGB'
+            changedLut = true
+            renderer.setLUT(lut.data, lut.size)
+            renderer.setDisplayEncoding(encoding)
+            renderer.render()
+            if (gl.getError() !== gl.NO_ERROR || gl.isContextLost())
+              throw new Error('设备无法渲染此尺寸的照片，请使用当前预览分辨率。')
+            current.lastLut = lut; current.encoding = encoding; current.ready = true
+            status({ loading: false, error: '' })
+          } catch (error) { failed(error) }
+        })
+      } catch (error) { failed(error) }
+    }
+    const failed = error => {
+      if (cancelled || resource.current !== current) return
+      if (changedLut && current.lastLut) {
+        try {
+          const renderer = current.renderer, gl = renderer.gl
+          renderer.setLUT(current.lastLut.data, current.lastLut.size)
+          renderer.setDisplayEncoding(current.encoding)
+          renderer.render()
+          current.ready = gl.getError() === gl.NO_ERROR && !gl.isContextLost()
+        } catch { current.ready = false }
       }
+      if (!current.ready) current.renderer.clear()
+      status({ loading: false, error: error.message || '效果载入失败' })
     }
     render()
-    return () => { cancelled = true; renderer?.dispose(); canvas.width = 1; canvas.height = 1 }
+    return () => { cancelled = true; cancelAnimationFrame(scheduled) }
   }, [image, snapshot, signature, onStatus])
   return <canvas className="photo-viewer-pixels" ref={ref} role="img" aria-label={label} />
 }
@@ -68,9 +108,10 @@ function gpuPhotoLimit() {
   return limit
 }
 
-export default function PhotoViewer({ sample, media, params, compatible, comparison, onClose, initialMode = 'slider', initialSplit = 0.5 }) {
+export default function PhotoViewer({ sample, media, params, compatible, comparison, onClose, initialMode = 'slider', initialSplit = 0.5,
+  adjustmentPanel, canUndo = false, canRedo = false, onUndo, onRedo, onEditDraft, onFinishAdjustment }) {
   const id = useId()
-  const modalRef = useModalFocus(onClose)
+  const modalRef = useModalFocus(onClose, false)
   const synthetic = useRef(media?.canvas)
   const preview = sample ? media?.canvas : synthetic.current
   const file = media?.file
@@ -90,6 +131,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const [view, setView] = useState({ scale: 1, x: 0, y: 0, fit: true })
   const [frame, setFrame] = useState({ width: 1, height: 1 })
   const [dragging, setDragging] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(() => !!adjustmentPanel && window.innerWidth >= 1000)
   const [aState, setAState] = useState({ loading: hasComparison && compatible, error: '' })
   const [bState, setBState] = useState({ loading: compatible, error: '' })
   const stageRef = useRef(null)
@@ -107,12 +149,30 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const bCurrent = bState.image === image && bState.signature === JSON.stringify(bParams)
   const renderError = compatible && ((hasComparison && aCurrent && aState.error) || (bCurrent && bState.error))
   const renderLoading = compatible && (!bCurrent || bState.loading || (hasComparison && (!aCurrent || aState.loading)))
-  const fallback = !compatible || !!renderError || renderLoading
+  const renderReady = bState.image === image && bState.ready && (!hasComparison || (aState.image === image && aState.ready))
+  const fallback = !compatible || !renderReady
   const visibleMode = fallback ? 'original' : mode
   const photoSize = { width: image?.width || 1, height: image?.height || 1 }
   const transform = photoTransform(view, photoSize, frame)
   const sourceWidth = sample?.source_width || sample?.photo_metadata?.source_width
   const sourceHeight = sample?.source_height || sample?.photo_metadata?.source_height
+  const historyAvailable = !hasComparison && !!adjustmentPanel
+
+  const finishAdjustment = useCallback(() => {
+    const focused = document.activeElement
+    if (modalRef.current?.contains(focused)) focused.blur?.()
+    onFinishAdjustment?.()
+  }, [modalRef, onFinishAdjustment])
+  const close = useCallback(() => { finishAdjustment(); onClose() }, [finishAdjustment, onClose])
+  useEffect(() => {
+    const escape = event => {
+      if (event.key !== 'Escape') return
+      // Curve dragging and text fields can consume Escape before the dialog closes.
+      queueMicrotask(() => { if (!event.defaultPrevented) { event.preventDefault(); close() } })
+    }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [close])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -213,6 +273,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const startPan = event => {
     if (event.button !== 0 || event.isPrimary === false) return
     event.preventDefault()
+    stageRef.current.focus({ preventScroll: true })
     stageRef.current.setPointerCapture(event.pointerId)
     drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, view: activeView.current }
     setDragging(true)
@@ -239,7 +300,16 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   })
 
   const key = event => {
-    if (event.ctrlKey || event.metaKey || event.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return
+    if (event.defaultPrevented) return
+    const formField = event.target.closest?.('input, select, textarea, [contenteditable="true"]')
+    const nativeUndo = formField && !(formField.tagName === 'INPUT' && formField.type === 'range')
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z' && !nativeUndo && historyAvailable) {
+      event.preventDefault()
+      if (event.shiftKey) { if (canRedo) { finishAdjustment(); onRedo?.() } }
+      else if (canUndo) { finishAdjustment(); onUndo?.() }
+      return
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey || formField || event.target.closest?.('.photo-viewer-adjustments')) return
     if (['+', '=', '-', '_', '0', '1', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) event.preventDefault()
     if (event.key === '+' || event.key === '=') zoom(view.scale * 1.25)
     if (event.key === '-' || event.key === '_') zoom(view.scale / 1.25)
@@ -258,13 +328,16 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const modes = [['slider', '滑动对比'], ['side-by-side', '并排'], ['original', hasComparison && !fallback ? '仅 A' : '仅原图'], ['effect', hasComparison ? '仅 B' : '仅效果']]
 
   return <div className="photo-viewer-backdrop">
-    <section ref={modalRef} className="photo-viewer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`} onKeyDown={key}>
+    <section ref={modalRef} className={`photo-viewer${panelOpen && adjustmentPanel ? ' has-adjustments' : ''}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`} onKeyDown={key}>
       <header className="photo-viewer-header">
         <div className="photo-viewer-title"><h2 id={`${id}-title`}>放大查看</h2><span title={sample?.name}>{sample?.name || '调色示意图'}</span></div>
-        <button type="button" className="photo-viewer-button photo-viewer-close" onClick={onClose}>关闭 <span aria-hidden="true">×</span></button>
+        <div className="photo-viewer-header-actions">
+          {adjustmentPanel && <button type="button" className="photo-viewer-button" aria-expanded={panelOpen} aria-controls={`${id}-adjustments`} onClick={() => { if (panelOpen) finishAdjustment(); setPanelOpen(value => !value) }}>调色面板{panelOpen ? ' · 收起' : ''}</button>}
+          <button type="button" className="photo-viewer-button photo-viewer-close" onClick={close}>关闭 <span aria-hidden="true">×</span></button>
+        </div>
       </header>
       <div className="photo-viewer-tools">
-        <div className="photo-viewer-modes" role="group" aria-label="照片查看模式">{modes.map(([value, label]) => <button type="button" key={value} className="photo-viewer-button" aria-pressed={visibleMode === value} disabled={(!compatible || !!renderError) && value !== 'original'} onClick={() => setMode(value)}>{label}</button>)}</div>
+        <div className="photo-viewer-modes" role="group" aria-label="照片查看模式">{modes.map(([value, label]) => <button type="button" key={value} className="photo-viewer-button" aria-pressed={visibleMode === value} disabled={(!compatible || (!!renderError && !renderReady)) && value !== 'original'} onClick={() => setMode(value)}>{label}</button>)}</div>
         <div className="photo-viewer-zoom" role="group" aria-label="照片缩放">
           <button type="button" className="photo-viewer-button" onClick={fit}>适应窗口</button>
           <button type="button" className="photo-viewer-button" disabled={sourceLoading} onClick={() => loadOriginal(true)}>{file ? '1:1 像素' : sample ? '预览 1:1' : '示意图 1:1'}</button>
@@ -282,11 +355,13 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
         {original && <button type="button" className="photo-viewer-button" onClick={previewAgain}>使用预览分辨率</button>}
         {sourceWidth && sourceHeight && !original && <span className="photo-viewer-source-size">原照片 {sourceWidth} × {sourceHeight}px</span>}
       </div>
-      {!compatible && <p className="photo-viewer-notice">输入尚未确认或与当前参数不兼容，当前仅显示原图。请关闭查看器后确认照片输入基准。</p>}
+      <div className="photo-viewer-content">
+      <div className="photo-viewer-main">
+      {!compatible && <p className="photo-viewer-notice">输入尚未确认或与当前参数不兼容，当前仅显示原图，暂不可调色。请关闭查看器后确认照片输入基准。</p>}
       {sourceError && <p className="photo-viewer-error" role="alert">{sourceError}</p>}
-      {renderError && <p className="photo-viewer-error" role="alert">效果载入失败：{renderError} 当前显示原图。</p>}
-      {renderLoading && <p className="photo-viewer-notice" role="status">正在载入完整效果，暂时显示原图…</p>}
-      <div ref={stageRef} className={`photo-viewer-stage photo-viewer-${visibleMode}${dragging ? ' is-dragging' : ''}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onLostPointerCapture={() => { drag.current = null; setDragging(false) }}>
+      {renderError && <p className="photo-viewer-error" role="alert">效果载入失败：{renderError} {renderReady ? '保留上一次成功效果。' : '当前显示原图。'}</p>}
+      {renderLoading && <p className={`photo-viewer-notice${renderReady ? ' photo-viewer-updating' : ''}`} role="status">{renderReady ? '正在更新效果…' : '正在载入完整效果，暂时显示原图…'}</p>}
+      <div ref={stageRef} className={`photo-viewer-stage photo-viewer-${visibleMode}${dragging ? ' is-dragging' : ''}`} tabIndex={0} role="region" aria-label="照片查看区域" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onLostPointerCapture={() => { drag.current = null; setDragging(false) }}>
         <div className="photo-viewer-frame photo-viewer-a">
           <div className="photo-viewer-image" style={{ width: photoSize.width, height: photoSize.height, transform }}>
             <div className="photo-viewer-layer" hidden={hasComparison && compatible && !fallback}><RawPixels image={image} label="规范化原图" /></div>
@@ -306,6 +381,19 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
         {compatible && visibleMode === 'slider' && <div className="photo-viewer-split"><label htmlFor={`${id}-split`}>{aLabel} / {bLabel}</label><input id={`${id}-split`} type="range" min="0" max="100" value={Math.round(split * 100)} onChange={event => setSplit(Number(event.target.value) / 100)} aria-label="照片对比分界" aria-valuetext={`左侧 ${Math.round(split * 100)}%，右侧 ${Math.round((1 - split) * 100)}%`} /></div>}
         <p id={`${id}-help`}>滚轮缩放 · 拖动平移 · + / − 缩放 · 0 适应 · 1 {file ? '原像素' : '预览像素'} · 方向键平移 · Esc 关闭</p>
       </footer>
+      </div>
+      {adjustmentPanel && panelOpen && <aside id={`${id}-adjustments`} className="photo-viewer-adjustments" aria-label="放大查看调色面板">
+        <div className="photo-viewer-adjustment-heading"><h3>{hasComparison ? '版本比较' : '调整当前草稿'}</h3>
+          {historyAvailable && <div className="photo-viewer-history" role="group" aria-label="调色历史">
+            <button type="button" className="photo-viewer-button" disabled={!canUndo} onClick={() => { finishAdjustment(); onUndo?.() }}>撤销</button>
+            <button type="button" className="photo-viewer-button" disabled={!canRedo} onClick={() => { finishAdjustment(); onRedo?.() }}>重做</button>
+          </div>}
+        </div>
+        {hasComparison ? <div className="photo-viewer-edit-notice"><p>A / B 为固定版本快照。切换到当前草稿后，可在此继续调色。</p>
+          {onEditDraft && <button type="button" className="photo-viewer-button" onClick={() => { finishAdjustment(); onEditDraft() }}>调整当前草稿</button>}
+        </div> : !compatible ? <p className="photo-viewer-edit-notice">请确保照片与当前草稿的输入基准一致。可用撤销／重做恢复输入，或关闭查看器后确认照片输入，再调整参数。</p> : adjustmentPanel}
+      </aside>}
+      </div>
     </section>
   </div>
 }

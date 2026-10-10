@@ -9,6 +9,7 @@ from lut_engine import LutParams
 
 
 APP = Path(__file__).resolve().parents[2] / "frontend/src/App.jsx"
+PARAMETER_CONTROLS = APP.parent / "lib/parameterControls.js"
 
 
 def _value_schema(schema):
@@ -22,14 +23,14 @@ def _bounds(schema):
 
 
 def _ui_ranges():
-    source = APP.read_text(encoding="utf-8")
+    source = PARAMETER_CONTROLS.read_text(encoding="utf-8")
     ranges = {
         key: (float(low), float(high))
         for key, low, high in re.findall(
             r"\{ key: '(\w+)', label: '[^']*', min: (-?[\d.]+), max: (-?[\d.]+)", source
         )
     }
-    mapping = re.search(r'aria-label="V-Log 显示映射"(.*?)onChange=', source, re.S)
+    mapping = re.search(r'aria-label="V-Log 显示映射"(.*?)onChange=', APP.read_text(encoding="utf-8"), re.S)
     assert mapping, "V-Log 显示映射控件未定义"
     low = re.search(r"min=\{([\d.]+)\}", mapping.group(1))
     high = re.search(r"max=\{([\d.]+)\}", mapping.group(1))

@@ -27,10 +27,13 @@ import { paramsToCube } from './lib/lutEngine.js'
 import { sameAutoMetadata } from './lib/autoJobs.js'
 import { preloadExternalLut, clearExternalLutCache } from './lib/importedLuts.js'
 import CurveEditor from './components/CurveEditor.jsx'
+import ParameterControls from './components/ParameterControls.jsx'
+import { defaultGroupOpen, parameterLabel } from './lib/parameterControls.js'
 import ImportedLutPanel from './components/ImportedLutPanel.jsx'
 import ReferenceMatchDialog from './components/ReferenceMatchDialog.jsx'
 import PhotoExportDialog from './components/PhotoExportDialog.jsx'
 import PhotoViewer from './components/PhotoViewer.jsx'
+import PhotoAdjustments from './components/PhotoAdjustments.jsx'
 import { makeTestImage } from './lib/preview.js'
 import { compatibleVersionInputs } from './lib/versionComparison.js'
 import AutoRetouchBar from './components/AutoRetouchBar.jsx'
@@ -41,83 +44,6 @@ import LandingView from './LandingView.jsx'
 import ThemePicker from './components/ThemePicker.jsx'
 import './Landing.css'
 import './GenerationWorkspace.css'
-
-const PARAM_GROUPS = [
-  {
-    id: 'basic', label: '单张校正', defaultOpen: true,
-    sliders: [
-      { key: 'temp', label: '冷暖偏移', min: -3000, max: 3000, step: 10, unit: '' },
-      { key: 'tint', label: '绿/洋红', min: -500, max: 500, step: 5, unit: '' },
-      { key: 'exposure', label: '曝光', min: -3, max: 3, step: 0.05, unit: ' EV' },
-    ],
-  },
-  {
-    id: 'look', label: '风格', defaultOpen: true,
-    sliders: [
-      { key: 'look_strength', label: '风格强度', min: 0, max: 1, step: 0.01, unit: '' },
-    ],
-  },
-  {
-    id: 'tone', label: '影调', defaultOpen: true,
-    sliders: [
-      { key: 'contrast', label: '对比度', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'contrast_pivot', label: '对比中心', min: 0.1, max: 0.9, step: 0.005, unit: '' },
-      { key: 'highlights', label: '高光', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'shadows', label: '阴影', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'whites', label: '白部层次', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'blacks', label: '黑部层次', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'curve', label: 'S 曲线', min: -1, max: 1, step: 0.01, unit: '' },
-    ],
-  },
-  {
-    id: 'color', label: '色彩', defaultOpen: false,
-    sliders: [
-      { key: 'saturation', label: '饱和度', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'vibrance', label: '自然饱和', min: -1, max: 1, step: 0.01, unit: '' },
-      { key: 'hue', label: '全局色相', min: -180, max: 180, step: 1, unit: '°' },
-    ],
-  },
-  {
-    id: 'selective', label: '局部色彩', defaultOpen: false,
-    sliders: [
-      { key: 'selective_hue_center', label: '目标色相', min: 0, max: 360, step: 1, unit: '°' },
-      { key: 'selective_hue_width', label: '色相范围', min: 1, max: 180, step: 1, unit: '°' },
-      { key: 'selective_hue_shift', label: '目标色相偏移', min: -180, max: 180, step: 1, unit: '°' },
-      { key: 'selective_saturation', label: '目标色饱和', min: -1, max: 1, step: 0.01, unit: '' },
-    ],
-  },
-  {
-    id: 'split', label: '分离色调', defaultOpen: false,
-    sliders: [
-      { key: 'split_shadow_hue', label: '阴影色相', min: 0, max: 360, step: 1, unit: '°' },
-      { key: 'split_shadow_sat', label: '阴影强度', min: 0, max: 1, step: 0.01, unit: '' },
-      { key: 'split_highlight_hue', label: '高光色相', min: 0, max: 360, step: 1, unit: '°' },
-      { key: 'split_highlight_sat', label: '高光强度', min: 0, max: 1, step: 0.01, unit: '' },
-      { key: 'split_mid_hue', label: '中间调色相', min: 0, max: 360, step: 1, unit: '°' },
-      { key: 'split_mid_sat', label: '中间调强度', min: 0, max: 1, step: 0.01, unit: '' },
-      { key: 'split_balance', label: '平衡', min: 0, max: 1, step: 0.01, unit: '' },
-    ],
-  },
-  {
-    id: 'rgb', label: '分通道(RGB)', defaultOpen: false,
-    sliders: [],
-  },
-]
-
-// 折叠状态(组 id → 是否展开)
-function defaultGroupOpen() {
-  const o = {}
-  for (const g of PARAM_GROUPS) o[g.id] = g.defaultOpen
-  return o
-}
-
-const RGB_GROUPS = [
-  { key: 'lift', label: 'RGB 偏移', min: -0.1, max: 0.1, step: 0.005 },
-  { key: 'gamma', label: '中间调', min: 0.5, max: 1.5, step: 0.005 },
-  { key: 'gain', label: 'RGB 增益', min: 0.5, max: 1.5, step: 0.005 },
-]
-
-const RGB_CHANNELS = ['R', 'G', 'B']
 
 const PHOTO_STYLES = [
   { value: 'STD', label: 'Standard' },
@@ -172,17 +98,6 @@ const DISPLAY_MODES = [
   { value: 'slider', label: '滑动对比' },
   { value: 'split', label: '独立展示' },
 ]
-
-function groupSummary(g, params) {
-  const defaults = defaultParams()
-  const keys = g.id === 'rgb' ? RGB_GROUPS.map((r) => r.key) : g.sliders.map((sl) => sl.key)
-  const changed = keys.filter((k) => {
-    const v = params[k]
-    if (Array.isArray(v)) return v.some((x, i) => Math.abs(x - defaults[k][i]) > 1e-9)
-    return Math.abs(v - defaults[k]) > 1e-9
-  })
-  return changed.length ? `${changed.length} 项已调整` : ''
-}
 
 function GenerateView({ previewLut, user }) {
   const editor = useWorkspace({ userId: user, initialParams: defaultParams() })
@@ -604,11 +519,7 @@ function GenerateView({ previewLut, user }) {
     )
   }
   const locked = (key) => workspace.locked_fields.includes(key)
-  const labelFor = (key) =>
-    PARAM_GROUPS.flatMap((g) => g.sliders).find((s) => s.key === key)?.label ||
-    RGB_GROUPS.find((g) => g.key === key)?.label ||
-    { base_photo_style: '输入基准', tone_map: '显示映射' }[key] ||
-    key
+  const labelFor = parameterLabel
   const lockButton = (key) => (
     <button
       type="button"
@@ -1416,112 +1327,22 @@ function GenerateView({ previewLut, user }) {
         <fieldset className="params param-groups" disabled={busy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <h3 className="tool-heading">微调当前效果</h3>
           <p className="tool-note">基础调整优先；已调整或受保护的高级项会在标题中提示。</p>
-          {PARAM_GROUPS.map((g) => {
-            const fields =
-              g.id === 'rgb' ? RGB_GROUPS.map((r) => r.key) : g.sliders.map((s) => s.key)
-            return (
-              <section key={g.id} className="param-group">
-                <div className="param-group-header">
-                  <button
-                    type="button"
-                    className="param-group-head"
-                    aria-expanded={groupOpen[g.id]}
-                    onClick={() => setGroupOpen((o) => ({ ...o, [g.id]: !o[g.id] }))}
-                  >
-                    <span className="param-group-arrow">{groupOpen[g.id] ? '▾' : '▸'}</span>
-                    <span className="param-group-label">{g.label}</span>
-                    <span className="param-group-hint">{groupSummary(g, params)}{fields.filter(locked).length ? ` · ${fields.filter(locked).length} 项已保护` : ''}</span>
-                  </button>
-                  <button className="parameter-lock" onClick={() => toggleLock(fields)}>
-                    {fields.every(locked) ? '解锁组' : '保护组'}
-                  </button>
-                  <button
-                    className="group-reset"
-                    onClick={() => {
-                      editor.reset(fields)
-                      setStatus(`已复位未保护项，保留 ${fields.filter(locked).length} 项`)
-                    }}
-                  >
-                    复位
-                  </button>
-                </div>
-                {groupOpen[g.id] && (
-                  <div className="controls">
-                    {g.id === 'rgb'
-                      ? RGB_GROUPS.map((rg) => (
-                          <div key={rg.key} className="rgb-group">
-                            <div className="rgb-group-title">
-                              <span className="rgb-group-label">{rg.label}</span>
-                              {lockButton(rg.key)}
-                            </div>
-                            {RGB_CHANNELS.map((c, idx) => (
-                              <label key={c} className="slider rgb-slider">
-                                <span>{c}</span>
-                                <input
-                                  type="range"
-                                  aria-label={`${rg.label} ${c}`}
-                                  min={rg.min}
-                                  max={rg.max}
-                                  step={rg.step}
-                                  value={params[rg.key][idx]}
-                                  disabled={locked(rg.key)}
-                                  {...gesture}
-                                  onChange={(e) =>
-                                    updateChannel(rg.key, idx, Number(e.target.value))
-                                  }
-                                />
-                                <em>{params[rg.key][idx].toFixed(2)}</em>
-                              </label>
-                            ))}
-                          </div>
-                        ))
-                      : g.sliders.map((sl) => (
-                          <div
-                            key={sl.key}
-                            className={`slider ${locked(sl.key) ? 'protected' : ''}`}
-                          >
-                            <span>{sl.label}</span>
-                            <input
-                              type="range"
-                              aria-label={sl.label}
-                              min={sl.min}
-                              max={sl.max}
-                              step={sl.step}
-                              value={params[sl.key]}
-                              disabled={locked(sl.key)}
-                              {...gesture}
-                              onChange={(e) => updateParam(sl.key, Number(e.target.value))}
-                            />
-                            <em>
-                              {Number(params[sl.key]).toFixed(2)}
-                              {sl.unit}
-                            </em>
-                            {lockButton(sl.key)}
-                          </div>
-                        ))}
-                  </div>
-                )}
-              </section>
-            )
-          })}
-          <div className="all-parameter-actions">
-            <button className="btn" onClick={() => editor.setLocks(Object.keys(params))}>
-              保护全部参数
-            </button>
-            <button className="btn" onClick={() => editor.setLocks([])}>
-              解除全部保护
-            </button>
-            <button
-              className="btn"
-              onClick={() =>
-                editor.reset(
-                  Object.keys(params).filter((k) => !['base_photo_style', 'tone_map'].includes(k)),
-                )
-              }
-            >
-              复位全部未保护调色项
-            </button>
-          </div>
+          <ParameterControls
+            params={params}
+            lockedFields={workspace.locked_fields}
+            disabled={busy}
+            groupOpen={groupOpen}
+            onGroupOpen={setGroupOpen}
+            gesture={gesture}
+            onUpdateParam={updateParam}
+            onUpdateChannel={updateChannel}
+            onToggleLock={toggleLock}
+            onSetLocks={editor.setLocks}
+            onReset={(fields, group) => {
+              editor.reset(fields)
+              if (group) setStatus(`已复位未保护项，保留 ${fields.filter(locked).length} 项`)
+            }}
+          />
           <details className="professional-settings">
             <summary>外部 LUT · {params.external_lut_id ? `${Math.round(params.external_lut_strength * 100)}% 已叠加` : '未叠加'}{locked('external_lut_id') ? ' · 已保护' : ''}</summary>
           <ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
@@ -1689,7 +1510,11 @@ function GenerateView({ previewLut, user }) {
       {photoViewer && !viewerUnavailable && <PhotoViewer key={`${workspace.id}:${selectedSample?.id || 'synthetic'}`}
         sample={selectedSample} media={viewerMedia} params={params} comparison={comparison}
         compatible={comparison ? comparisonSampleMatches : !samples.length || compatible}
-        initialMode={displayMode} initialSplit={split} onClose={() => setPhotoViewer(false)} />}
+        initialMode={displayMode} initialSplit={split} onClose={() => setPhotoViewer(false)}
+        canUndo={!busy && editor.canUndo} canRedo={!busy && editor.canRedo} onUndo={editor.undo} onRedo={editor.redo}
+        onFinishAdjustment={() => editor.commit()} onEditDraft={() => setComparison(null)}
+        adjustmentPanel={<PhotoAdjustments editor={editor} disabled={busy} gesture={gesture}
+          onUpdateParam={updateParam} onUpdateChannel={updateChannel} onToggleLock={toggleLock} resourceError={resourceError} />} />}
       {inputConfirmation && (
         <InputConfirmationDialog
           workspace={workspace}
