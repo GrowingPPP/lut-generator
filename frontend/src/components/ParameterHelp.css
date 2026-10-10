@@ -1,0 +1,57 @@
+.parameter-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.parameter-help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid var(--linestrong);
+  border-radius: 50%;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.parameter-help-button:hover, .parameter-help-button[aria-expanded='true'] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent-line); }
+.parameter-help-button:focus-visible, .parameter-help-disclosure > summary:focus-visible, .beginner-guide > summary:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.parameter-control { min-width: 0; }
+.parameter-control > .parameter-help-content, .rgb-group > .parameter-help-content { margin-top: 10px; }
+.parameter-help-content { min-width: 0; padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--panel2); color: var(--text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.parameter-help-content p { margin: 0; }
+.parameter-help-summary { font-weight: 500; }
+.parameter-help-directions { display: grid; gap: 9px; margin: 12px 0; }
+.parameter-help-directions dt { font-size: 11px; font-weight: 600; color: var(--muted); }
+.parameter-help-directions dd { margin: 2px 0 0; }
+.parameter-help-content .parameter-help-try { padding-top: 10px; border-top: 1px solid var(--line); }
+.parameter-help-try strong, .parameter-help-note strong { display: block; font-size: 11px; font-weight: 600; color: var(--accent-strong); }
+.parameter-help-content .parameter-help-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.parameter-group-description { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.parameter-group-description strong { font-weight: 500; color: var(--text); }
+.parameter-help-disclosure { min-width: 0; }
+.parameter-help-disclosure > summary { display: flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%; list-style: none; padding: 4px 0; color: var(--muted); font-size: 12px; line-height: 1.6; cursor: pointer; }
+.parameter-help-disclosure > summary::-webkit-details-marker, .beginner-guide > summary::-webkit-details-marker { display: none; }
+.parameter-help-disclosure[open] > summary { color: var(--accent-strong); margin-bottom: 8px; }
+.parameter-help-symbol { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border: 1px solid var(--linestrong); border-radius: 50%; color: var(--text); font-weight: 600; }
+.beginner-guide { min-width: 0; border: 1px solid var(--accent-line); border-radius: 9px; background: var(--accent-soft); color: var(--text); }
+.beginner-guide > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; list-style: none; padding: 12px 14px; cursor: pointer; }
+.beginner-guide > summary strong, .beginner-guide > summary small { display: block; }
+.beginner-guide > summary strong { font-size: 13px; font-weight: 600; }
+.beginner-guide > summary small { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.beginner-guide-arrow { color: var(--accent-strong); transition: transform .15s; }
+.beginner-guide[open] .beginner-guide-arrow { transform: rotate(180deg); }
+.beginner-guide-content { padding: 0 14px 14px; font-size: 13px; line-height: 1.7; }
+.beginner-guide-content > p { margin: 0 0 12px; }
+.beginner-guide-content ol { display: grid; gap: 13px; padding-left: 20px; margin: 0 0 14px; }
+.beginner-guide-content li::marker { color: var(--accent-strong); font-weight: 600; }
+.beginner-guide-content li strong { font-size: 13px; font-weight: 600; }
+.beginner-guide-content li p { margin: 4px 0 0; }
+.beginner-guide-content .parameter-help-note { margin: 0; padding-top: 12px; border-top: 1px solid var(--accent-line); font-size: 12px; color: var(--muted); }
+.parameter-help-intro { margin: 0 2px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.photo-adjustment-external-help { margin: 0 12px 12px; }
+.curve-channel-learning { margin: 0; min-height: 2.8em; color: var(--muted); font-size: 12px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .beginner-guide-arrow { transition: none; } }

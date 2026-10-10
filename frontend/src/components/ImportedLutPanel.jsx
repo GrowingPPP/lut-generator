@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { importLut, listImportedLuts, preloadExternalLut } from '../lib/importedLuts.js'
 import { MAX_CUBE_BYTES } from '../lib/cubeLut.js'
+import ParameterHelp from './ParameterHelp.jsx'
 import './ImportedLutPanel.css'
 
 const SIGNALS = ['sRGB', 'Rec709', 'VLOG']
@@ -78,6 +79,7 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
   const selected = artifacts.find(artifact => artifact.id === params.external_lut_id)
   return <section className="imported-lut-panel" aria-label="外部 LUT">
     <div className="imported-lut-heading"><h3>外部 LUT</h3><button type="button" disabled={blocked || loading} onClick={() => setShowImport(value => !value)}>导入 .cube</button></div>
+    <ParameterHelp parameter="external_lut_id" />
     <label className="imported-lut-choice">账号导入库
       <select aria-label="外部 LUT 选择" disabled={blocked || loading} value={params.external_lut_id || ''} onChange={event => select(event.target.value)}>
         <option value="">不使用外部 LUT</option>
@@ -87,12 +89,14 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
         </option>)}
       </select>
     </label>
+    <ParameterHelp parameter="external_lut_mode" />
     {params.external_lut_id && <>
       <div className="imported-lut-strength"><label htmlFor="external-lut-strength">{params.external_lut_mode === 'input' ? '输入转换强度' : '显示风格强度'}</label><output>{Math.round(strength * 100)}%</output>
         <input id="external-lut-strength" type="range" min={0} max={1} step={0.01} value={strength}
           disabled={blocked || loading || params.external_lut_mode === 'input'} onChange={event => setStrength(Number(event.target.value))}
           onPointerUp={commitStrength} onPointerCancel={() => setStrength(params.external_lut_strength)} onBlur={commitStrength} onKeyUp={commitStrength} />
       </div>
+      <ParameterHelp parameter="external_lut_strength" />
       <p className="imported-lut-help">{params.external_lut_mode === 'input'
         ? '此 LUT 替换 V-Log 技术转换，强度固定100%；内置 V-Log 显示映射不参与。系统相对调色与自由曲线随后应用。'
         : '在系统调色输出后叠加同编码的显示风格；独立于系统风格强度。'}</p>

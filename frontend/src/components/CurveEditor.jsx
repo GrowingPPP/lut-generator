@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { CURVE_CHANNELS, identityCurves, MAX_CURVE_POINTS, MIN_POINT_DISTANCE, prepareCurve } from '../lib/curveMath.js'
+import ParameterHelp from './ParameterHelp.jsx'
 import './CurveEditor.css'
 
 const LABELS = { master: '主曲线', r: '红', g: '绿', b: '蓝' }
 const TITLES = { master: '主曲线', r: 'R · 红色', g: 'G · 绿色', b: 'B · 蓝色' }
+const CHANNEL_GUIDANCE = {
+  master: '左侧为暗部，右侧为亮部。上抬提亮，下压变暗；三个颜色通道一起改变。',
+  r: '上抬增加红色，下压偏青色。可以先在中间加点，小幅尝试。',
+  g: '上抬增加绿色，下压偏洋红色。可以先在中间加点，小幅尝试。',
+  b: '上抬增加蓝色，下压偏黄色。可以先在中间加点，小幅尝试。',
+}
 const copy = value => structuredClone(value)
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value))
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b)
@@ -73,6 +80,7 @@ function CurveChannel({ channel, points, blocked, dragging, onBegin, onMove, onF
       <h4><span className="curve-channel-dot" aria-hidden="true" />{TITLES[channel]}</h4>
       <span>{channel === 'master' ? '整体影调' : '分通道色彩'}</span>
     </div>
+    <p className="curve-channel-learning">{CHANNEL_GUIDANCE[channel]}</p>
     <svg className="curve-editor-graph" viewBox="0 0 100 100" role="group" aria-label={`${LABELS[channel]}控制点，可用方向键调整`} onDoubleClick={add}>
       {[25, 50, 75].map(value => <path key={value} className="curve-grid" d={`M${value} 0V100 M0 ${value}H100`} />)}
       <path className="curve-identity" d="M0 100L100 0" />
@@ -169,6 +177,7 @@ export default function CurveEditor({ params, disabled = false, locked = false, 
   return <section className="curve-editor" aria-label="自由曲线编辑">
     <div className="curve-editor-heading"><h3>自由曲线</h3><span>四通道独立调整</span></div>
     <p className="curve-editor-help">双击增加控制点；拖动或用方向键调整。每通道最多16点，输出不能下降。</p>
+    <ParameterHelp parameter="curve_points" />
     <div className="curve-editor-panels">
       {CURVE_CHANNELS.map(channel => <CurveChannel key={channel} channel={channel} points={curves[channel]}
         blocked={blocked} dragging={activeChannel !== null} onBegin={begin} onMove={move} onFinish={end} onChange={changeChannel} />)}

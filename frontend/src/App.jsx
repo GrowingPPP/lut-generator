@@ -28,6 +28,7 @@ import { sameAutoMetadata } from './lib/autoJobs.js'
 import { preloadExternalLut, clearExternalLutCache } from './lib/importedLuts.js'
 import CurveEditor from './components/CurveEditor.jsx'
 import ParameterControls from './components/ParameterControls.jsx'
+import ParameterHelp from './components/ParameterHelp.jsx'
 import { defaultGroupOpen, parameterLabel } from './lib/parameterControls.js'
 import ImportedLutPanel from './components/ImportedLutPanel.jsx'
 import ReferenceMatchDialog from './components/ReferenceMatchDialog.jsx'
@@ -1377,6 +1378,7 @@ function GenerateView({ previewLut, user }) {
               </select>
               {lockButton('base_photo_style')}
             </div>
+            <ParameterHelp parameter="base_photo_style" />
             {params.base_photo_style === 'VLOG' && (
               <div className="slider">
                 <span>V-Log 显示映射</span>
@@ -1395,6 +1397,7 @@ function GenerateView({ previewLut, user }) {
                 {lockButton('tone_map')}
               </div>
             )}
+            {params.base_photo_style === 'VLOG' && <ParameterHelp parameter="tone_map" />}
           </div>
           <p className="text-muted">
             冷暖是相对 RGB 偏移，风格强度为 0

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ParameterControls from './ParameterControls.jsx'
 import CurveEditor from './CurveEditor.jsx'
+import ParameterHelp from './ParameterHelp.jsx'
 
 const SAVE_STATES = {
   loading: '正在恢复草稿', saving: '草稿保存中', saved: '草稿已保存到本机',
@@ -46,6 +47,7 @@ export default function PhotoAdjustments({ editor, disabled, gesture, onUpdatePa
             {...gesture} onChange={event => onUpdateParam('external_lut_strength', Number(event.target.value))} />
           <em>{Math.round(params.external_lut_strength * 100)}%</em>
         </div></div>
+        <div className="photo-adjustment-external-help"><ParameterHelp parameter="external_lut_strength" /></div>
         {params.external_lut_mode === 'input' && <p className="tool-note">输入转换 LUT 强度固定为 100%。</p>}
       </section>}
     </fieldset>

@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import { PARAMETER_GROUP_HELP } from '../lib/parameterHelp.js'
+import { BeginnerGuide, ParameterHelpButton, ParameterHelpPanel } from './ParameterHelp.jsx'
 import {
   PARAM_GROUPS, RGB_GROUPS, RGB_CHANNELS, defaultGroupOpen, groupSummary, parameterLabel,
 } from '../lib/parameterControls.js'
@@ -9,6 +11,12 @@ export default function ParameterControls({
   showFooter = true,
 }) {
   const [localOpen, setLocalOpen] = useState(defaultGroupOpen)
+  const [helpKey, setHelpKey] = useState(null)
+  const helpPrefix = useId()
+  const helpId = key => `${helpPrefix}-help-${key}`
+  const helpButton = key => <ParameterHelpButton parameter={key} open={helpKey === key} controls={helpId(key)}
+    onClick={() => setHelpKey(current => current === key ? null : key)} />
+  const helpPanel = key => helpKey === key && <ParameterHelpPanel parameter={key} id={helpId(key)} />
   const open = groupOpen ?? localOpen
   const setOpen = onGroupOpen ?? setLocalOpen
   const locked = (key) => lockedFields.includes(key)
@@ -26,6 +34,8 @@ export default function ParameterControls({
   )
 
   return <>
+    <BeginnerGuide />
+    <p className="parameter-help-intro">不确定参数的作用？点击名称旁的「？」查看说明与尝试建议。</p>
     {PARAM_GROUPS.map((group) => {
       const fields = group.id === 'rgb'
         ? RGB_GROUPS.map((rgb) => rgb.key)
@@ -54,12 +64,14 @@ export default function ParameterControls({
           </button>
         </div>
         {open[group.id] && <div className="controls">
+          <p className="parameter-group-description">{PARAMETER_GROUP_HELP[group.id].summary} <strong>{PARAMETER_GROUP_HELP[group.id].startWith}</strong></p>
           {group.id === 'rgb'
             ? RGB_GROUPS.map((rgb) => <div key={rgb.key} className="rgb-group">
               <div className="rgb-group-title">
-                <span className="rgb-group-label">{rgb.label}</span>
+                <span className="parameter-name rgb-group-label">{rgb.label}{helpButton(rgb.key)}</span>
                 {lockButton(rgb.key)}
               </div>
+              {helpPanel(rgb.key)}
               {RGB_CHANNELS.map((channel, index) => <label key={channel} className="slider rgb-slider">
                 <span>{channel}</span>
                 <input
@@ -76,8 +88,9 @@ export default function ParameterControls({
                 <em>{params[rgb.key][index].toFixed(2)}</em>
               </label>)}
             </div>)
-            : group.sliders.map((slider) => <div key={slider.key} className={`slider ${locked(slider.key) ? 'protected' : ''}`}>
-              <span>{slider.label}</span>
+            : group.sliders.map((slider) => <div key={slider.key} className="parameter-control">
+              <div className={`slider ${locked(slider.key) ? 'protected' : ''}`}>
+              <span className="parameter-name">{slider.label}{helpButton(slider.key)}</span>
               <input
                 type="range"
                 aria-label={slider.label}
@@ -91,6 +104,8 @@ export default function ParameterControls({
               />
               <em>{Number(params[slider.key]).toFixed(2)}{slider.unit}</em>
               {lockButton(slider.key)}
+              </div>
+              {helpPanel(slider.key)}
             </div>)}
         </div>}
       </section>

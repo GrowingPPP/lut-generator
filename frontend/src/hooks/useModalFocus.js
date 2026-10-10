@@ -11,9 +11,10 @@ export default function useModalFocus(onClose, allowClose = true, active = true)
     const controls = () =>
       [
         ...(panel?.querySelectorAll(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]',
+          'button, input, select, textarea, a[href], details > summary, [tabindex]',
         ) || []),
-      ].filter((node) => node.getClientRects().length > 0)
+      ].filter((node) => node.tabIndex >= 0 && !node.matches(':disabled') &&
+        node.getAttribute('aria-disabled') !== 'true' && node.getClientRects().length > 0)
     controls()[0]?.focus()
     function onKey(event) {
       if (event.key === 'Escape' && allowClose) {
