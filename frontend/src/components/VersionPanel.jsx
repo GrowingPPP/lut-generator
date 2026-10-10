@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
+import { useDialogs } from './ui/Dialog.jsx'
 
 export default function VersionPanel({
   versions,
@@ -16,6 +17,9 @@ export default function VersionPanel({
 }) {
   const [name, setName] = useState('')
   const [open, setOpen] = useState(false)
+  const { confirm, prompt } = useDialogs()
+  const current = useRef(null)
+  current.current = { versions, busy, onRename, onDelete }
   const choices = [{ id: 'draft', name: '当前草稿快照', params: draft.params }, ...versions]
   function select(side, id) {
     const item = choices.find((v) => String(v.id) === id)
@@ -108,9 +112,10 @@ export default function VersionPanel({
               <button
                 className="btn"
                 disabled={busy}
-                onClick={() => {
-                  const n = window.prompt('版本名称', v.name)
-                  if (n?.trim()) onRename(v.id, n.trim())
+                onClick={async () => {
+                  const name = await prompt({ title: '修改版本名称', label: '版本名称', defaultValue: v.name, maxLength: 100, confirmLabel: '保存名称' })
+                  const latest = current.current
+                  if (name !== null && !latest.busy && latest.versions.some(version => version.id === v.id)) latest.onRename(v.id, name)
                 }}
               >
                 改名
@@ -118,8 +123,10 @@ export default function VersionPanel({
               <button
                 className="btn-danger"
                 disabled={busy}
-                onClick={() => {
-                  if (window.confirm(`删除版本「${v.name}」？`)) onDelete(v.id)
+                onClick={async () => {
+                  const allowed = await confirm({ title: `删除版本「${v.name}」？`, description: '删除后无法恢复此命名版本，当前草稿保持原样。', confirmLabel: '删除版本', destructive: true })
+                  const latest = current.current
+                  if (allowed && !latest.busy && latest.versions.some(version => version.id === v.id)) latest.onDelete(v.id)
                 }}
               >
                 删除

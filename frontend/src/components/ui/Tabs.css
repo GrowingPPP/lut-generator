@@ -1,0 +1,10 @@
+.ui-tabs { min-width: 0; }
+.ui-tabs-list { display: flex; align-items: center; gap: 2px; min-width: 0; border-bottom: 1px solid var(--line); }
+.ui-tabs-trigger { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 8px 12px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.ui-tabs-trigger[data-state='active'] { color: var(--accent-strong); font-weight: 600; }
+.ui-tabs-trigger:hover:not(:disabled) { color: var(--text); }
+.ui-tabs-trigger:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -3px; border-radius: 5px; }
+.ui-tabs-trigger:disabled { color: var(--faint); cursor: not-allowed; }
+.ui-tabs-content { min-width: 0; }
+.ui-tabs-content[hidden] { display: none !important; }
+.ui-tabs-content:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }

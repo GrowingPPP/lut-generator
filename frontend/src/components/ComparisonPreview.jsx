@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import RangeField from './ui/RangeField.jsx'
 import { defaultParams, generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
 import { preloadExternalLut } from '../lib/importedLuts.js'
@@ -78,8 +79,9 @@ export default function ComparisonPreview({ image, a, b, compatible }) {
           </div>
           <div className="comparison-slide-control">
             <label htmlFor={`${comparisonId}-split`}>滑动比较 A / B</label>
-            <input id={`${comparisonId}-split`} type="range" min="0" max="100" step="1" value={split}
+            <RangeField id={`${comparisonId}-split`} min="0" max="100" step="1" value={split}
               onChange={(event) => setSplit(Number(event.target.value))}
+              aria-label="滑动比较 A / B"
               aria-valuetext={`左侧 A ${split}%，右侧 B ${100 - split}%`} />
             <div className="comparison-slide-labels"><span>A · {a.name || '未命名版本'}</span><span>B · {b.name || '未命名版本'}</span></div>
           </div>

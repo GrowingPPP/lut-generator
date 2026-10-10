@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import CheckboxField from './ui/CheckboxField.jsx'
 import SelectField from './SelectField.jsx'
 import { inputContract } from '../lib/styleRecipe.js'
 import { photoMetadataNotes } from '../lib/photoMetadata.js'
@@ -87,7 +88,7 @@ export default function SampleGallery({ samples, media, selectedId, primaryId, v
         {!selected && <button className="btn sg-action" onClick={() => onGuide()} disabled={busy}>输入与相机引导</button>}<span>统计测量，不调用模型</span></div>
         {validation && <details className="sg-validation-details"><summary>{stale ? '参数或样张已变化，上次验证仅供回看' : '查看全部统计验证详情'}</summary>
           <pre>{JSON.stringify(validation.results, null, 2)}</pre></details>}
-        <label className="sg-preview-cache"><input type="checkbox" checked={retainPreviews} onChange={(event) => onRetain(event.target.checked)} disabled={busy} />
+        <label className="sg-preview-cache"><CheckboxField checked={retainPreviews} onChange={(event) => onRetain(event.target.checked)} disabled={busy} />
           <span>在本机保留缩小预览<small>最多 24MB，7 天后过期；不保留原文件</small></span></label>
       </div>
     </div>

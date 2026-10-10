@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
-import useModalFocus from '../hooks/useModalFocus.js'
+import { ModalSurface } from './ui/Dialog.jsx'
+import RangeField from './ui/RangeField.jsx'
+import Tooltip from './ui/Tooltip.jsx'
 import { generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
 import { preloadExternalLut } from '../lib/importedLuts.js'
@@ -112,7 +114,7 @@ function gpuPhotoLimit() {
 export default function PhotoViewer({ sample, media, params, compatible, comparison, onClose, initialMode = 'slider', initialSplit = 0.5,
   adjustmentPanel, canUndo = false, canRedo = false, onUndo, onRedo, onEditDraft, onFinishAdjustment }) {
   const id = useId()
-  const modalRef = useModalFocus(onClose, false)
+  const modalRef = useRef(null)
   const synthetic = useRef(media?.canvas)
   const preview = sample ? media?.canvas : synthetic.current
   const file = media?.file
@@ -136,6 +138,8 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const [aState, setAState] = useState({ loading: hasComparison && compatible, error: '' })
   const [bState, setBState] = useState({ loading: compatible, error: '' })
   const stageRef = useRef(null)
+  const [stageElement, setStageElement] = useState(null)
+  const attachStage = useCallback(node => { stageRef.current = node; setStageElement(node) }, [])
   const drag = useRef(null)
   const request = useRef(null)
   const objectUrl = useRef(null)
@@ -166,22 +170,6 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   }, [modalRef, onFinishAdjustment])
   const close = useCallback(() => { finishAdjustment(); onClose() }, [finishAdjustment, onClose])
   useEffect(() => {
-    const escape = event => {
-      if (event.key !== 'Escape') return
-      // Curve dragging and text fields can consume Escape before the dialog closes.
-      queueMicrotask(() => { if (!event.defaultPrevented) { event.preventDefault(); close() } })
-    }
-    window.addEventListener('keydown', escape)
-    return () => window.removeEventListener('keydown', escape)
-  }, [close])
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = previousOverflow }
-  }, [])
-
-  useEffect(() => {
     generation.current++
     request.current?.abort()
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null }
@@ -200,7 +188,8 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   }, [preview, file, digest, inputStyle])
 
   useEffect(() => {
-    const stage = stageRef.current
+    const stage = stageElement
+    if (!stage) return
     const measure = () => {
       const rect = stage.getBoundingClientRect()
       setFrame({ width: Math.max(1, visibleMode === 'side-by-side' ? (rect.width - 1) / 2 : rect.width), height: Math.max(1, rect.height) })
@@ -209,7 +198,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
     const observer = new ResizeObserver(measure)
     observer.observe(stage)
     return () => observer.disconnect()
-  }, [visibleMode])
+  }, [visibleMode, stageElement])
 
   useEffect(() => {
     setView(current => current.fit
@@ -295,15 +284,16 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
     zoom(activeView.current.scale * Math.exp(-Math.max(-300, Math.min(300, pixels)) * 0.002), localPoint(event))
   }
   useEffect(() => {
-    const stage = stageRef.current
+    const stage = stageElement
+    if (!stage) return
     stage.addEventListener('wheel', wheel, { passive: false })
     return () => stage.removeEventListener('wheel', wheel)
   })
 
   const key = event => {
     if (event.defaultPrevented) return
-    const formField = event.target.closest?.('input, select, textarea, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="option"]')
-    const nativeUndo = formField && !(formField.tagName === 'INPUT' && formField.type === 'range')
+    const formField = event.target.closest?.('input, select, textarea, [contenteditable="true"], [role="slider"], [role="combobox"], [role="listbox"], [role="option"], [role="menu"], [data-chroma-popover-content]')
+    const nativeUndo = formField && formField.getAttribute('role') !== 'slider' && !(formField.tagName === 'INPUT' && formField.type === 'range')
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z' && !nativeUndo && historyAvailable) {
       event.preventDefault()
       if (event.shiftKey) { if (canRedo) { finishAdjustment(); onRedo?.() } }
@@ -328,8 +318,8 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const percent = Math.round(view.scale * 1000) / 10
   const modes = [['slider', '滑动对比'], ['side-by-side', '并排'], ['original', hasComparison && !fallback ? '仅 A' : '仅原图'], ['effect', hasComparison ? '仅 B' : '仅效果']]
 
-  return <div className="photo-viewer-backdrop">
-    <section ref={modalRef} className={`photo-viewer${panelOpen && adjustmentPanel ? ' has-adjustments' : ''}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`} onKeyDown={key}>
+  return <ModalSurface onClose={close} contentRef={modalRef} overlayClassName="photo-viewer-backdrop">
+    <section className={`photo-viewer${panelOpen && adjustmentPanel ? ' has-adjustments' : ''}`} aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`} onKeyDown={key}>
       <header className="photo-viewer-header">
         <div className="photo-viewer-title"><h2 id={`${id}-title`}>放大查看</h2><span title={sample?.name}>{sample?.name || '调色示意图'}</span></div>
         <div className="photo-viewer-header-actions">
@@ -341,7 +331,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
         <div className="photo-viewer-modes" role="group" aria-label="照片查看模式">{modes.map(([value, label]) => <button type="button" key={value} className="photo-viewer-button" aria-pressed={visibleMode === value} disabled={(!compatible || (!!renderError && !renderReady)) && value !== 'original'} onClick={() => setMode(value)}>{label}</button>)}</div>
         <div className="photo-viewer-zoom" role="group" aria-label="照片缩放">
           <button type="button" className="photo-viewer-button" onClick={fit}>适应窗口</button>
-          <button type="button" className="photo-viewer-button" disabled={sourceLoading} onClick={() => loadOriginal(true)}>{file ? '1:1 像素' : sample ? '预览 1:1' : '示意图 1:1'}</button>
+          <Tooltip content="按照片像素查看细节；有原文件时载入原分辨率"><button type="button" className="photo-viewer-button" disabled={sourceLoading} onClick={() => loadOriginal(true)}>{file ? '1:1 像素' : sample ? '预览 1:1' : '示意图 1:1'}</button></Tooltip>
           <button type="button" className="photo-viewer-button photo-viewer-step" aria-label="缩小照片" onClick={() => zoom(view.scale / 1.25)} disabled={view.scale <= 0.25}>−</button>
           <label className="photo-viewer-scale"><span className="photo-viewer-sr-only">缩放比例</span><SelectField aria-label="照片缩放比例" value={String(percent)} onChange={event => zoom(Number(event.target.value) / 100)}>
             {![25, 50, 75, 100, 150, 200, 300, 400].includes(percent) && <option value={percent}>{percent}%</option>}
@@ -362,7 +352,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
       {sourceError && <p className="photo-viewer-error" role="alert">{sourceError}</p>}
       {renderError && <p className="photo-viewer-error" role="alert">效果载入失败：{renderError} {renderReady ? '保留上一次成功效果。' : '当前显示原图。'}</p>}
       {renderLoading && <p className={`photo-viewer-notice${renderReady ? ' photo-viewer-updating' : ''}`} role="status">{renderReady ? '正在更新效果…' : '正在载入完整效果，暂时显示原图…'}</p>}
-      <div ref={stageRef} className={`photo-viewer-stage photo-viewer-${visibleMode}${dragging ? ' is-dragging' : ''}`} tabIndex={0} role="region" aria-label="照片查看区域" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onLostPointerCapture={() => { drag.current = null; setDragging(false) }}>
+      <div ref={attachStage} className={`photo-viewer-stage photo-viewer-${visibleMode}${dragging ? ' is-dragging' : ''}`} tabIndex={0} role="region" aria-label="照片查看区域" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onLostPointerCapture={() => { drag.current = null; setDragging(false) }}>
         <div className="photo-viewer-frame photo-viewer-a">
           <div className="photo-viewer-image" style={{ width: photoSize.width, height: photoSize.height, transform }}>
             <div className="photo-viewer-layer" hidden={hasComparison && compatible && !fallback}><RawPixels image={image} label="规范化原图" /></div>
@@ -379,7 +369,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
         {visibleMode === 'slider' && <div className="photo-viewer-divider" style={{ left: `${split * 100}%` }} aria-hidden="true" />}
       </div>
       <footer className="photo-viewer-footer">
-        {compatible && visibleMode === 'slider' && <div className="photo-viewer-split"><label htmlFor={`${id}-split`}>{aLabel} / {bLabel}</label><input id={`${id}-split`} type="range" min="0" max="100" value={Math.round(split * 100)} onChange={event => setSplit(Number(event.target.value) / 100)} aria-label="照片对比分界" aria-valuetext={`左侧 ${Math.round(split * 100)}%，右侧 ${Math.round((1 - split) * 100)}%`} /></div>}
+        {compatible && visibleMode === 'slider' && <div className="photo-viewer-split"><label htmlFor={`${id}-split`}>{aLabel} / {bLabel}</label><RangeField id={`${id}-split`} min="0" max="100" value={Math.round(split * 100)} onChange={event => setSplit(Number(event.target.value) / 100)} aria-label="照片对比分界" aria-valuetext={`左侧 ${Math.round(split * 100)}%，右侧 ${Math.round((1 - split) * 100)}%`} /></div>}
         <p id={`${id}-help`}>滚轮缩放 · 拖动平移 · + / − 缩放 · 0 适应 · 1 {file ? '原像素' : '预览像素'} · 方向键平移 · Esc 关闭</p>
       </footer>
       </div>
@@ -396,5 +386,5 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
       </aside>}
       </div>
     </section>
-  </div>
+  </ModalSurface>
 }

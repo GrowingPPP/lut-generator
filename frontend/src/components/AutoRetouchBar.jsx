@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import CheckboxField from './ui/CheckboxField.jsx'
 import { startAutoJob, getAutoJob, cancelAutoJob } from '../lib/api.js'
 import { captureAutoRequest, sameAutoConditions, sameAutoMetadata, bindAutoRequest, jobProgressSteps,
   pollAutoJob, ensureAutoJob, continuationRequest, matchingAutoResult, waitRestoredAutoJob,
@@ -280,7 +281,7 @@ export default function AutoRetouchBar({
           disabled={(!recoveryMissing && !job?.can_cancel) || cancelling} title={job?.progress?.stage === 'save' ? '保存已开始，不能取消' : ''}>
           {cancelling ? '正在取消…' : recoveryMissing ? '结束未确认提交' : job?.progress?.stage === 'save' ? '正在保存…' : '取消分析'}</button>}
         <label className="auto-vision" title="开启后会把照片与修图结果发送给模型做主观复检。关闭后只根据客观数据调整。">
-          <input type="checkbox" checked={useVision} onChange={(e) => setUseVision(e.target.checked)} disabled={running || disabled} />
+          <CheckboxField checked={useVision} onChange={(e) => setUseVision(e.target.checked)} disabled={running || disabled} />
           <span>视觉复核</span>
         </label>
       </div>

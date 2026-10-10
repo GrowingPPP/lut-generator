@@ -1,0 +1,24 @@
+.range-field { position: relative; display: flex; align-items: center; width: 100%; min-width: 0; height: 36px; touch-action: pan-y; user-select: none; cursor: pointer; }
+.range-track { position: relative; flex: 1; height: 6px; overflow: hidden; border-radius: 999px; background: var(--linestrong); }
+.range-fill { position: absolute; height: 100%; border-radius: inherit; background: var(--accent-strong); }
+.range-field button.range-thumb { display: block; width: 18px; height: 18px; min-width: 18px; min-height: 18px; padding: 0; border: 2px solid var(--accent-strong); border-radius: 50%; background: var(--panel); color: var(--text); box-shadow: 0 1px 3px var(--shadow); cursor: grab; touch-action: none; }
+.range-field button.range-thumb::before { position: absolute; inset: -10px; border-radius: 50%; content: ''; }
+.range-field button.range-thumb:active { cursor: grabbing; background: var(--accent-soft); }
+.range-field button.range-thumb:focus-visible { outline: 3px solid var(--accent-line); outline-offset: 3px; }
+.range-field[data-disabled] { cursor: default; }
+.range-field[data-disabled] .range-fill { background: var(--muted); }
+.range-field[data-disabled] button.range-thumb { border-color: var(--muted); background: var(--panel2); box-shadow: none; cursor: not-allowed; }
+.slider > .range-field { grid-area: control; }
+.slider > .number-field { grid-area: value; }
+.number-field { position: relative; display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; min-width: 0; max-width: 100%; color: var(--param-value, var(--accent-strong)); font-variant-numeric: tabular-nums; }
+.number-field input.number-input { width: 72px; min-width: 0; max-width: 100%; min-height: 30px; padding: 4px 6px; border: 1px solid var(--linestrong); border-radius: 5px; background: var(--field); color: inherit; font: inherit; font-size: 12px; font-weight: 600; line-height: 1.4; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; }
+.number-field input.number-input::-webkit-inner-spin-button, .number-field input.number-input::-webkit-outer-spin-button { margin: 0; appearance: none; }
+.number-field input.number-input:hover:not(:disabled) { border-color: var(--accent-line); }
+.number-field input.number-input:focus-visible { border-color: var(--accent-strong); outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.number-field input.number-input:disabled { color: var(--muted); background: var(--panel2); cursor: not-allowed; opacity: 1; }
+.number-field input.number-input[aria-invalid='true'] { border-color: var(--danger); }
+.number-unit { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+.number-error { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: max-content; max-width: 230px; padding: 5px 7px; border: 1px solid var(--danger-line); border-radius: 5px; background: var(--panel); color: var(--danger); font-size: 11px; font-weight: 400; line-height: 1.5; text-align: left; }
+.imported-lut-strength > .range-field { grid-column: 1 / -1; }
+.photo-viewer-split > .range-field { flex: 1 1 100px; }
+@media (pointer: coarse) { .range-field { height: 44px; } .range-field button.range-thumb { width: 20px; height: 20px; } .number-field input.number-input { min-height: 36px; } }

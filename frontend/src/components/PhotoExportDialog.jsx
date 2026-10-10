@@ -1,6 +1,7 @@
+import RangeField from './ui/RangeField.jsx'
 import { useState } from 'react'
 import SelectField from './SelectField.jsx'
-import useModalFocus from '../hooks/useModalFocus.js'
+import { ModalSurface } from './ui/Dialog.jsx'
 import { exportPhoto, savePhotoFile } from '../lib/photoApi.js'
 import { sampleIsNormalized } from '../lib/samples.js'
 import './PhotoExportDialog.css'
@@ -10,7 +11,6 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
   const [quality, setQuality] = useState(95)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const modalRef = useModalFocus(onClose, !saving)
   const available = !!media?.file && compatible && sampleIsNormalized(sample)
   const width = sample?.source_width || sample?.photo_metadata?.source_width
   const height = sample?.source_height || sample?.photo_metadata?.source_height
@@ -32,8 +32,8 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
     }
   }
   return (
-    <div className="modal-backdrop">
-      <section ref={modalRef} className="workspace-modal photo-export-modal" role="dialog"
+    <ModalSurface onClose={onClose} busy={saving}>
+      <section className="workspace-modal photo-export-modal" role="dialog"
         aria-modal="true" aria-labelledby="photo-export-title">
         <div className="section-heading">
           <h2 id="photo-export-title">导出调整后照片</h2>
@@ -57,7 +57,7 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
             </SelectField>
           </label>
           {format === 'jpeg' && <label>JPEG 质量 <output>{quality}</output>
-            <input type="range" aria-label="JPEG 导出质量" min="80" max="100" step="1"
+            <RangeField aria-label="JPEG 导出质量" min="80" max="100" step="1"
               value={quality} disabled={saving} onChange={(e) => setQuality(Number(e.target.value))}/>
           </label>}
         </div>
@@ -75,6 +75,6 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
           </button>
         </div>
       </section>
-    </div>
+    </ModalSurface>
   )
 }

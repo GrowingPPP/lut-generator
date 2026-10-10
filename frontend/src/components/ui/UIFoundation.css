@@ -1,0 +1,51 @@
+button, input, textarea { font-family: inherit; }
+
+.btn, .btn-primary, .btn-danger {
+  gap: 7px;
+  min-height: 36px;
+  line-height: 1.4;
+  transition: background .14s, border-color .14s, box-shadow .14s;
+}
+
+button:focus-visible, summary:focus-visible,
+input:not([type='hidden']):focus-visible, textarea:focus-visible,
+[tabindex='0']:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+
+.btn:disabled, .btn-primary:disabled, .btn-danger:disabled,
+.parameter-lock:disabled, .group-reset:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn:disabled, .btn-danger:disabled {
+  color: var(--muted);
+  background: var(--panel2);
+  border-color: var(--line);
+}
+
+input[aria-invalid='true'], textarea[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.session-item .session-title { flex: 1; min-width: 0; }
+.session-item .session-rename { flex: 0 0 auto; min-height: 28px; padding: 4px 8px; font-size: 12px; border-radius: 6px; }
+.workspace-history-drawer .session-item { border-radius: 8px; }
+
+.photo-viewer-split > .range-field { flex: 1 1 100px; min-width: 0; }
+.comparison-slide-control > .range-field { width: 100%; }
+.slider > .number-field { color: var(--param-value, var(--accent-strong)); font-weight: 600; }
+input[type='radio'] { accent-color: var(--accent); }
+
+.modal-backdrop[data-chroma-dialog-overlay],
+.photo-viewer-backdrop[data-chroma-dialog-overlay] { z-index: 1400; }
+
+.diagnostics-overlay-control,
+.baseline-field-list > label,
+.sg-preview-cache { align-items: center; gap: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .btn-primary, .btn-danger { transition: none; }
+}

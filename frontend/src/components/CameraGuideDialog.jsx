@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import SelectField from './SelectField.jsx'
-import useModalFocus from '../hooks/useModalFocus.js'
+import { ModalSurface } from './ui/Dialog.jsx'
 import { cameraFileName, saveTextFile } from '../lib/api.js'
 import {
   CAMERA_GUIDE_SOURCES,
@@ -11,14 +11,12 @@ import {
 import './CameraGuideDialog.css'
 
 export default function CameraGuideDialog({ params, name, sample, onClose, onDownload }) {
-  const modalRef = useModalFocus(onClose)
   const [model, setModel] = useState(identifyCamera(sample?.photo_metadata?.camera_model))
   const filename = cameraFileName(name || 'CHROMA')
   const modelName = { s5ii: 'LUMIX S5II', s5iix: 'LUMIX S5IIX', other: '其他 / 尚未确认' }[model]
   return (
-    <div className="modal-backdrop">
+    <ModalSurface onClose={onClose}>
       <section
-        ref={modalRef}
         className="workspace-modal camera-guide"
         role="dialog"
         aria-modal="true"
@@ -139,6 +137,6 @@ export default function CameraGuideDialog({ params, name, sample, onClose, onDow
           </button>
         </div>
       </section>
-    </div>
+    </ModalSurface>
   )
 }

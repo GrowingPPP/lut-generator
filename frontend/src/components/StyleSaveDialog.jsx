@@ -1,3 +1,4 @@
+import CheckboxField from './ui/CheckboxField.jsx'
 import { useMemo, useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { defaultParams } from '../lib/lutEngine.js'
@@ -9,7 +10,7 @@ import {
 } from '../lib/styleRecipe.js'
 import { RenderedImage } from './ComparisonPreview.jsx'
 import { diffParams, PARAM_LABELS } from '../lib/autoGrade.js'
-import useModalFocus from '../hooks/useModalFocus.js'
+import { ModalSurface } from './ui/Dialog.jsx'
 import { parseTags } from '../lib/assetLibrary.js'
 
 export default function StyleSaveDialog({
@@ -32,7 +33,6 @@ export default function StyleSaveDialog({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [replace, setReplace] = useState(false)
-  const modalRef = useModalFocus(onClose, !saving)
   const eligibility = recipeCanSave(workspace)
   const originalOperations = workspace.recipe_projection?.operations || {}
   const candidate = useMemo(() => {
@@ -80,9 +80,8 @@ export default function StyleSaveDialog({
     }
   }
   return (
-    <div className="modal-backdrop">
+    <ModalSurface onClose={onClose} busy={saving}>
       <section
-        ref={modalRef}
         className="workspace-modal"
         role="dialog"
         aria-modal="true"
@@ -153,8 +152,7 @@ export default function StyleSaveDialog({
             </SelectField>
           </label>
           <label className="favorite-option">
-            <input
-              type="checkbox"
+            <CheckboxField
               checked={favorite}
               onChange={(e) => setFavorite(e.target.checked)}
               disabled={saving}
@@ -201,8 +199,7 @@ export default function StyleSaveDialog({
               {Object.entries(operations || originalOperations).map(([key, op]) => (
                 <div className="recipe-operation" key={key}>
                   <label>
-                    <input
-                      type="checkbox"
+                    <CheckboxField
                       aria-label={`保留${PARAM_LABELS[key]?.[0] || key}`}
                       checked={!excluded.includes(key)}
                       disabled={op.dependency || saving}
@@ -272,8 +269,7 @@ export default function StyleSaveDialog({
         )}
         {savedAsset && (
           <label className="preview-cache-option">
-            <input
-              type="checkbox"
+            <CheckboxField
               checked={replace}
               onChange={(e) => setReplace(e.target.checked)}
             />
@@ -300,6 +296,6 @@ export default function StyleSaveDialog({
           </button>
         </div>
       </section>
-    </div>
+    </ModalSurface>
   )
 }

@@ -1,3 +1,4 @@
+import CheckboxField from './ui/CheckboxField.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
 
@@ -17,32 +18,18 @@ import {
 } from '../lib/assetLibrary.js'
 import { preloadExternalLut } from '../lib/importedLuts.js'
 import { makeThumb } from '../lib/preview.js'
-import useModalFocus from '../hooks/useModalFocus.js'
+import { AlertSurface, ModalSurface, useDialogs } from './ui/Dialog.jsx'
 import './LibraryView.css'
 
 async function downloadAndSave(id, mode, portable) {
+  const { blob, name } = await downloadLut(id, mode, portable ? 'neutral' : 'saved')
+  const url = URL.createObjectURL(blob)
   try {
-    if (
-      portable &&
-      !window.confirm(
-        '将风格应用于相同输入基准的中性参数并导出一个 LUT？若要叠加当前校正，请先载入工作区，再直接下载当前完整效果。',
-      )
-    )
-      return
-    const { blob, name } = await downloadLut(
-      id,
-      mode,
-      portable ? 'neutral' : 'saved',
-    )
-    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = name
     a.click()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    alert(`下载失败：${e.message}`)
-  }
+  } finally { URL.revokeObjectURL(url) }
 }
 
 const kindLabel = (asset) =>
@@ -91,30 +78,31 @@ function LibraryModal({
   className = '',
   busy = false,
   describedBy,
+  destructive = false,
+  initialFocusRef,
 }) {
-  const ref = useModalFocus(onClose, allowClose)
-  useEffect(() => { if (busy) ref.current?.focus() }, [busy, ref])
   const Panel = form ? 'form' : 'section'
+  const Surface = destructive ? AlertSurface : ModalSurface
   return (
-    <div className="modal-backdrop">
+    <Surface onClose={onClose} busy={busy || !allowClose} initialFocusRef={initialFocusRef}>
       <Panel
-        ref={ref}
         className={`workspace-modal library-modal ${className}`}
         role="dialog"
         aria-modal="true"
         aria-label={label}
         aria-describedby={describedBy}
-        aria-busy={busy || undefined}
+        aria-busy={busy || !allowClose || undefined}
         tabIndex={-1}
         onSubmit={onSubmit}
       >
         {children}
       </Panel>
-    </div>
+    </Surface>
   )
 }
 
 export default function LibraryView({ onPreview, onDeleted }) {
+  const { confirm } = useDialogs()
   const [luts, setLuts] = useState([])
   const [summary, setSummary] = useState({ total: 0, groups: [] })
   const [filters, setFilters] = useState({ ...DEFAULT_LIBRARY_FILTERS })
@@ -128,6 +116,8 @@ export default function LibraryView({ onPreview, onDeleted }) {
   const deleteInFlight = useRef(false)
   const resultsRef = useRef(null)
   const [detail, setDetail] = useState(null)
+  const [downloadError, setDownloadError] = useState('')
+  const [downloading, setDownloading] = useState(false)
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
   const [editError, setEditError] = useState('')
@@ -137,7 +127,11 @@ export default function LibraryView({ onPreview, onDeleted }) {
   const [revisions, setRevisions] = useState([])
   const requestId = useRef(0)
   const filtersRef = useRef(filters)
+  const deleteCancelRef = useRef(null)
+  const editingNameRef = useRef(null)
   filtersRef.current = filters
+
+  useEffect(() => { setDownloadError('') }, [detail?.id])
 
   useEffect(() => {
     const active = document.activeElement
@@ -291,6 +285,18 @@ export default function LibraryView({ onPreview, onDeleted }) {
     setDetail(null)
     setRevisionAsset(null)
     onPreview(lut)
+  }
+  const downloadAsset = async (asset, mode) => {
+    if (downloading) return
+    setDownloadError('')
+    const portable = asset.kind === 'portable_style'
+    if (portable && !(await confirm({ title: '导出中性参数上的风格？',
+      description: '将风格应用于相同输入基准的中性参数并导出一个 LUT。若要叠加当前校正，请先载入工作区，再直接下载当前完整效果。',
+      confirmLabel: '导出风格' }))) return
+    setDownloading(true)
+    try { await downloadAndSave(asset.id, mode, portable) }
+    catch (failure) { setDownloadError(`下载失败：${failure.message}`) }
+    finally { setDownloading(false) }
   }
 
   return (
@@ -483,10 +489,10 @@ export default function LibraryView({ onPreview, onDeleted }) {
         </div>
       )}
       {detail && !deleteTarget && (
-        <LibraryModal label="资产详情" onClose={() => setDetail(null)}>
+        <LibraryModal label="资产详情" onClose={() => setDetail(null)} busy={downloading}>
           <div className="section-heading">
             <h2>{detail.name}</h2>
-            <button className="btn" onClick={() => setDetail(null)}>
+            <button className="btn" disabled={downloading} onClick={() => setDetail(null)}>
               关闭
             </button>
           </div>
@@ -545,41 +551,33 @@ export default function LibraryView({ onPreview, onDeleted }) {
               : '库内导出使用已保存的完整参数。'}{' '}
             载入前会显示候选预览。
           </p>
+          {downloadError && <p className="error" role="alert">{downloadError}</p>}
+          {downloading && <p role="status">正在导出，请稍候…</p>}
           <div className="library-modal-actions">
-            <button className="btn-primary" onClick={() => preview(detail)}>
+            <button className="btn-primary" disabled={downloading} onClick={() => preview(detail)}>
               预览并载入
             </button>
             <button
               className="btn"
-              onClick={() =>
-                downloadAndSave(
-                  detail.id,
-                  'camera',
-                  detail.kind === 'portable_style',
-                )
-              }
+              disabled={downloading}
+              onClick={() => downloadAsset(detail, 'camera')}
             >
               导出机内版
             </button>
             <button
               className="btn"
-              onClick={() =>
-                downloadAndSave(
-                  detail.id,
-                  'software',
-                  detail.kind === 'portable_style',
-                )
-              }
+              disabled={downloading}
+              onClick={() => downloadAsset(detail, 'software')}
             >
               导出后期版
             </button>
-            <button className="btn" onClick={() => openEdit(detail)}>
+            <button className="btn" disabled={downloading} onClick={() => openEdit(detail)}>
               编辑信息
             </button>
-            <button className="btn" onClick={() => openRevisions(detail)}>
+            <button className="btn" disabled={downloading} onClick={() => openRevisions(detail)}>
               调色修订历史
             </button>
-            <button className="btn-danger" disabled={busyIds.includes(detail.id)} onClick={() => openDelete(detail)}>
+            <button className="btn-danger" disabled={downloading || busyIds.includes(detail.id)} onClick={() => openDelete(detail)}>
               删除资产
             </button>
           </div>
@@ -587,7 +585,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
       )}
       {deleteTarget && (
         <LibraryModal label="删除 LUT" className="library-delete-modal" onClose={closeDelete}
-          busy={deleting} describedBy="library-delete-description">
+          busy={deleting} destructive initialFocusRef={deleteCancelRef} describedBy="library-delete-description">
           <h2>删除这个 LUT？</h2>
           <div className="library-delete-target">
             <strong>{deleteTarget.name}</strong>
@@ -600,7 +598,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           {deleteError && <p className="error" role="alert">{deleteError}</p>}
           {deleting && <p className="library-delete-progress" role="status">正在删除，请稍候…</p>}
           <div className="library-modal-actions library-delete-actions">
-            <button className="btn" disabled={deleting} onClick={closeDelete}>取消</button>
+            <button ref={deleteCancelRef} className="btn" disabled={deleting} onClick={closeDelete}>取消</button>
             <button className="btn-danger library-delete-confirm" disabled={deleting} onClick={remove}>
               {deleting ? '正在删除…' : '确认删除'}
             </button>
@@ -615,6 +613,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           onSubmit={saveEdit}
           onClose={() => setEditing(null)}
           allowClose={!saving}
+          initialFocusRef={editingNameRef}
         >
           <div className="section-heading">
             <h2>编辑资产信息</h2>
@@ -630,7 +629,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           <label>
             名称
             <input
-              autoFocus
+              ref={editingNameRef}
               value={draft.name}
               maxLength={255}
               required
@@ -676,8 +675,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
             </datalist>
           </label>
           <label className="library-check">
-            <input
-              type="checkbox"
+            <CheckboxField
               checked={draft.favorite}
               disabled={saving}
               onChange={(e) => changeDraft('favorite', e.target.checked)}

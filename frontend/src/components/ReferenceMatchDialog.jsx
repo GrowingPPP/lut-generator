@@ -1,10 +1,12 @@
+import RangeField from './ui/RangeField.jsx'
+import CheckboxField from './ui/CheckboxField.jsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { defaultParams } from '../lib/lutEngine.js'
 import { decodeSample } from '../lib/samples.js'
 import { matchingReferenceResult, requestReferenceMatch } from '../lib/referenceMatch.js'
 import { diffParams } from '../lib/autoGrade.js'
 import { RenderedImage } from './ComparisonPreview.jsx'
-import useModalFocus from '../hooks/useModalFocus.js'
+import { ModalSurface } from './ui/Dialog.jsx'
 import './ReferenceMatchDialog.css'
 
 export default function ReferenceMatchDialog({ file, image, params, context, workspaceId,
@@ -21,7 +23,6 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
   const generation = useRef(0)
   const running = loading || matching
   const blocked = running || disabled
-  const modal = useModalFocus(onClose, !running, !inline)
   useEffect(() => () => { generation.current += 1 }, [])
   useEffect(() => { setCandidate(null) }, [params, context, workspaceId, sourceDigest, mainSampleId])
 
@@ -70,8 +71,7 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
     finally { setMatching(false); onBusyChange(false) }
   }
   const changes = candidate ? diffParams(candidate.result.before_params, candidate.result.params) : []
-  return <div className={inline ? 'reference-match-inline' : 'modal-backdrop'}>
-    <section ref={modal} className={inline ? 'reference-match' : 'workspace-modal reference-match'} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-labelledby="reference-match-title">
+  const content = <section className={inline ? 'reference-match' : 'workspace-modal reference-match'} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-labelledby="reference-match-title">
       <div className="section-heading"><div><span className="reference-kicker">色彩与影调</span><h2 id="reference-match-title">参考图风格匹配</h2></div>
         {!inline && <button className="btn" disabled={running} onClick={onClose}>关闭</button>}</div>
       <p className="workspace-note">参考图不会成为主样张。匹配在现有调色参数中寻找接近的色彩与影调，保留参数保护；场景和光照差异会影响结果。</p>
@@ -85,10 +85,10 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
         <label className="btn">更换参考图<input type="file" accept="image/jpeg,image/png,image/webp" disabled={blocked} onChange={upload} /></label></div>}
       {reference && reference.metadata.color_management?.warning && <p className="workspace-note">{reference.metadata.color_management.warning}</p>}
       <fieldset className="reference-options" disabled={blocked}>
-        <label><input type="checkbox" checked={color} onChange={(e) => { setColor(e.target.checked); setCandidate(null) }} />匹配色彩</label>
-        <label><input type="checkbox" checked={tone} onChange={(e) => { setTone(e.target.checked); setCandidate(null) }} />匹配影调</label>
+        <label><CheckboxField checked={color} onChange={(e) => { setColor(e.target.checked); setCandidate(null) }} />匹配色彩</label>
+        <label><CheckboxField checked={tone} onChange={(e) => { setTone(e.target.checked); setCandidate(null) }} />匹配影调</label>
         <label className="reference-strength">匹配强度 <output>{Math.round(strength * 100)}%</output>
-          <input aria-label="参考匹配强度" type="range" min="0" max="1" step="0.05" value={strength}
+          <RangeField aria-label="参考匹配强度" min="0" max="1" step="0.05" value={strength}
             onChange={(e) => { setStrength(Number(e.target.value)); setCandidate(null) }} /></label>
       </fieldset>
       {(!compatible || !file) && <p className="workspace-note">请先绑定当前主样张原文件，并确认匹配的输入。</p>}
@@ -104,5 +104,6 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
         {loading ? '正在统一参考图色彩…' : matching ? '正在匹配…' : '生成匹配候选'}</button>
         <button className="btn-primary" disabled={blocked || !changes.length} onClick={apply}>应用候选</button></div>
     </section>
-  </div>
+  return inline ? <div className="reference-match-inline">{content}</div>
+    : <ModalSurface onClose={onClose} busy={running}>{content}</ModalSurface>
 }

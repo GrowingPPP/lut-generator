@@ -1,0 +1,13 @@
+.checkbox-control { display: inline-flex; align-items: center; position: relative; flex: 0 0 auto; vertical-align: middle; }
+.checkbox-control > button.checkbox-field { display: inline-flex; align-items: center; justify-content: center; position: relative; flex: 0 0 19px; width: 19px; height: 19px; min-width: 19px; min-height: 19px; padding: 0; margin: 0; border: 1px solid var(--linestrong); border-radius: 5px; background: var(--field); color: var(--text); box-shadow: 0 1px 2px var(--shadow); cursor: pointer; vertical-align: middle; }
+button.checkbox-field::before { position: absolute; inset: -5px; border-radius: 6px; content: ''; }
+.checkbox-control > button.checkbox-field[data-state='checked'] { border-color: var(--accent-strong); background: var(--accent-strong); color: var(--panel); }
+button.checkbox-field:hover:not(:disabled) { border-color: var(--accent-strong); }
+button.checkbox-field:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.checkbox-control > button.checkbox-field:disabled { cursor: not-allowed; border-color: var(--linestrong); background: var(--panel2); color: var(--muted); box-shadow: none; }
+button.checkbox-field[aria-invalid='true'] { border-color: var(--danger); }
+.checkbox-validation { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; width: max-content; max-width: 210px; padding: 5px 7px; border: 1px solid var(--danger); border-radius: 5px; background: var(--panel); color: var(--danger); font-size: 11px; font-weight: 400; }
+.checkbox-indicator { display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.checkbox-indicator svg { display: block; }
+.imported-lut-confirm > .checkbox-control, .sg-preview-cache > .checkbox-control { margin-top: 2px; }
+@media (pointer: coarse) { .checkbox-control > button.checkbox-field { width: 22px; height: 22px; min-width: 22px; min-height: 22px; flex-basis: 22px; } }

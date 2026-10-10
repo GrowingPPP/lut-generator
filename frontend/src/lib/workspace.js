@@ -47,6 +47,16 @@ export function createWorkspaceState(options = {}) {
   return { workspace: options.workspace || createWorkspace(options), past: [], future: [], pending: null }
 }
 
+function snapshotChanged(before, after) {
+  return SNAPSHOT_FIELDS.some(key => key !== 'report' && !equalValue(before[key], after[key]))
+}
+
+export function historyAvailability(state) {
+  const pendingChanged = Boolean(state.pending && snapshotChanged(state.pending.before, state.workspace))
+  return { canUndo: state.past.length > 0 || pendingChanged,
+    canRedo: state.future.length > 0 && !pendingChanged }
+}
+
 export function changedFields(before, after) {
   return PARAM_FIELDS.filter((field) => !equalValue(before[field], after[field]))
 }
@@ -256,7 +266,7 @@ export function commitEdit(state, patch, options = {}) {
   validateSnapshot(after)
   // A report follows a real editing transaction; failed or skipped automatic
   // attempts remain metadata and cannot create an undo step on their own.
-  if (!SNAPSHOT_FIELDS.some((key) => key !== 'report' && !equalValue(before[key], after[key]))) return { ...state, pending: null }
+  if (!snapshotChanged(before, after)) return { ...state, pending: null }
   if ([...state.past, ...state.future].some(transaction => transaction.id === id))
     throw domainError('duplicate_transaction', '此作业操作已经存在，不能重复应用')
   if (Object.hasOwn(config, 'report')) {

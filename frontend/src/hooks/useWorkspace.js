@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createWorkspace, createWorkspaceState, beginEdit, previewEdit, commitEdit, cancelEdit, undoEdit, redoEdit,
   setWorkspaceMeta, serializeWorkspaceState, validateWorkspaceRecord, applyRecipeEdit, restoreVersionEdit,
-  workspaceId } from '../lib/workspace.js'
+  workspaceId, historyAvailability } from '../lib/workspace.js'
 import { createDraftStorage, draftBackup } from '../lib/draftStorage.js'
 import { clone, domainError, inputContract } from '../lib/styleRecipe.js'
 
@@ -225,11 +225,12 @@ export default function useWorkspace({ userId = 'guest', initialParams, sessionI
   }, [flush])
 
   // While account identity changes, never render a previous owner's draft.
-  const workspace = state.workspace.user_id === userKey ? state.workspace : createWorkspace({ userId: userKey, initialParams, sessionId })
-  return { workspace, histories: { past: state.workspace.user_id === userKey ? state.past : [], future: state.workspace.user_id === userKey ? state.future : [] },
-    ready: ready && state.workspace.user_id === userKey, saveStatus, error, conflict,
-    canUndo: state.workspace.user_id === userKey && state.past.length > 0,
-    canRedo: state.workspace.user_id === userKey && state.future.length > 0,
+  const owned = state.workspace.user_id === userKey
+  const workspace = owned ? state.workspace : createWorkspace({ userId: userKey, initialParams, sessionId })
+  const history = owned ? historyAvailability(state) : { canUndo: false, canRedo: false }
+  return { workspace, histories: { past: owned ? state.past : [], future: owned ? state.future : [] },
+    ready: ready && owned, saveStatus, error, conflict,
+    ...history,
     begin, update, commit, cancel, undo, redo, setMeta, loadWorkspace, fork, flush, backup,
     setGoal, setLocks, setPurpose, reset, applyRecipe, restoreVersion, confirmRecipeInput, confirmBaseline,
     cachePreview, getCachedPreview, clearPreviews }

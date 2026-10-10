@@ -1,6 +1,7 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { PARAMETER_GROUP_HELP } from '../lib/parameterHelp.js'
-import { BeginnerGuide, ParameterHelpButton, ParameterHelpPanel } from './ParameterHelp.jsx'
+import { BeginnerGuide, ParameterInfo } from './ParameterHelp.jsx'
+import RangeField, { NumberField } from './ui/RangeField.jsx'
 import {
   PARAM_GROUPS, RGB_GROUPS, RGB_CHANNELS, defaultGroupOpen, groupSummary, parameterLabel,
 } from '../lib/parameterControls.js'
@@ -11,12 +12,6 @@ export default function ParameterControls({
   showFooter = true,
 }) {
   const [localOpen, setLocalOpen] = useState(defaultGroupOpen)
-  const [helpKey, setHelpKey] = useState(null)
-  const helpPrefix = useId()
-  const helpId = key => `${helpPrefix}-help-${key}`
-  const helpButton = key => <ParameterHelpButton parameter={key} open={helpKey === key} controls={helpId(key)}
-    onClick={() => setHelpKey(current => current === key ? null : key)} />
-  const helpPanel = key => helpKey === key && <ParameterHelpPanel parameter={key} id={helpId(key)} />
   const open = groupOpen ?? localOpen
   const setOpen = onGroupOpen ?? setLocalOpen
   const locked = (key) => lockedFields.includes(key)
@@ -68,14 +63,12 @@ export default function ParameterControls({
           {group.id === 'rgb'
             ? RGB_GROUPS.map((rgb) => <div key={rgb.key} className="rgb-group">
               <div className="rgb-group-title">
-                <span className="parameter-name rgb-group-label">{rgb.label}{helpButton(rgb.key)}</span>
+                <span className="parameter-name rgb-group-label">{rgb.label}<ParameterInfo parameter={rgb.key} /></span>
                 {lockButton(rgb.key)}
               </div>
-              {helpPanel(rgb.key)}
-              {RGB_CHANNELS.map((channel, index) => <label key={channel} className="slider rgb-slider">
+              {RGB_CHANNELS.map((channel, index) => <div key={channel} className="slider rgb-slider">
                 <span>{channel}</span>
-                <input
-                  type="range"
+                <RangeField
                   aria-label={`${rgb.label} ${channel}`}
                   min={rgb.min}
                   max={rgb.max}
@@ -85,14 +78,15 @@ export default function ParameterControls({
                   {...gesture}
                   onChange={(event) => onUpdateChannel(rgb.key, index, Number(event.target.value))}
                 />
-                <em>{params[rgb.key][index].toFixed(2)}</em>
-              </label>)}
+                <NumberField aria-label={`${rgb.label} ${channel} 数值`} min={rgb.min} max={rgb.max} step={rgb.step}
+                  value={params[rgb.key][index]} disabled={disabled || locked(rgb.key)} {...gesture}
+                  onChange={event => onUpdateChannel(rgb.key, index, Number(event.target.value))} />
+              </div>)}
             </div>)
             : group.sliders.map((slider) => <div key={slider.key} className="parameter-control">
               <div className={`slider ${locked(slider.key) ? 'protected' : ''}`}>
-              <span className="parameter-name">{slider.label}{helpButton(slider.key)}</span>
-              <input
-                type="range"
+              <span className="parameter-name">{slider.label}<ParameterInfo parameter={slider.key} /></span>
+              <RangeField
                 aria-label={slider.label}
                 min={slider.min}
                 max={slider.max}
@@ -102,10 +96,11 @@ export default function ParameterControls({
                 {...gesture}
                 onChange={(event) => onUpdateParam(slider.key, Number(event.target.value))}
               />
-              <em>{Number(params[slider.key]).toFixed(2)}{slider.unit}</em>
+              <NumberField aria-label={`${slider.label} 数值`} min={slider.min} max={slider.max} step={slider.step}
+                value={params[slider.key]} unit={slider.unit} disabled={disabled || locked(slider.key)} {...gesture}
+                onChange={event => onUpdateParam(slider.key, Number(event.target.value))} />
               {lockButton(slider.key)}
               </div>
-              {helpPanel(slider.key)}
             </div>)}
         </div>}
       </section>

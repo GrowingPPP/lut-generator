@@ -1,6 +1,7 @@
 import { defaultParams } from '../lib/lutEngine.js'
 import { applyStyleRecipe, inputContract } from '../lib/styleRecipe.js'
 import { RenderedImage } from './ComparisonPreview.jsx'
+import { ModalSurface } from './ui/Dialog.jsx'
 
 export default function InputConfirmationDialog({ workspace, image, onConfirm, onClose }) {
   const neutral = {
@@ -21,7 +22,7 @@ export default function InputConfirmationDialog({ workspace, image, onConfirm, o
     error = e.message
   }
   return (
-    <div className="modal-backdrop">
+    <ModalSurface onClose={onClose}>
       <section
         className="workspace-modal"
         role="dialog"
@@ -46,6 +47,6 @@ export default function InputConfirmationDialog({ workspace, image, onConfirm, o
           </button>
         </div>
       </section>
-    </div>
+    </ModalSurface>
   )
 }

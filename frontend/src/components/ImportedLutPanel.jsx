@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import CheckboxField from './ui/CheckboxField.jsx'
 import SelectField from './SelectField.jsx'
+import RangeField from './ui/RangeField.jsx'
 import { importLut, listImportedLuts, preloadExternalLut } from '../lib/importedLuts.js'
 import { MAX_CUBE_BYTES } from '../lib/cubeLut.js'
 import ParameterHelp from './ParameterHelp.jsx'
@@ -73,9 +75,14 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
     } catch (reason) { if (request === requestId.current) fail(reason) }
     finally { if (request === requestId.current) setLoading(false) }
   }
-  function commitStrength() {
-    if (blocked || loading || params.external_lut_mode === 'input' || strength === params.external_lut_strength) return
-    onCommit?.({ external_lut_strength: strength })
+  function commitStrength(event) {
+    const finalStrength = Number(event?.target?.value ?? strength)
+    if (blockedRef.current || loading || paramsRef.current.external_lut_mode === 'input') {
+      setStrength(paramsRef.current.external_lut_strength)
+      return
+    }
+    if (finalStrength === paramsRef.current.external_lut_strength) return
+    onCommit?.({ external_lut_strength: finalStrength })
   }
   const selected = artifacts.find(artifact => artifact.id === params.external_lut_id)
   return <section className="imported-lut-panel" aria-label="外部 LUT">
@@ -93,9 +100,9 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
     <ParameterHelp parameter="external_lut_mode" />
     {params.external_lut_id && <>
       <div className="imported-lut-strength"><label htmlFor="external-lut-strength">{params.external_lut_mode === 'input' ? '输入转换强度' : '显示风格强度'}</label><output>{Math.round(strength * 100)}%</output>
-        <input id="external-lut-strength" type="range" min={0} max={1} step={0.01} value={strength}
+        <RangeField id="external-lut-strength" aria-label="外部 LUT 显示风格强度" min={0} max={1} step={0.01} value={strength}
           disabled={blocked || loading || params.external_lut_mode === 'input'} onChange={event => setStrength(Number(event.target.value))}
-          onPointerUp={commitStrength} onPointerCancel={() => setStrength(params.external_lut_strength)} onBlur={commitStrength} onKeyUp={commitStrength} />
+          onPointerUp={commitStrength} onPointerCancel={() => setStrength(paramsRef.current.external_lut_strength)} onBlur={commitStrength} onKeyUp={commitStrength} />
       </div>
       <ParameterHelp parameter="external_lut_strength" />
       <p className="imported-lut-help">{params.external_lut_mode === 'input'
@@ -108,7 +115,7 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
         <label>输入信号<SelectField aria-label="外部 LUT 输入信号" required disabled={loading} value={input} onChange={event => { setInput(event.target.value); setConfirmed(false) }}><option value="">请选择</option>{SIGNALS.map(signal => <option key={signal}>{signal}</option>)}</SelectField></label>
         <label>输出信号<SelectField aria-label="外部 LUT 输出信号" required disabled={loading} value={output} onChange={event => { setOutput(event.target.value); setConfirmed(false) }}><option value="">请选择</option>{SIGNALS.filter(signal => signal !== 'VLOG').map(signal => <option key={signal}>{signal}</option>)}</SelectField></label>
       </div>
-      <label className="imported-lut-confirm"><input type="checkbox" checked={confirmed} disabled={loading} onChange={event => setConfirmed(event.target.checked)} />我已依据 LUT 来源确认信号声明，且文件为 SDR。</label>
+      <label className="imported-lut-confirm"><CheckboxField checked={confirmed} disabled={loading} onChange={event => setConfirmed(event.target.checked)} />我已依据 LUT 来源确认信号声明，且文件为 SDR。</label>
       <p className="imported-lut-help">支持纯3D 2–65点、R最快、DOMAIN。仅接受 sRGB→sRGB、Rec709→Rec709 或 VLOG→Rec709；不支持1D、混合及HDR。账号保存解析网格，不保存照片；导出33点可能降低高密度 LUT 细节。</p>
       <button type="submit" disabled={blocked || loading || !file || !confirmed}>{loading ? '正在导入…' : '确认并导入'}</button>
     </form>}

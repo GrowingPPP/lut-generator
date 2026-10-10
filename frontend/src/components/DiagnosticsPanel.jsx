@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import CheckboxField from './ui/CheckboxField.jsx'
 import { normalizeParams } from '../lib/lutEngine.js'
 import { parameterSignature } from '../lib/workspaceFlow.js'
 import { curvePoints, diagnosticDimensions, hueWeight, measureDiagnostics } from '../lib/diagnostics.js'
@@ -165,7 +166,7 @@ export default function DiagnosticsPanel({ image, params, compatible, sampleName
           <div className="diagnostics-histograms">{CHANNELS.map((channel) => <Histogram key={channel.key} channel={channel} baseline={currentMeasurement.baseline.histograms[channel.key]} current={currentMeasurement.current.histograms[channel.key]} />)}</div>
           <details className="diagnostics-risk-details">
             <summary>查看裁切位置与诊断预览</summary>
-            <label className="diagnostics-overlay-control"><input type="checkbox" checked={overlay} onChange={(event) => setOverlay(event.target.checked)} />叠加裁切位置</label>
+            <label className="diagnostics-overlay-control"><CheckboxField checked={overlay} onChange={(event) => setOverlay(event.target.checked)} />叠加裁切位置</label>
             <RiskPreview result={currentMeasurement} enabled={overlay} />
             <div className="diagnostics-mask-legend"><span><i />高光：任一通道 &gt; 0.98</span><span><i className="shadow" />暗部：全部通道 &lt; 0.02</span></div>
           </details>

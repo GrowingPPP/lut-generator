@@ -1846,13 +1846,6 @@ textarea::placeholder {
 .comparison-preview .pane {
   background: var(--photo-surround);
 }
-button:focus-visible,
-select:focus-visible,
-input:focus-visible,
-summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
 @media (max-width: 900px) {
   .workspace-toolbar-row {
     align-items: flex-start;

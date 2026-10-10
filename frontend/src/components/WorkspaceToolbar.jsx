@@ -1,4 +1,5 @@
 import SelectField from './SelectField.jsx'
+import Tooltip from './ui/Tooltip.jsx'
 const GOALS = [
   ['preserve', '保留氛围', '基础校正保留全局曝光、冷暖与绿洋红；明确的风格要求可调整未锁定项。'],
   ['natural', '自然校正', '按照片测量结果克制地校正亮度、色偏和影调。'],
@@ -66,12 +67,12 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
           {SAVE_STATES[saveStatus] || saveStatus}
         </span>}
         {showHeader && <div className="workspace-history">
-          <button className="btn" onClick={() => { undo(); onHistory?.('undo') }} disabled={!canUndo || busy}>
+          <Tooltip content="撤销上一项调整 · ⌘ / Ctrl + Z"><button className="btn" onClick={() => { undo(); onHistory?.('undo') }} disabled={!canUndo || busy}>
             撤销
-          </button>
-          <button className="btn" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
+          </button></Tooltip>
+          <Tooltip content="重做上一项调整 · ⌘ / Ctrl + Shift + Z"><button className="btn" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
             重做
-          </button>
+          </button></Tooltip>
           <button className="btn" onClick={onNew} disabled={busy}>
             新工作区
           </button>

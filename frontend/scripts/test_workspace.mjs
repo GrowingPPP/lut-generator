@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { defaultParams } from '../src/lib/lutEngine.js'
-import { createWorkspaceState, beginEdit, previewEdit, commitEdit, undoEdit, redoEdit,
+import { createWorkspaceState, beginEdit, previewEdit, commitEdit, cancelEdit, undoEdit, redoEdit, historyAvailability,
   serializeWorkspaceState, validateWorkspaceRecord, setWorkspaceMeta, applyRecipeEdit,
   restoreVersionEdit } from '../src/lib/workspace.js'
 import { buildStyleRecipe } from '../src/lib/styleRecipe.js'
@@ -30,6 +30,79 @@ test('a complete slider gesture produces one reversible transaction, including r
   assert.equal(undone.workspace.params.saturation, 0)
   assert.deepEqual(undone.workspace.recipe_projection.operations, {})
   assert.equal(redoEdit(undone).workspace.params.saturation, 0.5)
+})
+
+test('the first pending curve adjustment is undoable and finishing it twice records only one edit', () => {
+  let state = createWorkspaceState()
+  const original = structuredClone(state.workspace.params.curve_points)
+  const changed = { ...original, master: [[0, 0], [0.5, 0.65], [1, 1]] }
+  state = previewEdit(beginEdit(state, { source: 'curve', purpose: 'style' }), { curve_points: changed })
+  assert.equal(state.past.length, 0)
+  assert.deepEqual(historyAvailability(state), { canUndo: true, canRedo: false })
+  state = commitEdit(state, { curve_points: changed }, { source: 'curve', purpose: 'style' })
+  state = commitEdit(state)
+  assert.equal(state.past.length, 1)
+  assert.equal(state.past[0].source, 'curve')
+  state = undoEdit(state)
+  assert.deepEqual(state.workspace.params.curve_points, original)
+  assert.deepEqual(historyAvailability(state), { canUndo: false, canRedo: true })
+  assert.equal(state.future.length, 1)
+  assert.deepEqual(redoEdit(state).workspace.params.curve_points, changed)
+})
+
+test('a changed pending branch disables redo before commit and cancelling restores the previous redo', () => {
+  let state = undoEdit(commitEdit(createWorkspaceState(), { exposure: 0.5 }))
+  const priorRedo = structuredClone(state.future)
+  state = previewEdit(beginEdit(state, { source: 'curve', purpose: 'style' }), {
+    curve_points: { ...state.workspace.params.curve_points, master: [[0, 0], [0.5, 0.6], [1, 1]] },
+  })
+  assert.deepEqual(historyAvailability(state), { canUndo: true, canRedo: false })
+  assert.deepEqual(state.future, priorRedo)
+  const cancelled = cancelEdit(state)
+  assert.deepEqual(historyAvailability(cancelled), { canUndo: false, canRedo: true })
+  assert.deepEqual(cancelled.future, priorRedo)
+  const committed = commitEdit(state)
+  assert.equal(committed.past.length, 1)
+  assert.equal(committed.future.length, 0)
+  assert.deepEqual(historyAvailability(committed), { canUndo: true, canRedo: false })
+})
+
+test('an unchanged pending gesture permits redo and does not add an empty history item', () => {
+  let state = undoEdit(commitEdit(createWorkspaceState(), { exposure: 0.5 }))
+  state = beginEdit(state, { source: 'curve', purpose: 'style' })
+  state = previewEdit(state, { curve_points: structuredClone(state.workspace.params.curve_points) })
+  assert.deepEqual(historyAvailability(state), { canUndo: false, canRedo: true })
+  state = commitEdit(state)
+  assert.equal(state.past.length, 0)
+  assert.equal(state.future.length, 1)
+  state = redoEdit(state)
+  assert.equal(state.workspace.params.exposure, 0.5)
+  assert.equal(state.past.length, 1)
+  assert.equal(state.pending, null)
+})
+
+test('dragging back to the original value restores redo availability before the gesture ends', () => {
+  let state = undoEdit(commitEdit(createWorkspaceState(), { exposure: 0.5 }))
+  state = previewEdit(beginEdit(state), { exposure: 0.25 })
+  assert.deepEqual(historyAvailability(state), { canUndo: true, canRedo: false })
+  state = previewEdit(state, { exposure: 0 })
+  assert.deepEqual(historyAvailability(state), { canUndo: false, canRedo: true })
+  state = commitEdit(state)
+  assert.equal(state.past.length, 0)
+  assert.equal(state.future.length, 1)
+})
+
+test('history availability ignores report metadata and stays read-only while detecting editable context', () => {
+  let state = beginEdit(undoEdit(commitEdit(createWorkspaceState(), { exposure: 0.5 })))
+  state = setWorkspaceMeta(state, { report: { status: 'failed' }, samples: [{ id: 'sample' }] })
+  const before = structuredClone(state)
+  assert.deepEqual(historyAvailability(state), { canUndo: false, canRedo: true })
+  assert.deepEqual(state, before)
+  state = setWorkspaceMeta(state, { name: '新名称' })
+  assert.deepEqual(historyAvailability(state), { canUndo: true, canRedo: false })
+  const committed = commitEdit(state)
+  assert.equal(committed.past.length, 1)
+  assert.equal(committed.future.length, 0)
 })
 
 test('locks and goals are undoable; rejected edits make no transaction; reset preserves locked fields', () => {

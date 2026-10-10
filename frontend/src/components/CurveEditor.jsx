@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { CURVE_CHANNELS, identityCurves, MAX_CURVE_POINTS, MIN_POINT_DISTANCE, prepareCurve } from '../lib/curveMath.js'
 import ParameterHelp from './ParameterHelp.jsx'
 import './CurveEditor.css'
@@ -95,7 +95,7 @@ function CurveChannel({ channel, points, blocked, dragging, onBegin, onMove, onF
     </svg>
     <div className="curve-editor-coordinates">
       {['x', 'y'].map(axis => <label key={axis}>{axis === 'x' ? '输入 %' : '输出 %'}
-        <input type="text" inputMode="decimal" aria-label={`${LABELS[channel]}所选控制点${axis === 'x' ? '输入' : '输出'}百分比`}
+        <input type="text" inputMode="decimal" data-chroma-escape-cancel="true" aria-label={`${LABELS[channel]}所选控制点${axis === 'x' ? '输入' : '输出'}百分比`}
           value={pointDraft[axis]} disabled={editingBlocked || (axis === 'x' && (pointIndex === 0 || pointIndex === points.length - 1))}
           onChange={event => setPointDraft(draft => ({ ...draft, [axis]: event.target.value }))}
           onBlur={() => commitCoordinate(axis)} onKeyDown={event => {
@@ -117,7 +117,7 @@ function CurveChannel({ channel, points, blocked, dragging, onBegin, onMove, onF
   </section>
 }
 
-export default function CurveEditor({ params, disabled = false, locked = false, onBegin, onPreview, onCommit, onCancel }) {
+const CurveEditor = forwardRef(function CurveEditor({ params, disabled = false, locked = false, onBegin, onPreview, onCommit, onCancel }, ref) {
   const [curves, setCurves] = useState(() => copy(params.curve_points || identityCurves()))
   const [activeChannel, setActiveChannel] = useState(null)
   const curvesRef = useRef(curves)
@@ -132,12 +132,15 @@ export default function CurveEditor({ params, disabled = false, locked = false, 
   }
   function finish(cancel = false) {
     const active = gesture.current
-    if (!active) return
+    if (!active) return false
     gesture.current = null; setActiveChannel(null)
-    if (cancel) { curvesRef.current = active.before; setCurves(active.before); onCancel?.(); return }
+    if (active.element?.hasPointerCapture(active.pointer)) active.element.releasePointerCapture(active.pointer)
+    if (cancel) { curvesRef.current = active.before; setCurves(active.before); onCancel?.(); return true }
     if (!equal(active.before, curvesRef.current)) onCommit?.({ curve_points: copy(curvesRef.current) })
     else onCancel?.()
+    return true
   }
+  useImperativeHandle(ref, () => ({ finishPendingEdit: () => finish(), cancelPendingEdit: () => finish(true) }))
   useEffect(() => {
     const cancel = event => { if (event.key === 'Escape' && gesture.current) { event.preventDefault(); finish(true) } }
     window.addEventListener('keydown', cancel)
@@ -148,7 +151,7 @@ export default function CurveEditor({ params, disabled = false, locked = false, 
   function begin(event, channel, index) {
     if (blocked || gesture.current || event.button !== 0) return false
     event.preventDefault(); event.stopPropagation()
-    gesture.current = { before: copy(curvesRef.current), channel, index, pointer: event.pointerId }
+    gesture.current = { before: copy(curvesRef.current), channel, index, pointer: event.pointerId, element: event.currentTarget }
     setActiveChannel(channel)
     event.currentTarget.setPointerCapture(event.pointerId)
     onBegin?.()
@@ -174,7 +177,7 @@ export default function CurveEditor({ params, disabled = false, locked = false, 
     if (equal(next, curvesRef.current)) return
     curvesRef.current = next; setCurves(next); onCommit?.({ curve_points: copy(next) })
   }
-  return <section className="curve-editor" aria-label="自由曲线编辑">
+  return <section className="curve-editor" aria-label="自由曲线编辑" data-chroma-escape-gesture={activeChannel !== null ? 'true' : undefined}>
     <div className="curve-editor-heading"><h3>自由曲线</h3><span>四通道独立调整</span></div>
     <p className="curve-editor-help">双击增加控制点；拖动或用方向键调整。每通道最多16点，输出不能下降。</p>
     <ParameterHelp parameter="curve_points" />
@@ -183,4 +186,6 @@ export default function CurveEditor({ params, disabled = false, locked = false, 
         blocked={blocked} dragging={activeChannel !== null} onBegin={begin} onMove={move} onFinish={end} onChange={changeChannel} />)}
     </div>
   </section>
-}
+})
+
+export default CurveEditor

@@ -18,10 +18,9 @@
   cursor: pointer;
 }
 .parameter-help-button:hover, .parameter-help-button[aria-expanded='true'] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent-line); }
-.parameter-help-button:focus-visible, .parameter-help-disclosure > summary:focus-visible, .beginner-guide > summary:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.parameter-help-button:focus-visible, .parameter-help-link:focus-visible, .beginner-guide > summary:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
 .parameter-control { min-width: 0; }
-.parameter-control > .parameter-help-content, .rgb-group > .parameter-help-content { margin-top: 10px; }
-.parameter-help-content { min-width: 0; padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--panel2); color: var(--text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.parameter-help-content { min-width: 0; color: var(--text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .parameter-help-content p { margin: 0; }
 .parameter-help-summary { font-weight: 500; }
 .parameter-help-directions { display: grid; gap: 9px; margin: 12px 0; }
@@ -32,10 +31,9 @@
 .parameter-help-content .parameter-help-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
 .parameter-group-description { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .parameter-group-description strong { font-weight: 500; color: var(--text); }
-.parameter-help-disclosure { min-width: 0; }
-.parameter-help-disclosure > summary { display: flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%; list-style: none; padding: 4px 0; color: var(--muted); font-size: 12px; line-height: 1.6; cursor: pointer; }
-.parameter-help-disclosure > summary::-webkit-details-marker, .beginner-guide > summary::-webkit-details-marker { display: none; }
-.parameter-help-disclosure[open] > summary { color: var(--accent-strong); margin-bottom: 8px; }
+.parameter-help-link { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; line-height: 1.6; text-align: left; cursor: pointer; }
+.parameter-help-link:hover, .parameter-help-link[aria-expanded='true'] { color: var(--accent-strong); }
+.beginner-guide > summary::-webkit-details-marker { display: none; }
 .parameter-help-symbol { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border: 1px solid var(--linestrong); border-radius: 50%; color: var(--text); font-weight: 600; }
 .beginner-guide { min-width: 0; border: 1px solid var(--accent-line); border-radius: 9px; background: var(--accent-soft); color: var(--text); }
 .beginner-guide > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; list-style: none; padding: 12px 14px; cursor: pointer; }
