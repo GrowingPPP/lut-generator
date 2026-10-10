@@ -224,7 +224,7 @@ def apply_split_tone(rgb_encoded, sh_hue, sh_sat, hi_hue, hi_sat, balance,
     # Balance 方向一致:往右推,高光调色占比更大)。
     # 实测确认:若按 (y-b)/(1-b) 直接归一,方向会反过来(b 越大反而只有暗部被染色)。
     sh_w = _smoothstep((1.0 - b - y) / max(1.0 - b, 1e-6)) if b < 1.0 else np.zeros_like(y)
-    hi_w = _smoothstep((y - (1.0 - b)) / max(b, 1e-6)) if b > 0 else np.ones_like(y)
+    hi_w = _smoothstep((y - (1.0 - b)) / max(b, 1e-6)) if b > 0 else np.zeros_like(y)
     tint = np.zeros_like(rgb_encoded)
     if sh_sat > 0:
         tint = tint + sh_w * (sh_sat * 0.5) * (_hue_to_rgb(sh_hue) - 0.5)

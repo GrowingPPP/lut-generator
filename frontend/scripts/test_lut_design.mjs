@@ -60,3 +60,28 @@ test('无效的可选数值回退到默认值', () => {
   assert.equal(normalized.contrast_pivot, 0.462)
   assert.deepEqual(normalized.gain, [1.1, 1, 1])
 })
+
+test('分离色调平衡为零时不施加高光染色', () => {
+  const neutral = generateLUT(defaultParams(), 9).data
+  const tinted = generateLUT({ ...defaultParams(), split_highlight_hue: 240, split_highlight_sat: 0.8, split_balance: 0 }, 9).data
+  assert.ok(tinted.every((value, index) => value === neutral[index]), '平衡为零仍施加高光染色')
+})
+
+test('分离色调平衡靠近零时非纯白样本不突然改变染色', () => {
+  const params = { split_shadow_hue: 240, split_shadow_sat: 0.6,
+    split_mid_hue: 120, split_mid_sat: 0.4, split_highlight_hue: 30, split_highlight_sat: 0.8 }
+  for (const level of [1, 8, 15]) {
+    const endpoint = sample({ ...params, split_balance: 0 }, level, level, level)
+    const nearby = sample({ ...params, split_balance: 1e-6 }, level, level, level)
+    assert.ok(endpoint.every((value, channel) => Math.abs(value - nearby[channel]) < 1e-5), `灰阶 ${level}/16 在平衡零点不连续`)
+  }
+})
+
+test('分离色调默认平衡保持阴影、中间调和高光染色', () => {
+  const params = { split_shadow_hue: 240, split_shadow_sat: 0.8,
+    split_mid_hue: 120, split_mid_sat: 0.4, split_highlight_hue: 0, split_highlight_sat: 0.8 }
+  for (const [level, expected] of [[4, [0.1, 0.2, 0.3]], [8, [0.4, 0.6, 0.4]], [12, [0.8, 0.7, 0.6]]]) {
+    const result = sample(params, level, level, level)
+    assert.ok(result.every((value, channel) => Math.abs(value - expected[channel]) < 1e-6), `默认平衡在灰阶 ${level}/16 的结果改变`)
+  }
+})

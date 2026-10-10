@@ -265,7 +265,7 @@ function applySplitTone(r, g, b, shHue, shSat, hiHue, hiSat, balance, midHue = 0
   const bl = Math.max(0, Math.min(1, balance))
   // balance 越大 → 高光染色覆盖越广(与 ACR 的 Balance 方向一致)
   const shW = bl < 1 ? smoothstep((1 - bl - y) / Math.max(1 - bl, 1e-6)) : 0
-  const hiW = bl > 0 ? smoothstep((y - (1 - bl)) / Math.max(bl, 1e-6)) : 1
+  const hiW = bl > 0 ? smoothstep((y - (1 - bl)) / Math.max(bl, 1e-6)) : 0
   let tr = 0, tg = 0, tb = 0
   if (shSat > 0) {
     const s = hueToRgb(shHue)

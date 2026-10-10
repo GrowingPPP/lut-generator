@@ -113,6 +113,26 @@ def test_split_balance_shifts_influence():
     assert d_high > d_low, "balance 没有影响高光染色的覆盖范围"
 
 
+def test_split_balance_zero_has_no_highlight_tint():
+    grid = build_grid(9)
+    result = transforms.apply_split_tone(grid, 0, 0, 240, 0.8, 0)
+    np.testing.assert_array_equal(result, grid)
+
+
+def test_split_balance_is_continuous_near_zero_away_from_pure_white():
+    samples = np.repeat(np.array([0.0625, 0.5, 0.9375])[:, None], 3, axis=1)
+    endpoint = transforms.apply_split_tone(samples, 240, 0.6, 30, 0.8, 0, 120, 0.4)
+    nearby = transforms.apply_split_tone(samples, 240, 0.6, 30, 0.8, 1e-6, 120, 0.4)
+    np.testing.assert_allclose(endpoint, nearby, atol=1e-5, rtol=0)
+
+
+def test_split_default_balance_preserves_all_three_tonal_regions():
+    samples = np.repeat(np.array([0.25, 0.5, 0.75])[:, None], 3, axis=1)
+    result = transforms.apply_split_tone(samples, 240, 0.8, 0, 0.8, 0.5, 120, 0.4)
+    expected = np.array([[0.1, 0.2, 0.3], [0.4, 0.6, 0.4], [0.8, 0.7, 0.6]])
+    np.testing.assert_allclose(result, expected, atol=1e-7, rtol=0)
+
+
 def test_new_ops_output_stays_in_range():
     for params in ({"highlights": 1.0}, {"shadows": 1.0}, {"whites": 1.0},
                    {"blacks": 1.0}, {"curve": 1.0},
