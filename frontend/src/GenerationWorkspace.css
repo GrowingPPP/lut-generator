@@ -235,6 +235,15 @@
   white-space: nowrap;
 }
 
+.gen-workbench .preview-toolbar .curve-quick-toggle {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+
 .gen-workbench .input-context {
   flex: 0 0 auto;
   margin: 0;
@@ -736,6 +745,17 @@
   gap: 2px;
   padding: 0 10px;
   border-bottom: 1px solid var(--workbench-line);
+}
+
+.gen-workbench .manual-tool-shortcuts {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--workbench-line);
+}
+
+.gen-workbench .manual-tool-shortcuts .curve-workbench-toggle {
+  min-height: 58px;
+  padding: 9px 12px;
 }
 
 .gen-workbench .task-tabs button {

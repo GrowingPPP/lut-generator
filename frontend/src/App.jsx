@@ -223,6 +223,8 @@ function GenerateView({ previewLut, user }) {
   const [rebindingId, setRebindingId] = useState(null)
   const originalRef = useRef(null)
   const gradedRef = useRef(null)
+  const curveWorkbenchRef = useRef(null)
+  const curveEntryRef = useRef(null)
   const draggingRef = useRef(false)
   const fileInputRef = useRef(null)
   const openRequestRef = useRef(0)
@@ -1073,6 +1075,17 @@ function GenerateView({ previewLut, user }) {
   const curvesVisible = toolTab === 'manual' && curvesOpen
   const curvesChanged = Object.values(params.curve_points).some(points => points.some(([x, y]) => Math.abs(x - y) > 1e-9))
   const activeAiIntent = grading ? 'optimize' : sending ? 'text' : referenceBusy ? 'reference' : null
+  const openCurves = () => {
+    setToolTab('manual')
+    setCurvesOpen(true)
+    requestAnimationFrame(() => {
+      const region = curveWorkbenchRef.current
+      if (!region || region.hidden) return
+      region.focus({ preventScroll: true })
+      if (window.matchMedia('(max-width: 960px), (max-height: 620px)').matches)
+        region.scrollIntoView({ block: 'start' })
+    })
+  }
 
   return (
     <div className="gen-workbench">
@@ -1133,6 +1146,11 @@ function GenerateView({ previewLut, user }) {
           <span className="text-muted">
             {selectedSample ? `正在查看：${selectedSample.name}` : '合成示意图 · 不参与 AI 分析'}
           </span>
+          <button type="button" className="btn curve-quick-toggle" ref={curveEntryRef}
+            aria-expanded={curvesVisible} aria-controls="curve-workbench"
+            onClick={() => curvesVisible ? setCurvesOpen(false) : openCurves()}>
+            自由曲线{curvesVisible ? ' · 收起' : curvesChanged ? ' · 已调整' : ''}
+          </button>
           <button
             className="upload-sm"
             disabled={busy || samples.length >= 5}
@@ -1251,8 +1269,8 @@ function GenerateView({ previewLut, user }) {
         />
           <DiagnosticsPanel compact image={selectedMedia?.canvas} params={params} compatible={compatible} sampleName={selectedSample?.name} />
           {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
-          <div className="curve-workbench" id="curve-workbench" hidden={!curvesVisible}>
-            <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><button className="btn" onClick={() => setCurvesOpen(false)}>收起曲线</button></div>
+          <div className="curve-workbench" id="curve-workbench" ref={curveWorkbenchRef} role="region" aria-label="自由曲线 · 四通道" tabIndex={-1} hidden={!curvesVisible}>
+            <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><button className="btn" onClick={() => { setCurvesOpen(false); curveEntryRef.current?.focus({ preventScroll: true }) }}>收起曲线</button></div>
             <div className="curve-workbench-body">
           <CurveEditor key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
             onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
@@ -1271,6 +1289,11 @@ function GenerateView({ previewLut, user }) {
                 const next = event.key === 'Home' ? 0 : event.key === 'End' ? TOOL_TABS.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + TOOL_TABS.length) % TOOL_TABS.length
                 setToolTab(TOOL_TABS[next][0]); document.getElementById(`tool-${TOOL_TABS[next][0]}`)?.focus()
               }}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</button>)}
+          </div>
+          <div className="manual-tool-shortcuts" hidden={toolTab !== 'manual'}>
+            <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => curvesOpen ? setCurvesOpen(false) : openCurves()}>
+              <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>
+            </button>
           </div>
           <section className="tool-view" id="tool-panel-ai" role="tabpanel" aria-labelledby="tool-ai" hidden={toolTab !== 'ai'}>
             <h2 className="tool-heading">形成你想要的效果</h2>
@@ -1480,9 +1503,6 @@ function GenerateView({ previewLut, user }) {
               复位全部未保护调色项
             </button>
           </div>
-          <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => setCurvesOpen(value => !value)}>
-            <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>
-          </button>
           <details className="professional-settings">
             <summary>外部 LUT · {params.external_lut_id ? `${Math.round(params.external_lut_strength * 100)}% 已叠加` : '未叠加'}{locked('external_lut_id') ? ' · 已保护' : ''}</summary>
           <ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}

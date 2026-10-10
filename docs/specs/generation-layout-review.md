@@ -130,6 +130,16 @@ AI 方法子标签同样保持异步控制器和输入状态。参考匹配的�
 
 本轮没有调用真实语言模型；自动修图的控制器恢复、取消及结果归属依赖保留的既有实现和回归测试。真实照片的艺术效果评价与相机实机导入验收继续待办。
 
+## 曲线入口可发现性
+
+曲线入口原位于手动参数列表底部，桌面首屏无法看到，且默认收起。照片工具栏新增“自由曲线”直接入口，可从任意工具视图进入；原入口移至手动面板顶部的固定区域，与参数列表滚动分开。入口显示展开及调整状态，展开后保持四通道独立编辑。
+
+照片入口打开曲线时切换到手动视图并聚焦曲线区域；窄屏滚动到该区域，桌面保留照片与曲线同时可见。查看与展开允许在作业运行时使用，实际编辑仍遵守作业冻结和参数保护。展开、收起和工具切换不改变曲线数据。
+
+验收包含：桌面手动首屏和滚动参数后入口均可见；AI/版本视图可从照片工具栏直接打开；四通道出现；窄屏进入时曲线进入视口；收起与切换不丢失数据；深色、中性灰、浅色入口均清晰可读。
+
+2026-10-10 浏览器复现与验收：1440×900 下原入口顶部为 2016.9px，超出可见面板；调整后固定入口顶部为 229px，滚动到参数底部仍可见。从 AI 和版本页点击照片入口均切到手动并显示四通道；390px 手机打开后曲线区顶部为 1.7px，页面无横向溢出。展开、收起、切标签及切主题前后的四条曲线路径一致。收起按钮将焦点返回照片入口。前端 168 项测试通过，生产构建成功，并通过独立只读复核。
+
 ## 核对依据
 
 页面布局和入口顺序见 [App.jsx](../../frontend/src/App.jsx)、[App.css](../../frontend/src/App.css)；具体信息与状态见 [WorkspaceToolbar.jsx](../../frontend/src/components/WorkspaceToolbar.jsx)、[SampleGallery.jsx](../../frontend/src/components/SampleGallery.jsx)、[AutoRetouchBar.jsx](../../frontend/src/components/AutoRetouchBar.jsx)、[AutoRetouchReport.jsx](../../frontend/src/components/AutoRetouchReport.jsx)、[VersionPanel.jsx](../../frontend/src/components/VersionPanel.jsx) 和 [DiagnosticsPanel.jsx](../../frontend/src/components/DiagnosticsPanel.jsx)。评价为基于当前页面和代码的产品判断，不代表用户研究结论。
