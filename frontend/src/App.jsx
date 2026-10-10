@@ -101,7 +101,7 @@ const DISPLAY_MODES = [
   { value: 'split', label: '独立展示' },
 ]
 
-function GenerateView({ previewLut, user }) {
+function GenerateView({ previewLut, deletedAssetId, user }) {
   const editor = useWorkspace({ userId: user, initialParams: defaultParams() })
   const { workspace, ready } = editor
   const params = workspace.params
@@ -151,11 +151,18 @@ function GenerateView({ previewLut, user }) {
   const openRequestRef = useRef(0)
   const remoteRequests = useRef(new Map())
   const consumedPreviewRef = useRef(null)
+  const deletedAssetIds = useRef(new Set())
   const viewWorkspaceRef = useRef(null)
   const mediaRef = useRef(media)
   mediaRef.current = media
   const currentRef = useRef(workspace)
   currentRef.current = workspace
+  useEffect(() => {
+    if (deletedAssetId == null) return
+    deletedAssetIds.current.add(deletedAssetId)
+    setSavedAsset(current => current?.id === deletedAssetId ? null : current)
+    setPendingAsset(current => current?.lut.id === deletedAssetId ? null : current)
+  }, [deletedAssetId])
   const baseBusy = sending || grading || validating || sampleLoading || remoteBusy || resourceLoading || !ready
   const busy = baseBusy || advancedLoading
   const samples = workspace.samples || []
@@ -629,7 +636,7 @@ function GenerateView({ previewLut, user }) {
   }
 
   function prepareAsset(lut) {
-    if (busy) return
+    if (busy || deletedAssetIds.current.has(lut.id)) return
     try {
       const candidate =
         lut.kind === 'portable_style'
@@ -643,6 +650,10 @@ function GenerateView({ previewLut, user }) {
   const applyAsset = async () => {
     if (!pendingAsset || busy) return
     const { lut, candidate, request } = pendingAsset
+    if (deletedAssetIds.current.has(lut.id)) {
+      setPendingAsset(null)
+      return
+    }
     if (!requestMatches(request)) {
       setPendingAsset(null)
       setStatus('草稿已变化，请重新预览资产候选')
@@ -679,6 +690,11 @@ function GenerateView({ previewLut, user }) {
         },
         primaryCompatible && sampleMatches(primarySample, candidate) ? primaryMedia?.blob : null,
       )
+      if (deletedAssetIds.current.has(lut.id)) {
+        setPendingAsset(null)
+        setStatus('该资产已删除，候选未应用')
+        return
+      }
       if (!requestMatches(request)) {
         setStatus('草稿已变化，候选未应用')
         return
@@ -876,7 +892,7 @@ function GenerateView({ previewLut, user }) {
       cover_id: data.cover_id,
     }
     const asset =
-      data.replace && savedAsset
+      data.replace && savedAsset && !deletedAssetIds.current.has(savedAsset.id)
         ? await updateLut(savedAsset.id, {
             name: data.name,
             revision_id: savedAsset.revision_id,
@@ -885,7 +901,7 @@ function GenerateView({ previewLut, user }) {
             ...metadata,
           })
         : await createLut(data.name, data.description, data.params, metadata)
-    setSavedAsset(asset)
+    setSavedAsset(deletedAssetIds.current.has(asset.id) ? null : asset)
     setStatus(`已保存「${data.name}」，当前草稿保持原效果`)
   }
 
@@ -1598,6 +1614,7 @@ export default function App() {
   // 落地页是入口:未登录访客先看到它,点 CTA 才进入生成的登录门。
   const [view, setView] = useState('landing')
   const [previewLut, setPreviewLut] = useState(null)
+  const [deletedAssetId, setDeletedAssetId] = useState(null)
   const [user, setUser] = useState(null)
   const [checking, setChecking] = useState(true)
 
@@ -1606,6 +1623,7 @@ export default function App() {
       clearExternalLutCache()
       setUser(null)
       setPreviewLut(null)
+      setDeletedAssetId(null)
     }
     window.addEventListener('chroma:unauthorized', onUnauthorized)
     return () => window.removeEventListener('chroma:unauthorized', onUnauthorized)
@@ -1624,6 +1642,11 @@ export default function App() {
     setView('generate')
   }
 
+  const handleAssetDeleted = id => {
+    setDeletedAssetId(id)
+    setPreviewLut(current => current?.id === id ? null : current)
+  }
+
   const handleLogout = async () => {
     clearExternalLutCache()
     try {
@@ -1633,6 +1656,7 @@ export default function App() {
     }
     setUser(null)
     setPreviewLut(null)
+    setDeletedAssetId(null)
   }
 
   if (checking) return null
@@ -1681,9 +1705,9 @@ export default function App() {
           </header>
         )}
         <div style={{ display: view === 'generate' ? undefined : 'none' }}>
-          <GenerateView key={user} previewLut={previewLut} user={user} />
+          <GenerateView key={user} previewLut={previewLut} deletedAssetId={deletedAssetId} user={user} />
         </div>
-        {view === 'library' && <LibraryView onPreview={openPreview} />}
+        {view === 'library' && <LibraryView onPreview={openPreview} onDeleted={handleAssetDeleted} />}
       </div>
     </>
   )

@@ -76,6 +76,16 @@
 .library-page .lut-card {
   min-width: 0;
 }
+.library-page .card-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+.library-page .card-actions .btn-primary { grid-column: 1 / -1; }
+.library-page .card-actions .btn { padding: 8px 9px; }
+.library-page .library-delete-entry { color: var(--danger); }
+.library-page .library-delete-entry:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-line); }
+.library-page .card-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.library-notice { margin: 0 0 16px; color: var(--success); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .library-cover {
   position: relative;
   overflow: hidden;
@@ -236,6 +246,20 @@
   gap: 8px;
   margin-top: 20px;
 }
+.library-modal.library-delete-modal { width: min(460px, 100%); outline: none; }
+.library-modal.library-delete-modal h2 { font-size: 21px; margin: 0 0 20px; }
+.library-delete-target { display: flex; flex-direction: column; gap: 7px; padding: 16px; border: 1px solid var(--linestrong); border-radius: 10px; background: var(--panel2); }
+.library-delete-target strong { color: var(--text); font-size: 16px; line-height: 1.6; overflow-wrap: anywhere; }
+.library-delete-target span { color: var(--muted); font-size: 12px; }
+.library-delete-description { margin: 18px 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.library-delete-description p { margin: 0 0 10px; }
+.library-delete-description p:first-child { color: var(--danger); }
+.library-delete-progress { color: var(--muted); font-size: 13px; }
+.library-delete-actions { justify-content: flex-end; }
+.library-delete-actions .library-delete-confirm { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 600; }
+.library-delete-actions .library-delete-confirm:hover:not(:disabled) { opacity: .9; }
+.library-delete-actions button:disabled { opacity: .5; cursor: wait; }
+.library-delete-actions button:focus-visible, .library-delete-entry:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
 .library-editor > label {
   margin-top: 16px;
 }

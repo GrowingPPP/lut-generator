@@ -89,8 +89,11 @@ function LibraryModal({
   form = false,
   onSubmit,
   className = '',
+  busy = false,
+  describedBy,
 }) {
   const ref = useModalFocus(onClose, allowClose)
+  useEffect(() => { if (busy) ref.current?.focus() }, [busy, ref])
   const Panel = form ? 'form' : 'section'
   return (
     <div className="modal-backdrop">
@@ -100,6 +103,9 @@ function LibraryModal({
         role="dialog"
         aria-modal="true"
         aria-label={label}
+        aria-describedby={describedBy}
+        aria-busy={busy || undefined}
+        tabIndex={-1}
         onSubmit={onSubmit}
       >
         {children}
@@ -108,13 +114,19 @@ function LibraryModal({
   )
 }
 
-export default function LibraryView({ onPreview }) {
+export default function LibraryView({ onPreview, onDeleted }) {
   const [luts, setLuts] = useState([])
   const [summary, setSummary] = useState({ total: 0, groups: [] })
   const [filters, setFilters] = useState({ ...DEFAULT_LIBRARY_FILTERS })
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const deleteInFlight = useRef(false)
+  const resultsRef = useRef(null)
   const [detail, setDetail] = useState(null)
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
@@ -126,6 +138,13 @@ export default function LibraryView({ onPreview }) {
   const requestId = useRef(0)
   const filtersRef = useRef(filters)
   filtersRef.current = filters
+
+  useEffect(() => {
+    const active = document.activeElement
+    if (notice && !deleteTarget && !deleting && (!active || active === document.body || !active.isConnected)) {
+      resultsRef.current?.focus()
+    }
+  }, [notice, deleteTarget, deleting])
 
   useEffect(() => {
     const timer = setTimeout(
@@ -150,8 +169,12 @@ export default function LibraryView({ onPreview }) {
       setLuts(loaded)
       setSummary(info)
       setError('')
+      return true
     } catch (e) {
-      if (requestId.current === id) setError(`加载失败：${e.message}`)
+      if (requestId.current === id) {
+        setError(`加载失败：${e.message}`)
+        return false
+      }
     } finally {
       if (requestId.current === id) setLoading(false)
     }
@@ -218,17 +241,41 @@ export default function LibraryView({ onPreview }) {
       setBusyIds((ids) => ids.filter((id) => id !== lut.id))
     }
   }
-  const remove = async (lut) => {
-    if (
-      !window.confirm(`确定删除「${lut.name}」及其修订历史？此操作无法撤销。`)
-    )
-      return
+  const openDelete = (lut) => {
+    if (deleteInFlight.current || busyIds.includes(lut.id)) return
+    setDeleteTarget(lut)
+    setDeleteError('')
+    setNotice('')
+  }
+  const closeDelete = () => {
+    if (deleteInFlight.current) return
+    setDeleteTarget(null)
+    setDeleteError('')
+  }
+  const remove = async () => {
+    if (!deleteTarget || deleteInFlight.current) return
+    const lut = deleteTarget
+    deleteInFlight.current = true
+    setDeleting(true)
+    setDeleteError('')
     try {
-      await deleteLut(lut.id)
+      try { await deleteLut(lut.id) }
+      catch (failure) { if (failure.status !== 404) throw failure }
+      requestId.current += 1
+      setLuts((current) => current.filter((asset) => asset.id !== lut.id))
+      setSummary((current) => ({ ...current, total: Math.max(0, current.total - 1) }))
       setDetail(null)
-      await load()
+      setRevisionAsset(null)
+      setDeleteTarget(null)
+      setNotice(`「${lut.name}」已从我的 LUT 中删除`)
+      onDeleted?.(lut.id)
+      const refreshed = await load()
+      if (refreshed === false) setNotice(`「${lut.name}」已删除，列表刷新失败，请点击刷新。`)
     } catch (e) {
-      setError(`删除失败：${e.message}`)
+      setDeleteError(`删除失败：${e.message}`)
+    } finally {
+      deleteInFlight.current = false
+      setDeleting(false)
     }
   }
   const openRevisions = async (lut) => {
@@ -303,6 +350,9 @@ export default function LibraryView({ onPreview }) {
             >
               <option value="all">全部分组</option>
               <option value="none">未分组</option>
+              {filters.group.startsWith('group:') && !summary.groups.includes(filters.group.slice(6)) && (
+                <option value={filters.group}>{filters.group.slice(6)}（暂无资产）</option>
+              )}
               {summary.groups.map((group) => (
                 <option key={group} value={`group:${group}`}>
                   {group}
@@ -340,7 +390,7 @@ export default function LibraryView({ onPreview }) {
         </div>
       </section>
       <div className="library-result-line">
-        <span role="status">
+        <span ref={resultsRef} role="status" tabIndex={-1}>
           {loading ? '正在加载…' : `找到 ${luts.length} 个资产`}
         </span>
         <button className="btn" onClick={resetFilters}>
@@ -355,6 +405,7 @@ export default function LibraryView({ onPreview }) {
           {error}
         </div>
       )}
+      {notice && <p className="library-notice" role="status">{notice}</p>}
       <div className="lib-grid">
         {luts.map((lut) => (
           <article key={lut.id} className="lut-card">
@@ -366,7 +417,7 @@ export default function LibraryView({ onPreview }) {
                 className={`library-favorite ${lut.favorite ? 'is-favorite' : ''}`}
                 aria-label={`${lut.favorite ? '取消收藏' : '收藏'}「${lut.name}」`}
                 aria-pressed={lut.favorite}
-                disabled={busyIds.includes(lut.id)}
+                disabled={deleting || busyIds.includes(lut.id)}
                 onClick={() => toggleFavorite(lut)}
               >
                 {lut.favorite ? '★' : '☆'}
@@ -392,16 +443,20 @@ export default function LibraryView({ onPreview }) {
                 更新于 {dateLabel(lut.updated_at)}
               </small>
               <div className="card-actions">
-                <button className="btn-primary" onClick={() => preview(lut)}>
+                <button className="btn-primary" disabled={deleting} onClick={() => preview(lut)}>
                   {lut.kind === 'portable_style'
                     ? '预览并追加风格'
                     : '预览并载入完整效果'}
                 </button>
-                <button className="btn" onClick={() => setDetail(lut)}>
+                <button className="btn" disabled={deleting} onClick={() => setDetail(lut)}>
                   详情与导出
                 </button>
-                <button className="btn" onClick={() => openEdit(lut)}>
+                <button className="btn" disabled={deleting || busyIds.includes(lut.id)} onClick={() => openEdit(lut)}>
                   编辑信息
+                </button>
+                <button className="btn library-delete-entry" aria-label={`删除「${lut.name}」`}
+                  disabled={deleting || busyIds.includes(lut.id)} onClick={() => openDelete(lut)}>
+                  删除
                 </button>
               </div>
             </div>
@@ -427,7 +482,7 @@ export default function LibraryView({ onPreview }) {
           )}
         </div>
       )}
-      {detail && (
+      {detail && !deleteTarget && (
         <LibraryModal label="资产详情" onClose={() => setDetail(null)}>
           <div className="section-heading">
             <h2>{detail.name}</h2>
@@ -524,8 +579,30 @@ export default function LibraryView({ onPreview }) {
             <button className="btn" onClick={() => openRevisions(detail)}>
               调色修订历史
             </button>
-            <button className="btn-danger" onClick={() => remove(detail)}>
+            <button className="btn-danger" disabled={busyIds.includes(detail.id)} onClick={() => openDelete(detail)}>
               删除资产
+            </button>
+          </div>
+        </LibraryModal>
+      )}
+      {deleteTarget && (
+        <LibraryModal label="删除 LUT" className="library-delete-modal" onClose={closeDelete}
+          busy={deleting} describedBy="library-delete-description">
+          <h2>删除这个 LUT？</h2>
+          <div className="library-delete-target">
+            <strong>{deleteTarget.name}</strong>
+            <span>{kindLabel(deleteTarget)} · {deleteTarget.params.base_photo_style || 'STD'}</span>
+          </div>
+          <div id="library-delete-description" className="library-delete-description">
+            <p>将永久删除此资产及全部调色修订，无法撤销。</p>
+            <p>已载入的调整效果、工作区草稿、保存版本和已导出的文件会保留。</p>
+          </div>
+          {deleteError && <p className="error" role="alert">{deleteError}</p>}
+          {deleting && <p className="library-delete-progress" role="status">正在删除，请稍候…</p>}
+          <div className="library-modal-actions library-delete-actions">
+            <button className="btn" disabled={deleting} onClick={closeDelete}>取消</button>
+            <button className="btn-danger library-delete-confirm" disabled={deleting} onClick={remove}>
+              {deleting ? '正在删除…' : '确认删除'}
             </button>
           </div>
         </LibraryModal>

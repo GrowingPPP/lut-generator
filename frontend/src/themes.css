@@ -17,6 +17,7 @@
   --accent-line: #a17b49;
   --on-accent: #191410;
   --danger: #f0a2a2;
+  --on-danger: #281516;
   --danger-soft: #382325;
   --danger-line: #a76a71;
   --success: #aad8b8;
@@ -55,6 +56,7 @@
   --accent-line: #c69c62;
   --on-accent: #2a2117;
   --danger: #ffc1bf;
+  --on-danger: #281516;
   --danger-soft: #59403f;
   --danger-line: #d99c98;
   --success: #c2ebce;
@@ -87,6 +89,7 @@
   --accent-line: #a77941;
   --on-accent: #ffffff;
   --danger: #a52e2e;
+  --on-danger: #ffffff;
   --danger-soft: #fff0ef;
   --danger-line: #c6817b;
   --success: #25623b;
