@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { defaultParams } from '../src/lib/lutEngine.js'
-import { createMemoryAutoJobStorage, autoJobReceipt, validateAutoJobReceipt } from '../src/lib/autoJobStorage.js'
+import { createAutoJobStorage, createMemoryAutoJobStorage, autoJobReceipt, validateAutoJobReceipt } from '../src/lib/autoJobStorage.js'
+import { createProjectDeletionJournal } from '../src/lib/projectManagement.js'
 import { captureAutoRequest, sameAutoMetadata, bindAutoRequest, waitRestoredAutoJob, matchingAutoResult } from '../src/lib/autoJobs.js'
 
 const request = () => captureAutoRequest({ file: new Blob(['original photo']), params: defaultParams(),
@@ -99,4 +100,38 @@ test('invalid or foreign saved receipts fail closed before candidate restoration
   for (const change of [{ user_id: '2' }, { request_id: crypto.randomUUID() }, { state: 'invented' },
     { request: { ...receipt.request, params: { ...args.params, exposure: 99 } } }])
     assert.throws(() => validateAutoJobReceipt({ ...receipt, ...change }, 1, args.workspace_id))
+})
+
+test('deleting a project clears its AI receipt and blocks late writes without affecting another account or project', async () => {
+  const storage = createMemoryAutoJobStorage(), args = request(), other = request()
+  await storage.begin(1, args)
+  await storage.begin(2, args)
+  await storage.begin(1, other)
+  await storage.remove(1, args.workspace_id)
+  assert.equal(await storage.load(1, args.workspace_id), null)
+  await assert.rejects(storage.begin(1, args), error => error.code === 'project_deleted')
+  await assert.rejects(storage.update(1, args.workspace_id, args.request_id, { state: 'applied' }), error => error.code === 'project_deleted')
+  assert.equal((await storage.load(2, args.workspace_id)).request_id, args.request_id)
+  assert.equal((await storage.load(1, other.workspace_id)).request_id, other.request_id)
+  assert.equal(await storage.remove(1, args.workspace_id), true)
+})
+
+test('project retirement hides an existing receipt before the receipt database is cleaned', async () => {
+  const deletionJournal = createProjectDeletionJournal({ localStorage: null })
+  const storage = createMemoryAutoJobStorage({ deletionJournal }), args = request()
+  await storage.begin(1, args)
+  deletionJournal.mark(1, args.workspace_id)
+  assert.equal(await storage.load(1, args.workspace_id), null)
+  await assert.rejects(storage.begin(1, args), error => error.code === 'project_deleted')
+  await assert.rejects(storage.update(1, args.workspace_id, args.request_id, { state: 'accepted' }), error => error.code === 'project_deleted')
+})
+
+test('the durable deletion fence prevents AI recovery even when IndexedDB cannot open', async () => {
+  const deletionJournal = createProjectDeletionJournal({ localStorage: null }), args = request()
+  deletionJournal.mark(1, args.workspace_id)
+  const storage = createAutoJobStorage({ indexedDB: null, deletionJournal })
+  assert.equal(await storage.load(1, args.workspace_id), null)
+  await assert.rejects(storage.begin(1, args), error => error.code === 'project_deleted')
+  await assert.rejects(storage.update(1, args.workspace_id, args.request_id, { state: 'accepted' }), error => error.code === 'project_deleted')
+  await assert.rejects(storage.load(2, args.workspace_id), error => error.code === 'storage_unavailable')
 })

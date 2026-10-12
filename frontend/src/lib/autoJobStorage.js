@@ -1,5 +1,6 @@
 import { validateParams, domainError } from './styleRecipe.js'
 import { contextSignature } from './workspaceFlow.js'
+import { createProjectDeletionJournal } from './projectManagement.js'
 
 const DB_NAME = 'chroma-auto-job-receipts'
 const keyFor = (userId, workspaceId) => JSON.stringify([String(userId), workspaceId])
@@ -18,7 +19,7 @@ function jsonOnly(value) {
 
 function jobSummary(job, receipt) {
   if (job.id !== receipt.request_id || job.workspace_id !== receipt.workspace_id)
-    throw domainError('invalid_job_receipt', '作业结果的标识或工作区不一致')
+    throw domainError('invalid_job_receipt', '作业结果的标识或调色项目不一致')
   const keys = ['id', 'status', 'persisted', 'result', 'can_cancel', 'workspace_id', 'source_digest',
     'main_sample_id', 'stages', 'progress', 'continuation_stages', 'continued_from', 'error',
     'not_accepted', 'recovered_from_report', 'created_at', 'updated_at', 'expires_at']
@@ -31,7 +32,7 @@ export function autoJobReceipt(args, userId, now = Date.now()) {
   if (!contextSignature(context))
     throw domainError('invalid_context', '作业上下文不正确')
   if (!UUID.test(args.request_id || '') || !UUID.test(args.workspace_id || '') || !userId || userId === 'guest')
-    throw domainError('invalid_job_receipt', '作业需要有效账号和工作区标识')
+    throw domainError('invalid_job_receipt', '作业需要有效账号和调色项目标识')
   if (typeof args.source_digest !== 'string' || !/^[a-f0-9]{64}$/i.test(args.source_digest)
       || typeof args.main_sample_id !== 'string' || !args.main_sample_id)
     throw domainError('invalid_job_receipt', '作业需要有效的主样张来源')
@@ -67,12 +68,15 @@ function patchReceipt(receipt, patch, now) {
 
 function checkBegin(current, incoming) {
   if (current && ACTIVE.has(current.state) && current.request_id !== incoming.request_id)
-    throw domainError('job_receipt_conflict', '此工作区还有未确认结束的作业，请先恢复或确认结束')
+    throw domainError('job_receipt_conflict', '此调色项目还有未确认结束的作业，请先恢复或确认结束')
   if (current?.request_id === incoming.request_id && JSON.stringify(current.request) !== JSON.stringify(incoming.request))
     throw domainError('job_receipt_conflict', '同一作业标识不能改写冻结请求')
 }
 
-export function createAutoJobStorage({ indexedDB = globalThis.indexedDB, now = () => Date.now() } = {}) {
+const deletedProjectError = () => domainError('project_deleted', '此调色项目已删除，不能保存 AI 作业记录')
+
+export function createAutoJobStorage({ indexedDB = globalThis.indexedDB, now = () => Date.now(),
+  deletionJournal = createProjectDeletionJournal() } = {}) {
   let database
   const getDb = () => database || (database = new Promise((resolve, reject) => {
     if (!indexedDB) { reject(domainError('storage_unavailable', '无法保存作业恢复记录，本次请求未提交')); return }
@@ -84,6 +88,10 @@ export function createAutoJobStorage({ indexedDB = globalThis.indexedDB, now = (
   }).catch(error => { database = null; throw error }))
 
   async function transact(userId, workspaceId, update) {
+    if (deletionJournal.has(userId, workspaceId)) {
+      if (update) throw deletedProjectError()
+      return null
+    }
     const db = await getDb()
     return new Promise((resolve, reject) => {
       const tx = db.transaction('receipts', update ? 'readwrite' : 'readonly')
@@ -92,6 +100,10 @@ export function createAutoJobStorage({ indexedDB = globalThis.indexedDB, now = (
       let result = null, failure
       request.onsuccess = () => {
         try {
+          if (request.result?.deleted || deletionJournal.has(userId, workspaceId)) {
+            if (update) throw deletedProjectError()
+            return
+          }
           const current = request.result ? validateAutoJobReceipt(request.result.receipt, userId, workspaceId) : null
           result = update ? update(current) : current
           if (update && result) store.put({ key, receipt: validateAutoJobReceipt(result, userId, workspaceId) })
@@ -113,17 +125,30 @@ export function createAutoJobStorage({ indexedDB = globalThis.indexedDB, now = (
       if (!current || current.request_id !== requestId) throw domainError('job_receipt_conflict', '作业记录已变化，不能覆盖新请求')
       return patchReceipt(current, patch, now())
     }),
+    async remove(userId, workspaceId) {
+      const db = await getDb()
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('receipts', 'readwrite')
+        tx.objectStore('receipts').put({ key: keyFor(userId, workspaceId), deleted: true })
+        tx.oncomplete = () => resolve(true)
+        tx.onabort = tx.onerror = () => reject(tx.error || new Error('AI 作业记录清理失败'))
+      })
+    },
   }
 }
 
-export function createMemoryAutoJobStorage({ now = () => Date.now() } = {}) {
-  const records = new Map()
+export function createMemoryAutoJobStorage({ now = () => Date.now(),
+  deletionJournal = createProjectDeletionJournal({ localStorage: null }) } = {}) {
+  const records = new Map(), deleted = new Set()
+  const isDeleted = (userId, workspaceId) => deleted.has(keyFor(userId, workspaceId)) || deletionJournal.has(userId, workspaceId)
   return {
     async load(userId, workspaceId) {
+      if (isDeleted(userId, workspaceId)) return null
       const current = records.get(keyFor(userId, workspaceId))
       return current ? validateAutoJobReceipt(current, userId, workspaceId) : null
     },
     async begin(userId, args) {
+      if (isDeleted(userId, args.workspace_id)) throw deletedProjectError()
       const key = keyFor(userId, args.workspace_id), current = records.get(key)
       const incoming = autoJobReceipt(args, userId, now())
       checkBegin(current, incoming)
@@ -132,11 +157,18 @@ export function createMemoryAutoJobStorage({ now = () => Date.now() } = {}) {
       return structuredClone(result)
     },
     async update(userId, workspaceId, requestId, patch) {
+      if (isDeleted(userId, workspaceId)) throw deletedProjectError()
       const key = keyFor(userId, workspaceId), current = records.get(key)
       if (!current || current.request_id !== requestId) throw domainError('job_receipt_conflict', '作业记录已变化，不能覆盖新请求')
       const result = validateAutoJobReceipt(patchReceipt(current, patch, now()), userId, workspaceId)
       records.set(key, result)
       return structuredClone(result)
+    },
+    async remove(userId, workspaceId) {
+      const key = keyFor(userId, workspaceId)
+      deleted.add(key)
+      records.delete(key)
+      return true
     },
   }
 }

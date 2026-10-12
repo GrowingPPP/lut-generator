@@ -1,0 +1,51 @@
+.project-manager {
+  width: min(720px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+}
+.project-manager-heading, .project-manager-tools, .project-manager-row, .project-manager-actions, .project-manager-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.project-manager-heading { justify-content: space-between; }
+.project-manager-eyebrow { color: var(--accent); font-size: 11px; letter-spacing: .12em; }
+.project-manager h2 { margin: 4px 0 0; font-size: 23px; letter-spacing: -.02em; }
+.project-manager-description, .project-manager-footer { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.project-manager-tools input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 13px;
+}
+.project-manager-list { min-height: 100px; max-height: min(48dvh, 430px); overflow-y: auto; overscroll-behavior: contain; }
+.project-manager-row { min-height: 78px; padding: 14px 12px; border-bottom: 1px solid var(--line); }
+.project-manager-row[data-current] { background: var(--accent-soft); border-radius: 9px; }
+.project-manager-mark { width: 28px; flex-shrink: 0; color: var(--accent); font-size: 20px; text-align: center; }
+.project-manager-info { flex: 1; min-width: 0; }
+.project-manager-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.project-manager-name h3 { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.project-manager-name span { color: var(--accent); font-size: 11px; white-space: nowrap; }
+.project-manager-info p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.project-manager-actions { gap: 7px; flex-shrink: 0; }
+.project-row-more { min-width: 36px; letter-spacing: .08em; }
+.project-manager-empty { padding: 24px 10px; color: var(--muted); text-align: center; font-size: 13px; }
+.project-manager-footer { padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; }
+.project-manager-error { color: var(--danger); font-size: 13px; justify-content: space-between; }
+.project-manager :where(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 540px) {
+  .project-manager { padding: 20px 16px; gap: 16px; }
+  .project-manager-tools { flex-wrap: wrap; }
+  .project-manager-tools input { flex-basis: 100%; }
+  .project-manager-row { padding: 12px 8px; gap: 8px; }
+  .project-manager-mark { width: 18px; }
+  .project-manager-actions { gap: 4px; }
+  .project-manager-actions .btn { padding: 7px 8px; font-size: 12px; }
+}

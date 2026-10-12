@@ -111,6 +111,54 @@ def test_original_sync_and_new_job_both_persist_the_same_formal_parameters(owner
     assert not jobs.get(data["request_id"], owner[0])["can_cancel"]
 
 
+def test_deleted_project_cancels_queued_work_and_rejects_replay(owner, clean):
+    uid, headers, wid = owner
+    jobs, executor = clean
+    raw, data = request_data(wid)
+    assert post(headers, raw, data).status_code == 202
+    assert client.delete(f"/api/workspaces/{wid}", headers=headers).status_code == 204
+    executor.next()
+    final = jobs.get(data["request_id"], uid)
+    assert final["status"] == "cancelled"
+    assert final["result"] is None and not final["persisted"]
+    assert post(headers, raw, data).status_code == 410
+    assert client.get(f"/api/auto/jobs/{data['request_id']}", headers=headers).status_code == 410
+    assert db.latest_workspace_report(wid, uid) is None
+    assert not db.list_sessions(uid)
+
+
+def test_delete_during_committed_save_prevents_late_recoverable_result(owner, clean, monkeypatch):
+    import api.main as main
+    uid, headers, wid = owner
+    jobs, executor = clean
+    entered, release = Event(), Event()
+    persist = main._persist_auto_grade
+    def blocked_persist(user_id, out):
+        sid = persist(user_id, out)
+        entered.set()
+        assert release.wait(3)
+        return sid
+    monkeypatch.setattr(main, "_persist_auto_grade", blocked_persist)
+    raw, data = request_data(wid)
+    assert post(headers, raw, data).status_code == 202
+    thread = Thread(target=executor.next)
+    thread.start()
+    try:
+        assert entered.wait(3)
+        assert client.delete(f"/api/workspaces/{wid}", headers=headers).status_code == 204
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        final = jobs.get(data["request_id"], uid)
+        assert final["status"] == "cancelled"
+        assert final["result"] is None and not final["persisted"]
+        assert db.find_auto_job_report(uid, data["request_id"]) is None
+        assert not db.list_sessions(uid)
+    finally:
+        release.set()
+        thread.join(3)
+
+
 def test_replayed_uuid_is_one_task_one_quota_and_conflicting_conditions_are_rejected(owner, clean, monkeypatch):
     import api.main as main
     _, headers, wid = owner

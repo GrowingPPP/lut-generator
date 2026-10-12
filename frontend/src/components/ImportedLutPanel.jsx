@@ -51,7 +51,7 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
     try {
       const artifact = await preloadExternalLut(id)
       if (request !== requestId.current) return
-      if (blockedRef.current || paramsRef.current.base_photo_style !== source.base || paramsRef.current.external_lut_id !== source.external) throw new Error('工作区或输入条件已改变，请重新选择外部 LUT')
+      if (blockedRef.current || paramsRef.current.base_photo_style !== source.base || paramsRef.current.external_lut_id !== source.external) throw new Error('调色项目或输入条件已改变，请重新选择外部 LUT')
       if (!compatibleImportedLut(artifact, paramsRef.current)) throw new Error('此 LUT 的信号声明与当前输入不兼容')
       onReady?.(artifact)
       onCommit?.({ external_lut_id: artifact.id, external_lut_mode: artifact.mode, external_lut_strength: 1 })
@@ -71,7 +71,7 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
       if (request !== requestId.current) return
       setArtifacts(rows => [artifact, ...rows.filter(row => row.id !== artifact.id)])
       setShowImport(false); setFile(null); setConfirmed(false)
-      setError(compatibleImportedLut(artifact, paramsRef.current) ? '导入成功，可在列表中选择试套。' : '导入成功；当前输入不兼容，请切换到相应输入工作区后试套。')
+      setError(compatibleImportedLut(artifact, paramsRef.current) ? '导入成功，可在列表中选择试套。' : '导入成功；当前输入不兼容，请切换到使用相应输入的调色项目后试套。')
     } catch (reason) { if (request === requestId.current) fail(reason) }
     finally { if (request === requestId.current) setLoading(false) }
   }

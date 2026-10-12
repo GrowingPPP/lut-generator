@@ -57,11 +57,17 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 12px 16px;
+  gap: 10px 12px;
   min-width: 0;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--workbench-line);
 }
+
+.gen-workbench .project-management-trigger { flex: 0 0 auto; }
+.gen-workbench .project-version-name { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gen-workbench .project-version-name span { display: grid; gap: 6px; min-width: 0; }
+.gen-workbench .project-version-name strong { color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.gen-workbench .project-version-name .btn { flex-shrink: 0; }
 
 .gen-workbench .workbench-header .workspace-select {
   display: grid;

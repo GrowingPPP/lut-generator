@@ -76,7 +76,7 @@ const FAQ = [
   },
   {
     q: '需要登录才能使用吗？',
-    a: '生成与管理需要登录。登录后可以创建工作区、保存自己的 LUT、管理版本，并继续之前的调色。',
+    a: '生成与管理需要登录。登录后可以创建调色项目、保存自己的 LUT、管理版本，并继续之前的调色。',
   },
   {
     q: '不理解调色参数，也可以开始吗？',
@@ -374,7 +374,7 @@ export default function LandingView({ onEnter }) {
                 </p>
               </div>
               <div className="landing-feature-mock landing-workflow-mock">
-                <span className="landing-demo-label">工作区能力</span>
+                <span className="landing-demo-label">调色项目能力</span>
                 <div className="landing-workflow-item"><span>01</span><div><strong>参考图风格匹配</strong><p>从参考色彩开始，继续调整自己的样张</p></div></div>
                 <div className="landing-workflow-item"><span>02</span><div><strong>外部 .cube 导入与试套</strong><p>在真实照片上比较已有 LUT 的效果</p></div></div>
                 <div className="landing-workflow-item"><span>03</span><div><strong>保存 LUT 与导出照片</strong><p>保留创作版本，让喜欢的效果再次使用</p></div></div>

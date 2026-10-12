@@ -191,6 +191,18 @@ app.include_router(imported_luts_router)
 app.include_router(reference_router)
 
 
+@app.exception_handler(db.WorkspaceDeletedError)
+async def deleted_project(_request, exc):
+    return JSONResponse(status_code=410, content={"detail": {
+        "code": "project_deleted", "message": str(exc)}})
+
+
+@app.exception_handler(db.WorkspaceMissingError)
+async def missing_project(_request, exc):
+    return JSONResponse(status_code=404, content={"detail": {
+        "code": "project_missing", "message": str(exc)}})
+
+
 @app.exception_handler(RequestValidationError)
 async def invalid_request(_request, exc):
     """错误摘要不回显非法数值或请求中的敏感内容。"""
@@ -525,7 +537,7 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
             if not db.get_session(session_id,user["id"]):
                 raise HTTPException(404,"会话不存在")
             if workspace["session_id"] not in (None,session_id):
-                raise HTTPException(409,"工作区与会话关联不一致")
+                raise HTTPException(409,"调色项目与会话关联不一致")
             db.update_workspace(body.workspace_id,user["id"],session_id=session_id)
         else:
             session_id = db.workspace_session(body.workspace_id,user["id"])
@@ -577,12 +589,14 @@ def chat(body: ChatRequest, user: dict = Depends(auth.get_current_user)):
                        execution_status=result.get("execution_status","failed" if error else "skipped"),
                        blocked_reasons=result.get("blocked_reasons",[]),
                        observations=result.get("observations",[]),steps=result.get("steps",[]))
-    db.add_message(user["id"],session_id,"user",body.message,None)
-    db.add_message(user["id"],session_id,"agent",reply,
-                   params_out.model_dump_json() if params_out else None,cube_text,
-                   out.model_dump_json() if body.workspace_id else None)
     if body.workspace_id:
-        db.add_workspace_report(body.workspace_id,user["id"],"chat",out.model_dump_json())
+        db.persist_workspace_chat(user["id"],body.workspace_id,session_id,body.message,reply,
+                                  params_out.model_dump_json() if params_out else None,
+                                  cube_text,out.model_dump_json())
+    else:
+        db.add_message(user["id"],session_id,"user",body.message,None)
+        db.add_message(user["id"],session_id,"agent",reply,
+                       params_out.model_dump_json() if params_out else None,cube_text)
     return out
 
 
@@ -968,10 +982,12 @@ def undo_auto_grade(workspace_id: Optional[str]=None,user: dict=Depends(auth.get
         raise HTTPException(status_code=404, detail="没有可撤销的修图")
     if workspace_id and sid is None:
         sid = db.workspace_session(workspace_id,user["id"])
-    db.add_message(user["id"],sid,"agent","已撤销自动修图",before.model_dump_json(),
-                   None, json.dumps({"undone": True}))
     if workspace_id:
-        db.add_workspace_report(workspace_id,user["id"],"auto",json.dumps({"undone":True}))
+        db.persist_workspace_chat(user["id"],workspace_id,sid,None,"已撤销自动修图",
+                                  before.model_dump_json(),None,json.dumps({"undone":True}),kind="auto")
+    else:
+        db.add_message(user["id"],sid,"agent","已撤销自动修图",before.model_dump_json(),
+                       None,json.dumps({"undone":True}))
     return {"params":before}
 
 

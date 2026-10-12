@@ -5,7 +5,7 @@ import { TooltipProvider } from './components/ui/Tooltip.jsx'
 import ThemePicker from './components/ThemePicker.jsx'
 import { DeferredFeature, lazyFeature } from './components/FeatureLoader.jsx'
 
-const GenerateView = lazyFeature(() => import('./GenerateView.jsx'), '调色工作区', GenerateViewUrl)
+const GenerateView = lazyFeature(() => import('./GenerateView.jsx'), '调色项目', GenerateViewUrl)
 const LibraryView = lazyFeature(() => import('./components/LibraryView.jsx'), '我的 LUT', LibraryViewUrl)
 
 export default function StudioView({ view, onViewChange, user, previewLut, deletedAssetId,

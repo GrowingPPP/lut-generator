@@ -29,7 +29,7 @@ export async function preloadExternalLut(id) {
     const view = new DataView(bytes), data = new Float32Array(bytes.byteLength / 4)
     for (let i = 0; i < data.length; i++) { data[i] = view.getFloat32(i * 4, true); if (!Number.isFinite(data[i]) || data[i] < 0 || data[i] > 1) throw new Error('外部 LUT 数据非法') }
     const artifact = { ...metadata, data }
-    if (started !== generation) throw new Error('账号或工作区引用缓存已清除，请重新载入')
+    if (started !== generation) throw new Error('账号或调色项目引用缓存已清除，请重新载入')
     return registerExternalLut(id, artifact)
   })()
   pending.set(id, loading)

@@ -102,9 +102,9 @@ function migrateSnapshot(snapshot) {
 
 function validateSnapshot(snapshot) {
   validateParams(snapshot.params)
-  if (!GOAL_MODES.includes(snapshot.goal_mode) || !PURPOSES.includes(snapshot.purpose)) throw domainError('invalid_context', '工作区目标或用途不正确')
+  if (!GOAL_MODES.includes(snapshot.goal_mode) || !PURPOSES.includes(snapshot.purpose)) throw domainError('invalid_context', '调色项目目标或用途不正确')
   validateLocks(snapshot.locked_fields)
-  if (typeof snapshot.name !== 'string' || !['confirmed', 'pending_confirmation'].includes(snapshot.input_status)) throw domainError('invalid_context', '工作区上下文不正确')
+  if (typeof snapshot.name !== 'string' || !['confirmed', 'pending_confirmation'].includes(snapshot.input_status)) throw domainError('invalid_context', '调色项目上下文不正确')
   validateParams(snapshot.baseline?.params)
   if (!['known', 'unclassified'].includes(snapshot.baseline?.classification)
     || !Array.isArray(snapshot.baseline?.unknown_fields)
@@ -343,7 +343,7 @@ export function sanitizeMeta(meta) {
 
 export function setWorkspaceMeta(state, meta) {
   const next = { ...state, workspace: { ...state.workspace, ...sanitizeMeta(meta), updated_at: Date.now() } }
-  if (typeof next.workspace.name !== 'string' || !PURPOSES.includes(next.workspace.purpose)) throw domainError('invalid_context', '工作区名称或用途不正确')
+  if (typeof next.workspace.name !== 'string' || !PURPOSES.includes(next.workspace.purpose)) throw domainError('invalid_context', '调色项目名称或用途不正确')
   return next
 }
 

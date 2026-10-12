@@ -45,6 +45,7 @@ def test_saved_legacy_fingerprint_replay_defaults_to_unknown_only(monkeypatch, m
         LutParamsModel=LutParamsModel, MAX_AUTO_IMAGE_BYTES=1024,
         _prepare_auto_grade=None, _compute_auto_grade=None, _persist_auto_grade=None, _reserve_auto_grade=None))
     monkeypatch.setattr(auto_jobs, "require_single_worker", lambda: None)
+    monkeypatch.setattr(auto_jobs, "_require_active_workspace", lambda *_: None)
     monkeypatch.setattr(auto_jobs, "registry", make_registry()[0])
     monkeypatch.setattr(auto_jobs, "_saved_job", lambda *_: saved)
     context = {**legacy_context, **({"subject_mode": mode} if mode is not None else {})}
@@ -116,6 +117,60 @@ def test_cancel_queued_never_runs_or_saves():
     assert final['status'] == 'cancelled'
     assert final['result'] is None and not final['persisted']
     assert called == []
+
+
+def test_project_invalidation_cancels_queued_jobs_without_touching_other_projects():
+    registry, executor = make_registry(max_active=3, max_per_user=3)
+    called = []
+    removed = submit(registry, run=lambda *_: called.append("removed"))
+    other = registry.submit(1, "other-project", "digest", "sample",
+                            lambda *_: {"params": {}}, lambda out: out)
+    registry.invalidate_workspace("workspace", 2)
+    assert registry.get(removed["id"], 1)["status"] == "queued"
+    registry.invalidate_workspace("workspace", 1)
+    executor.next()
+    executor.next()
+    assert registry.get(removed["id"], 1)["status"] == "cancelled"
+    assert called == []
+    assert registry.get(other["id"], 1)["status"] == "succeeded"
+
+
+def test_project_invalidation_discards_results_even_after_save_boundary():
+    registry, executor = make_registry()
+    entered, release = Event(), Event()
+    def persist(out):
+        entered.set()
+        assert release.wait(3)
+        return out
+    job = submit(registry, persist=persist)
+    thread = Thread(target=executor.next)
+    thread.start()
+    try:
+        assert entered.wait(3)
+        assert registry.get(job["id"], 1)["can_cancel"] is False
+        registry.invalidate_workspace("workspace", 1)
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        final = registry.get(job["id"], 1)
+        assert final["status"] == "cancelled"
+        assert final["result"] is None and not final["persisted"]
+        assert final["continuation_stages"] == []
+    finally:
+        release.set()
+        thread.join(3)
+
+
+def test_project_invalidation_removes_completed_results_and_continuation():
+    registry, executor = make_registry()
+    job = submit(registry, run=lambda *_: {"params": {}, "_continuation_stages": ["style"]})
+    executor.next()
+    assert registry.get(job["id"], 1)["status"] == "succeeded"
+    registry.invalidate_workspace("workspace", 1)
+    final = registry.get(job["id"], 1)
+    assert final["status"] == "cancelled"
+    assert final["result"] is None and not final["persisted"]
+    assert final["continuation_stages"] == []
 
 
 def test_uncancellable_upstream_waits_for_safe_boundary():
@@ -321,6 +376,7 @@ def test_worker_scopes_account_lut_resolver_over_compute_and_continuation(monkey
     registry, executor = make_registry()
     monkeypatch.setattr(auto_jobs, 'registry', registry)
     monkeypatch.setattr(auto_jobs, '_saved_job', lambda *args: None)
+    monkeypatch.setattr(auto_jobs, '_require_active_workspace', lambda *_: None)
     owner, seen = 7, []
     resolver = lambda identifier: identifier
     monkeypatch.setattr(imported_luts, 'resolver_for_user',

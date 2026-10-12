@@ -209,6 +209,21 @@ class AutoJobRegistry:
                     job.status = "cancelling"
                     job.updated_at = self.clock()
 
+    def invalidate_workspace(self, workspace_id, user_id):
+        """项目退休后取消执行并撤销内存中的可恢复结果。"""
+        with self._lock:
+            for job in self._jobs.values():
+                if job.workspace_id == workspace_id and job.user_id == user_id:
+                    job.cancelled.set()
+                    job.result = None
+                    job.persisted = False
+                    job.continuation_stages = []
+                    if job.status in TERMINAL_STATUSES:
+                        self._finish(job, "cancelled")
+                    else:
+                        job.status = "cancelling"
+                        job.updated_at = self.clock()
+
     def prevent_late(self, job_id, user_id, workspace_id):
         with self._lock:
             self.cleanup()
@@ -294,6 +309,9 @@ class AutoJobRegistry:
                 progress({"stage": "save", "state": "running"})
             saved = persist(result)
             with self._lock:
+                if cancelled():
+                    self._finish(job, "cancelled")
+                    return
                 job.result = deepcopy(saved)
                 job.persisted = True
                 progress({"stage": "save", "state": "done"})
@@ -304,7 +322,7 @@ class AutoJobRegistry:
         except Exception:
             logger.exception("自动修图作业失败，作业 %s", job.id)
             with self._lock:
-                if cancelled() and not job.committing:
+                if cancelled():
                     self._finish(job, "cancelled")
                 else:
                     self._finish(job, "failed", {"code": "save_failed" if job.committing else "analysis_failed",
@@ -380,6 +398,12 @@ def _saved_job(job_id, user_id, workspace_id=None):
             "continuation_stages": [], "continued_from": result.get("continued_from"), "error": None}
 
 
+def _require_active_workspace(workspace_id, user_id):
+    if workspace_id:
+        from api.workspaces import require_workspace
+        require_workspace(workspace_id, user_id)
+
+
 def _request_blocked():
     return HTTPException(409, {"code": "request_blocked", "accepted": False,
                               "message": "此请求已明确结束，不会重新提交；请使用新的请求标识重新开始"})
@@ -439,6 +463,7 @@ def create_job(request: Request, file: UploadFile = File(...),
         raise HTTPException(409, "来源文件摘要不一致，请重新绑定主样张")
     require_subject_source(ctx, actual_digest, parsed.base_photo_style)
     require_subject_source(ctx, source_digest, parsed.base_photo_style)
+    _require_active_workspace(workspace_id, user["id"])
     request_data = {"style": (style or "").strip()[:200] or None,
                     "use_vision": use_vision, "max_rounds": max_rounds,
                     "context": normalize_context(ctx).model_dump(), "actual_digest": actual_digest}
@@ -526,6 +551,7 @@ def get_job(job_id: str, workspace_id: Optional[str] = None, user: dict = Depend
         job = registry.get(job_id, user["id"])
         if workspace_id and job["workspace_id"] != workspace_id:
             raise JobNotFound()
+        _require_active_workspace(job["workspace_id"], user["id"])
         return job
     except JobNotFound:
         saved = _saved_job(job_id, user["id"], workspace_id)

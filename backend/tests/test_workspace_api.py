@@ -2,6 +2,7 @@
 import io
 import json
 from uuid import uuid4
+from threading import Event, Thread
 
 import numpy as np
 import pytest
@@ -74,6 +75,266 @@ def test_workspace_rejects_another_users_session(headers):
     other_id = db.create_user("other-session-owner","unused-hash")
     sid = db.create_session(other_id,"private")
     assert client.post("/api/workspaces",json={"session_id":sid},headers=headers).status_code == 404
+
+
+def test_project_names_are_trimmed_and_rename_preserves_identity(headers):
+    project = workspace(headers, name="  春日调色  ")
+    assert project["name"] == "春日调色"
+    renamed = client.patch(f"/api/workspaces/{project['id']}", headers=headers, json={"name": "  春日清透  "})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "春日清透"
+    assert renamed.json()["id"] == project["id"]
+    assert renamed.json()["created_at"] == project["created_at"]
+
+
+@pytest.mark.parametrize("name", ["", "   ", "色" * 161, "含\n换行", 42, None])
+def test_project_rejects_invalid_create_and_rename_names(headers, name):
+    assert client.post("/api/workspaces", headers=headers, json={"name": name}).status_code == 422
+    project = workspace(headers, name="有效项目")
+    assert client.patch(f"/api/workspaces/{project['id']}", headers=headers, json={"name": name}).status_code == 422
+    assert db.get_workspace(project["id"], db.get_user_by_username("workspace-user")["id"])["name"] == "有效项目"
+
+
+def test_project_delete_clears_owned_content_and_preserves_lut_revisions(headers):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "独立对话")
+    wid = workspace(headers, session_id=sid)["id"]
+    db.add_message(user_id, sid, "user", "春日风格", None)
+    db.create_workspace_version(wid, user_id, "版本", "{}")
+    db.add_workspace_report(wid, user_id, "validation", "{}")
+    saved = client.post("/api/luts", headers=headers, json={"name": "保留成果", "workspace_id": wid, "params": {"contrast": .1}})
+    assert saved.status_code == 200, saved.text
+    asset = saved.json()
+    revised = client.put(f"/api/luts/{asset['id']}", headers=headers, json={"name": "保留成果二版", "params": {"contrast": .2}})
+    assert revised.status_code == 200, revised.text
+    revisions = db.list_lut_revisions(asset["id"], user_id)
+    assert len(revisions) == 2
+    assert client.delete(f"/api/workspaces/{wid}", headers=headers).status_code == 204
+    assert db.get_workspace(wid, user_id) is None
+    assert not db.list_workspace_versions(wid, user_id)
+    assert db.latest_workspace_report(wid, user_id, "validation") is None
+    assert db.get_session(sid, user_id) is None and not db.list_messages(sid, user_id)
+    assert db.get_lut(asset["id"], user_id)["workspace_id"] is None
+    assert db.list_lut_revisions(asset["id"], user_id) == revisions
+    kept = client.get(f"/api/luts/{asset['id']}", headers=headers)
+    assert kept.status_code == 200 and kept.json()["params"]["contrast"] == .2
+    original = client.post(f"/api/luts/{asset['id']}/apply", headers=headers,
+                          json={"params": {}, "revision_id": asset["revision_id"]})
+    assert original.status_code == 200 and original.json()["params"]["contrast"] == .1
+
+
+@pytest.mark.parametrize("global_auto", [False, True])
+def test_project_delete_preserves_shared_and_global_auto_conversations(headers, global_auto):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "保留对话", is_auto=global_auto)
+    wid = workspace(headers, session_id=sid)["id"]
+    other = workspace(headers, session_id=sid)["id"] if not global_auto else None
+    db.add_message(user_id, sid, "agent", "保留内容", None)
+    assert client.delete(f"/api/workspaces/{wid}", headers=headers).status_code == 204
+    assert db.get_session(sid, user_id) is not None
+    assert len(db.list_messages(sid, user_id)) == 1
+    if other:
+        assert db.get_workspace(other, user_id)["session_id"] == sid
+
+
+def test_project_delete_tombstone_is_idempotent_and_account_scoped(headers):
+    wid = workspace(headers)["id"]
+    other_id = db.create_user("project-other-owner", "unused")
+    other = {"Authorization": f"Bearer {create_token(other_id, 0)}"}
+    path = f"/api/workspaces/{wid}"
+    assert client.delete(path, headers=other).status_code == 404
+    assert client.get(path, headers=headers).status_code == 200
+    assert client.delete(path, headers=headers).status_code == 204
+    assert client.delete(path, headers=headers).status_code == 204
+    assert client.get(path, headers=headers).status_code == 410
+    assert client.get(path, headers=other).status_code == 404
+    assert client.delete(path, headers=other).status_code == 404
+    assert client.post("/api/workspaces", headers=headers, json={"id": wid}).status_code == 410
+    assert client.post("/api/workspaces", headers=other, json={"id": wid}).status_code == 409
+    assert client.patch(path, headers=headers, json={"name": "复活"}).status_code == 410
+    assert client.get("/api/workspaces", headers=headers).json() == []
+    assert workspace(headers)["id"] != wid
+
+
+def test_retired_project_rejects_late_reports_versions_chat_and_lut_associations(headers):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "会话")
+    wid = workspace(headers, session_id=sid)["id"]
+    asset_id = db.create_lut(user_id, "资产", "", "{}")
+    assert db.delete_workspace(wid, user_id)
+    writes = [
+        lambda: db.add_workspace_report(wid, user_id, "validation", "{}"),
+        lambda: db.create_workspace_version(wid, user_id, "版本", "{}"),
+        lambda: db.update_workspace(wid, user_id, name="重新命名"),
+        lambda: db.workspace_session(wid, user_id),
+        lambda: db.persist_workspace_chat(user_id, wid, sid, "请求", "晚到回复", "{}", None, "{}"),
+        lambda: db.persist_auto_grade(user_id, wid, "晚到AI结果", "{}", {"job_id": "late"}),
+        lambda: db.create_lut(user_id, "晚到资产", "", "{}", workspace_id=wid),
+        lambda: db.update_lut(asset_id, user_id, workspace_id=wid),
+    ]
+    for write in writes:
+        with pytest.raises(db.WorkspaceDeletedError):
+            write()
+    assert db.latest_workspace_report(wid, user_id) is None
+    assert not db.list_workspace_versions(wid, user_id)
+    assert not db.list_messages(sid, user_id)
+    assert len(db.list_luts(user_id)) == 1
+    assert db.get_lut(asset_id, user_id)["workspace_id"] is None
+
+
+def test_deleted_project_report_cannot_be_recovered_from_a_shared_conversation(headers):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "共享")
+    wid = workspace(headers, session_id=sid)["id"]
+    workspace(headers, session_id=sid)
+    payload = {"workspace_id": wid, "job_id": "saved-job"}
+    db.persist_auto_grade(user_id, wid, "正式报告", "{}", payload)
+    assert db.find_auto_job_report(user_id, "saved-job", wid) is not None
+    assert db.delete_workspace(wid, user_id)
+    assert db.list_messages(sid, user_id)
+    assert db.find_auto_job_report(user_id, "saved-job", wid) is None
+    assert db.find_auto_job_report(user_id, "saved-job") is None
+
+
+def test_workspace_undo_message_and_report_commit_without_fake_user_message(headers):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "对话")
+    wid = workspace(headers, session_id=sid)["id"]
+    payload = json.dumps({"undone": True})
+    db.persist_workspace_chat(user_id, wid, sid, None, "已撤销自动修图", "{}", None, payload, kind="auto")
+    messages = db.list_messages(sid, user_id)
+    assert len(messages) == 1 and messages[0]["role"] == "agent"
+    assert db.latest_workspace_report(wid, user_id, "auto")["payload_json"] == payload
+    assert db.delete_workspace(wid, user_id)
+    with pytest.raises(db.WorkspaceDeletedError):
+        db.persist_workspace_chat(user_id, wid, sid, None, "已撤销自动修图", "{}", None, payload, kind="auto")
+    assert not db.list_messages(sid, user_id)
+
+
+def test_project_delete_rolls_back_all_content_when_asset_detach_fails(headers, monkeypatch):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "对话")
+    wid = workspace(headers, session_id=sid)["id"]
+    db.create_workspace_version(wid, user_id, "版本", "{}")
+    db.add_workspace_report(wid, user_id, "validation", "{}")
+    asset_id = db.create_lut(user_id, "成果", "", "{}", workspace_id=wid)
+    connect = db._connect
+
+    class Cursor:
+        def __init__(self, cursor):
+            self.cursor = cursor
+        def __enter__(self):
+            self.cursor.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.cursor.__exit__(*args)
+        def __getattr__(self, name):
+            return getattr(self.cursor, name)
+        def execute(self, query, *args):
+            if query.startswith("UPDATE luts SET workspace_id=NULL"):
+                raise RuntimeError("storage unavailable")
+            return self.cursor.execute(query, *args)
+
+    class Connection:
+        def __init__(self):
+            self.connection = connect()
+        def __enter__(self):
+            self.connection.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.connection.__exit__(*args)
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+        def cursor(self):
+            return Cursor(self.connection.cursor())
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "_connect", Connection)
+        with pytest.raises(RuntimeError, match="storage unavailable"):
+            db.delete_workspace(wid, user_id)
+    assert db.get_workspace(wid, user_id) is not None
+    assert not db.is_workspace_deleted(wid, user_id)
+    assert len(db.list_workspace_versions(wid, user_id)) == 1
+    assert db.latest_workspace_report(wid, user_id, "validation") is not None
+    assert db.get_lut(asset_id, user_id)["workspace_id"] == wid
+    assert db.get_session(sid, user_id) is not None
+
+
+def test_project_chat_finished_after_delete_returns_gone_without_orphan_messages(headers, monkeypatch):
+    import agent.graph as graph
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    sid = db.create_session(user_id, "独立对话")
+    wid = workspace(headers, session_id=sid)["id"]
+    def deleted_during_generation(*args, **kwargs):
+        assert db.delete_workspace(wid, user_id)
+        return {"reply": "晚到回复", "done": False}
+    monkeypatch.setattr(graph, "run_agent", deleted_during_generation)
+    monkeypatch.setenv("CHROMA_FAKE_LLM", "confirm")
+    response = client.post("/api/session/chat", headers=headers,
+                           json={"message": "春日风格", "workspace_id": wid, "session_id": sid})
+    assert response.status_code == 410, response.text
+    assert not db.list_messages(sid, user_id)
+    assert db.latest_workspace_report(wid, user_id, "chat") is None
+
+
+def test_project_validation_finished_after_delete_cannot_write_orphan_report(headers, monkeypatch):
+    from api import workspaces
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    wid = workspace(headers)["id"]
+    def deleted_during_measurement(*args, **kwargs):
+        assert db.delete_workspace(wid, user_id)
+        return {"id": "sample", "status": "no_new_risk"}
+    monkeypatch.setattr(workspaces, "measure_sample", deleted_during_measurement)
+    response = client.post(f"/api/workspaces/{wid}/validate", headers=headers,
+                           data={"params": "{}", "samples": json.dumps([{"id": "sample", "input_contract": input_contract({})}])},
+                           files={"files": ("sample.png", png(), "image/png")})
+    assert response.status_code == 410, response.text
+    assert db.latest_workspace_report(wid, user_id, "validation") is None
+
+
+def test_report_commit_interleaved_with_delete_leaves_no_orphan_report(headers, monkeypatch):
+    user_id = db.get_user_by_username("workspace-user")["id"]
+    wid = workspace(headers)["id"]
+    locked, release, deleting = Event(), Event(), Event()
+    errors = []
+    require_row = db._require_workspace_row
+    def hold_report_lock(cur, workspace_id, owner_id):
+        record = require_row(cur, workspace_id, owner_id)
+        locked.set()
+        assert release.wait(3)
+        return record
+    monkeypatch.setattr(db, "_require_workspace_row", hold_report_lock)
+    def save_report():
+        try:
+            db.add_workspace_report(wid, user_id, "validation", "{}")
+        except BaseException as exc:
+            errors.append(exc)
+    def remove_project():
+        deleting.set()
+        try:
+            assert db.delete_workspace(wid, user_id)
+        except BaseException as exc:
+            errors.append(exc)
+    writer = Thread(target=save_report)
+    remover = Thread(target=remove_project)
+    writer.start()
+    try:
+        assert locked.wait(3)
+        remover.start()
+        assert deleting.wait(3)
+        release.set()
+        writer.join(3)
+        remover.join(3)
+        assert not writer.is_alive() and not remover.is_alive()
+        assert errors == []
+        assert db.get_workspace(wid, user_id) is None
+        assert db.latest_workspace_report(wid, user_id, "validation") is None
+        assert db.is_workspace_deleted(wid, user_id)
+    finally:
+        release.set()
+        writer.join(3)
+        if remover.ident is not None:
+            remover.join(3)
 
 
 def test_version_immutable_snapshot_and_projection(headers):

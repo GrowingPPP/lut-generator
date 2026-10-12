@@ -44,7 +44,7 @@ class LutParamsModel(BaseModel):
     def valid_external_options(self):
         validate_external_options(self.external_lut_id,self.external_lut_strength,self.external_lut_mode)
         if self.external_lut_mode == "input" and self.base_photo_style != "VLOG":
-            raise ValueError("输入转换模式仅支持 VLOG 工作区")
+            raise ValueError("输入转换模式仅支持 VLOG 调色项目")
         return self
     # 分离色调
     split_shadow_hue: float = Field(0.0, ge=0, le=360)

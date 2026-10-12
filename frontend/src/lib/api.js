@@ -269,6 +269,8 @@ export const createWorkspace = (data) =>
   jsonFetch(`${BASE}/workspaces`, { method: 'POST', body: JSON.stringify(data) })
 export const updateWorkspace = (id, data) =>
   jsonFetch(`${BASE}/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteWorkspace = (id) =>
+  jsonFetch(`${BASE}/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const listVersions = (id) => jsonFetch(`${BASE}/workspaces/${id}/versions`)
 export const createVersion = (id, data) =>
   jsonFetch(`${BASE}/workspaces/${id}/versions`, { method: 'POST', body: JSON.stringify(data) })

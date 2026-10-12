@@ -66,7 +66,7 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
     onStatus?.('正在应用并保存参考候选…')
     try {
       if (await onApply(candidate.result, candidate.request) !== false) onClose()
-      else { setError('工作区或来源已变化，候选未应用，请重新匹配'); onStatus?.('工作区或来源已变化，候选未应用，请重新匹配') }
+      else { setError('调色项目或来源已变化，候选未应用，请重新匹配'); onStatus?.('调色项目或来源已变化，候选未应用，请重新匹配') }
     } catch (failure) { setError(failure.message); onStatus?.(`参考候选未确认应用：${failure.message}`) }
     finally { setMatching(false); onBusyChange(false) }
   }

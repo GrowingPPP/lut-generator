@@ -82,9 +82,9 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
           <Tooltip content="重做上一项调整 · ⌘ / Ctrl + Shift + Z"><button className="btn" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
             重做
           </button></Tooltip>
-          <button className="btn" onClick={onNew} disabled={busy}>
-            新工作区
-          </button>
+          <Tooltip content="保存当前项目，使用默认参数开始新的创作"><button className="btn" onClick={onNew} disabled={busy}>
+            新建调色项目
+          </button></Tooltip>
         </div>}
       </div>
       {showContext && <p className="workspace-note">

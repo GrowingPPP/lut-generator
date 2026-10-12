@@ -291,7 +291,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
     setDownloadError('')
     const portable = asset.kind === 'portable_style'
     if (portable && !(await confirm({ title: '导出中性参数上的风格？',
-      description: '将风格应用于相同输入基准的中性参数并导出一个 LUT。若要叠加当前校正，请先载入工作区，再直接下载当前完整效果。',
+      description: '将风格应用于相同输入基准的中性参数并导出一个 LUT。若要叠加当前校正，请先载入调色项目，再直接下载当前完整效果。',
       confirmLabel: '导出风格' }))) return
     setDownloading(true)
     try { await downloadAndSave(asset.id, mode, portable) }
@@ -480,7 +480,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           </h2>
           <p>
             {summary.total === 0
-              ? '在「生成」工作区保存完整效果或可复用风格，它们会出现在这里。'
+              ? '在「生成」页面的调色项目中保存完整效果或可复用风格，它们会出现在这里。'
               : '试试其他关键词，或清除种类、输入与收藏筛选。'}
           </p>
           {summary.total > 0 && (
@@ -549,7 +549,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           </div>
           <p className="workspace-note">
             {detail.kind === 'portable_style'
-              ? '库内导出将风格应用于中性参数。叠加校正后的完整效果，请在工作区导出。'
+              ? '库内导出将风格应用于中性参数。叠加校正后的完整效果，请在调色项目中导出。'
               : '库内导出使用已保存的完整参数。'}{' '}
             载入前会显示候选预览。
           </p>
@@ -595,7 +595,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           </div>
           <div id="library-delete-description" className="library-delete-description">
             <p>将永久删除此资产及全部调色修订，无法撤销。</p>
-            <p>已载入的调整效果、工作区草稿、保存版本和已导出的文件会保留。</p>
+            <p>已载入的调整效果、调色项目草稿、保存版本和已导出的文件会保留。</p>
           </div>
           {deleteError && <p className="error" role="alert">{deleteError}</p>}
           {deleting && <p className="library-delete-progress" role="status">正在删除，请稍候…</p>}

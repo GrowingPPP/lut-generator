@@ -166,7 +166,7 @@ export default function AutoRetouchBar({
           release(token)
           return
         }
-        callbacksRef.current.setStatus('正在恢复本工作区的 AI 作业，编辑保持冻结…')
+        callbacksRef.current.setStatus('正在恢复本调色项目的 AI 作业，编辑保持冻结…')
         const initial = await waitForKnownJob(token)
         const completed = await watch(token, initial)
         if (completed) await finish(token, receipt.request, completed, null, true)
@@ -222,7 +222,7 @@ export default function AutoRetouchBar({
       request = onBeforeRun ? await onBeforeRun(args.params) : null
       if (request === false || !current(token) || token.cancelRequested) return
       if (!sameAutoConditions(args, conditionsRef.current)) {
-        setStatus('工作区、参数或主样张已变化，请用当前条件重新开始')
+        setStatus('调色项目、参数或主样张已变化，请用当前条件重新开始')
         return
       }
       const receipt = await storageRef.current.begin(userId, args)

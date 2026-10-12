@@ -185,7 +185,7 @@ export default function StyleSaveDialog({
         <p className="workspace-note">
           {kind === 'full_snapshot'
             ? '保存当前全部参数，包含单张校正。载入时替换完整参数。'
-            : '保存实际生效的风格贡献；追加到另一工作区的当前效果。下方预览使用同一输入基准的中性参数。'}
+            : '保存实际生效的风格贡献；追加到另一调色项目的当前效果。下方预览使用同一输入基准的中性参数。'}
         </p>
         {kind === 'portable_style' && (
           <>

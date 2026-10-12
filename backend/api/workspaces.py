@@ -1,4 +1,4 @@
-"""工作区身份、不可变版本与无模型多样张验证。"""
+"""调色项目身份、不可变版本与无模型多样张验证。"""
 import hashlib
 import json
 from dataclasses import asdict
@@ -20,6 +20,7 @@ from api import auth
 from api.models import LutParamsModel, checked_metadata
 from lut_engine import input_contract, validate_recipe, validate_input_contract, RecipeError, technical_baseline_params
 from storage import db
+from storage.library_metadata import normalized_text
 
 router = APIRouter(prefix="/api/workspaces")
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
@@ -44,7 +45,9 @@ def validation_slot():
 def require_workspace(workspace_id, user_id):
     record = db.get_workspace(workspace_id, user_id)
     if not record:
-        raise HTTPException(404, "工作区不存在")
+        if db.is_workspace_deleted(workspace_id, user_id):
+            raise HTTPException(410, "调色项目已删除，请打开其他项目")
+        raise HTTPException(404, "调色项目不存在")
     return record
 
 
@@ -61,7 +64,12 @@ class WorkspaceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: Optional[str] = None
     session_id: Optional[int] = None
-    name: str = Field("创作工作区", min_length=1, max_length=255)
+    name: str = Field("调色项目", min_length=1, max_length=160)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def valid_name(cls, value):
+        return normalized_text(value, 160)
 
     @field_validator("id")
     @classmethod
@@ -72,7 +80,12 @@ class WorkspaceCreate(BaseModel):
 class WorkspaceUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: Optional[int] = None
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def valid_name(cls, value):
+        return normalized_text(value, 160) if value is not None else None
 
 
 class VersionCreate(BaseModel):
@@ -117,16 +130,13 @@ def version_out(record):
 def create_workspace(body: WorkspaceCreate, user=Depends(auth.get_current_user)):
     if body.session_id is not None and not db.get_session(body.session_id, user["id"]):
         raise HTTPException(404, "会话不存在")
-    existing = db.get_workspace(body.id, user["id"]) if body.id else None
-    if existing:
-        return existing
     try:
         return db.create_workspace(user["id"], body.id, body.session_id, body.name)
     except pymysql.err.IntegrityError as exc:
         existing = db.get_workspace(body.id,user["id"])
         if existing:
             return existing
-        raise HTTPException(409,"工作区标识已使用") from exc
+        raise HTTPException(409,"调色项目标识已使用") from exc
 
 
 @router.get("")
@@ -153,7 +163,9 @@ def update_workspace(workspace_id: str, body: WorkspaceUpdate, user=Depends(auth
 @router.delete("/{workspace_id}", status_code=204)
 def delete_workspace(workspace_id: str, user=Depends(auth.get_current_user)):
     if not db.delete_workspace(workspace_id, user["id"]):
-        raise HTTPException(404, "工作区不存在")
+        raise HTTPException(404, "调色项目不存在")
+    from api.auto_jobs import registry
+    registry.invalidate_workspace(workspace_id, user["id"])
 
 
 @router.post("/{workspace_id}/versions")
@@ -182,7 +194,9 @@ def create_version(workspace_id: str, body: VersionCreate, user=Depends(auth.get
     try:
         return version_out(db.create_workspace_version(workspace_id,user["id"],body.name,_json(snapshot)))
     except ValueError as exc:
-        raise HTTPException(409, "每个工作区最多保存 20 个命名版本") from exc
+        if isinstance(exc, db.WorkspaceMissingError):
+            raise
+        raise HTTPException(409, "每个调色项目最多保存 20 个命名版本") from exc
 
 
 @router.get("/{workspace_id}/versions")

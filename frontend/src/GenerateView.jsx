@@ -16,10 +16,12 @@ import CheckboxField from './components/ui/CheckboxField.jsx'
 import Tooltip from './components/ui/Tooltip.jsx'
 import { inputContract, applyStyleRecipe } from './lib/styleRecipe.js'
 import { lockConflicts } from './lib/workspace.js'
+import { duplicateProjectName } from './lib/projectManagement.js'
 import { decodeSample, restoreSample, sampleMatches, sampleIsNormalized, editingContextForSample } from './lib/samples.js'
 import { diffParams } from './lib/autoGrade.js'
 import { parameterSignature, effectivePhases, versionSource, equivalentCandidate, contextSignature, reportIsHistorical } from './lib/workspaceFlow.js'
 import WorkspaceToolbar from './components/WorkspaceToolbar.jsx'
+import ProjectManager, { projectName } from './components/ProjectManager.jsx'
 import InputConfirmationDialog from './components/InputConfirmationDialog.jsx'
 import SampleGallery from './components/SampleGallery.jsx'
 import SubjectProtectionPanel from './components/SubjectProtectionPanel.jsx'
@@ -33,7 +35,7 @@ import ComparisonPreview, { RenderedImage } from './components/ComparisonPreview
 import {
   createLut, chatSession,
   listSessions, createSession, deleteSession, updateSession, listMessages,
-  saveTextFile, cameraFileName, listWorkspaces, createWorkspace, updateWorkspace, listVersions, createVersion, renameVersion, deleteVersion, applyLut, validateWorkspace, updateLut, getAutoReport, analyzePhotoSubjects,
+  saveTextFile, cameraFileName, listWorkspaces, createWorkspace, updateWorkspace, deleteWorkspace, listVersions, createVersion, renameVersion, deleteVersion, applyLut, validateWorkspace, updateLut, getAutoReport, analyzePhotoSubjects,
 } from './lib/api.js'
 import { paramsToCube } from './lib/lutEngine.js'
 import { sameAutoMetadata } from './lib/autoJobs.js'
@@ -114,6 +116,8 @@ const DISPLAY_MODES = [
   { value: 'slider', label: '滑动对比' },
   { value: 'split', label: '独立展示' },
 ]
+const EMPTY_PROJECT_VIEW = { display_mode: 'slider', split: 0.5, selected_sample_id: null,
+  comparison: null, tool_tab: 'ai', ai_intent: 'optimize', curves_open: false }
 
 export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const dialogs = useDialogs()
@@ -147,6 +151,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const [aiIntent, setAiIntent] = useState('optimize')
   const [curvesOpen, setCurvesOpen] = useState(false)
   const [workspaceHistory, setWorkspaceHistory] = useState(false)
+  const [projectManager, setProjectManager] = useState(false)
+  const [localProjects, setLocalProjects] = useState([])
+  const [projectLoading, setProjectLoading] = useState(false)
+  const [projectError, setProjectError] = useState('')
+  const [retiredProjectIds, setRetiredProjectIds] = useState([])
   const [detailsRequest, setDetailsRequest] = useState(0)
   const [photoExport, setPhotoExport] = useState(false)
   const [photoViewer, setPhotoViewer] = useState(false)
@@ -167,6 +176,8 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const draggingRef = useRef(false)
   const fileInputRef = useRef(null)
   const openRequestRef = useRef(0)
+  const projectOperationRef = useRef(false)
+  const recoveringProjectsRef = useRef(new Set())
   const remoteRequests = useRef(new Map())
   const consumedPreviewRef = useRef(null)
   const deletedAssetIds = useRef(new Set())
@@ -193,6 +204,13 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   }, [deletedAssetId])
   const baseBusy = sending || grading || validating || sampleLoading || detectingSampleId !== null || remoteBusy || resourceLoading || !ready
   const busy = baseBusy || advancedLoading
+  const projects = useMemo(() => {
+    const combined = new Map(localProjects.map(project => [project.id, { ...project, localOnly: true }]))
+    for (const project of remoteWorkspaces) combined.set(project.id, { ...combined.get(project.id), ...project, localOnly: false })
+    combined.set(workspace.id, { localOnly: true, ...combined.get(workspace.id), ...workspace })
+    return [...combined.values()].filter(project => !retiredProjectIds.includes(project.id)).sort((a, b) => a.id === workspace.id ? -1 : b.id === workspace.id ? 1 :
+      new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
+  }, [localProjects, remoteWorkspaces, workspace, retiredProjectIds])
   const samples = workspace.samples || []
   const primaryId = workspace.primary_sample_id || null
   const selectedSample = samples.find((s) => s.id === selectedId) || samples[0]
@@ -245,7 +263,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     const request = createWorkspace({
       id: ws.id,
       session_id: ws.session_id,
-      name: ws.name || '调色工作区',
+      name: projectName(ws),
     })
       .then((record) => {
         setRemoteWorkspaces((prev) =>
@@ -255,6 +273,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       })
       .catch((e) => {
         remoteRequests.current.delete(ws.id)
+        if (e.status === 410) void recoverDeletedProject(ws.id)
         throw e
       })
     remoteRequests.current.set(ws.id, request)
@@ -265,12 +284,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     listSessions()
       .then(setSessions)
       .catch((e) => setStatus(e.message))
-    listWorkspaces()
-      .then((items) => {
-        setRemoteWorkspaces(items)
-        items.forEach((item) => remoteRequests.current.set(item.id, Promise.resolve(item)))
-      })
-      .catch(() => {})
+    void refreshProjects()
   }, [])
 
   useEffect(() => {
@@ -299,7 +313,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         if (!cancelled) setVersions(v)
       })
       .catch((e) => {
-        if (!cancelled) setStatus(`工作区同步失败：${e.message}`)
+        if (!cancelled) {
+          if (e.status === 410) void recoverDeletedProject(workspace.id)
+          else setStatus(`调色项目同步失败：${e.message}`)
+        }
       })
     if (!workspace.report) {
       ensureRemote(workspace)
@@ -388,7 +405,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         saveDialog ||
         inputConfirmation ||
         pendingAsset ||
-        workspaceHistory ||
+        workspaceHistory || projectManager ||
         photoExport ||
         photoViewer ||
         /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) ||
@@ -406,7 +423,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undoAdjustment, redoAdjustment, editor.canUndo, editor.canRedo, busy, saveDialog, inputConfirmation, pendingAsset, workspaceHistory, photoExport, photoViewer])
+  }, [undoAdjustment, redoAdjustment, editor.canUndo, editor.canRedo, busy, saveDialog, inputConfirmation, pendingAsset, workspaceHistory, projectManager, photoExport, photoViewer])
 
   const captureRequest = () => {
     const ws = currentRef.current
@@ -430,7 +447,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       || parameterSignature(result.before_params) !== parameterSignature(ws.params)
       || result.workspace_id !== ws.id || result.source_digest !== sample?.source_digest
       || result.main_sample_id !== ws.primary_sample_id || result.job_id !== meta?.jobId) {
-      setStatus('工作区、参数或主样张已变化，本次响应未应用')
+      setStatus('调色项目、参数或主样张已变化，本次响应未应用')
       return false
     }
     if ((ws.applied_auto_job_ids || []).includes(meta.jobId)) return true
@@ -457,8 +474,47 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   }
 
 
+  const recoverDeletedProject = async (id) => {
+    if (recoveringProjectsRef.current.has(id)) return
+    recoveringProjectsRef.current.add(id)
+    setRetiredProjectIds(ids => [...new Set([...ids, id])])
+    remoteRequests.current.delete(id)
+    await editor.retireProject(id)
+    setRemoteWorkspaces(items => items.filter(item => item.id !== id))
+    setLocalProjects(items => items.filter(item => item.id !== id))
+    if (currentRef.current.id === id) {
+      await editor.loadWorkspace({ sessionId: null })
+      setStatus('此调色项目已被删除，已切换到可用草稿')
+    }
+  }
+
+  const refreshProjects = async () => {
+    setProjectLoading(true)
+    setProjectError('')
+    const results = await Promise.allSettled([listWorkspaces(), editor.listProjects(), editor.deletedProjectIds()])
+    if (results[2].status === 'fulfilled') {
+      setRetiredProjectIds(ids => [...new Set([...ids, ...results[2].value])])
+      const cleanup = await Promise.allSettled(results[2].value.map(id =>
+        currentRef.current.id === id ? recoverDeletedProject(id) : editor.retireProject(id)))
+      if (cleanup.some(result => result.status === 'rejected' || result.value === false))
+        setProjectError('部分已删除项目的本机缓存尚未清理，请重试同步')
+    }
+    if (results[0].status === 'fulfilled') setRemoteWorkspaces(results[0].value)
+    else setProjectError(`项目列表同步失败：${results[0].reason.message}`)
+    if (results[1].status === 'fulfilled' && results[1].value) setLocalProjects(results[1].value)
+    else if (results[1].status === 'fulfilled') setProjectError('本机项目读取失败，请查看草稿保存提示')
+    else setProjectError(`本机项目读取失败：${results[1].reason.message}`)
+    setProjectLoading(false)
+  }
+
+  const manageProjects = () => {
+    setProjectManager(true)
+    void refreshProjects()
+  }
+
   const newWorkspace = async () => {
-    if (busy) return
+    if (busy || projectOperationRef.current) return
+    projectOperationRef.current = true
     setRemoteBusy(true)
     try {
       if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试或下载备份')
@@ -469,40 +525,186 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         params: defaultParams(),
         legacy: false,
         sessionId: session.id,
-        name: '',
+        name: '未命名调色项目',
+        view_state: EMPTY_PROJECT_VIEW,
       })
       if (!loaded) throw new Error('未能创建新草稿，请查看本机保存提示')
       setSessions((prev) => [session, ...prev])
-      setStatus('已创建新工作区')
+      await ensureRemote(loaded)
+      setProjectManager(false)
+      setStatus('已创建新的调色项目')
     } catch (e) {
       setStatus(e.message)
     } finally {
+      projectOperationRef.current = false
       setRemoteBusy(false)
     }
   }
 
-  const openWorkspace = async (id) => {
-    if (busy || id === workspace.id) return
-    setRemoteBusy(true)
-    const record = remoteWorkspaces.find((w) => w.id === id)
+  const loadProject = async (record) => {
+    const id = record.id
     const request = ++openRequestRef.current
+    const local = (await editor.listProjects())?.find(project => project.id === id)
+    let detached = false
+    const msgs = record?.session_id ? await listMessages(record.session_id).catch(error => {
+      if (!local) throw error
+      detached = error.status === 404
+      return []
+    }) : []
+    if (request !== openRequestRef.current) return
+    const last = [...msgs].reverse().find((m) => m.role === 'agent' && m.params)
+    let loaded = await editor.loadWorkspace({
+      id,
+      params: last?.params || defaultParams(),
+      legacy: true,
+      sessionId: record?.session_id,
+      name: record?.name || '',
+    })
+    if (!loaded) throw new Error('草稿未能载入，请查看本机保存提示')
+    if (detached) {
+      loaded = editor.setMeta({ session_id: null }) || loaded
+      await updateWorkspace(id, { session_id: null }).catch(error => { if (error.status !== 404) throw error })
+    }
+    let syncError
+    await ensureRemote(loaded).catch(error => {
+      if (!local || error.status === 410 || error.status === 401) throw error
+      syncError = error.message
+    })
+    return { ...loaded, syncError }
+  }
+
+  const openWorkspace = async (id) => {
+    if (busy || projectOperationRef.current || id === workspace.id) return
+    projectOperationRef.current = true
+    setRemoteBusy(true)
     try {
       if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试或下载备份')
-      const msgs = record?.session_id ? await listMessages(record.session_id) : []
-      if (request !== openRequestRef.current) return
-      const last = [...msgs].reverse().find((m) => m.role === 'agent' && m.params)
-      const loaded = await editor.loadWorkspace({
-        id,
-        params: last?.params || defaultParams(),
-        legacy: true,
-        sessionId: record?.session_id,
-        name: record?.name || '',
-      })
-      if (!loaded) throw new Error('草稿未能载入，请查看本机保存提示')
-      setStatus('已载入工作区；本机草稿优先恢复')
+      const record = projects.find((w) => w.id === id)
+      if (!record) throw new Error('调色项目已不存在，请刷新项目列表')
+      const loaded = await loadProject(record)
+      if (!loaded) return
+      setProjectManager(false)
+      setStatus(loaded.syncError ? `已恢复本机草稿；账户同步失败：${loaded.syncError}` : '已载入调色项目；本机草稿优先恢复')
     } catch (e) {
+      if (e.status === 410) void recoverDeletedProject(id)
       setStatus(e.message)
     } finally {
+      projectOperationRef.current = false
+      setRemoteBusy(false)
+    }
+  }
+
+  const renameProject = async (id = workspace.id) => {
+    if (busy || projectOperationRef.current) return
+    const source = projects.find(project => project.id === id)
+    if (!source) return
+    const ownerProjectId = workspace.id
+    const name = await dialogs.prompt({ title: '重命名调色项目', label: '项目名称',
+      description: '仅修改项目名称，已保存的 LUT 和版本名称保持不变。',
+      defaultValue: projectName(source), maxLength: 160 })
+    if (name == null || currentRef.current.id !== ownerProjectId || projectOperationRef.current) return
+    projectOperationRef.current = true
+    setRemoteBusy(true)
+    try {
+      if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试或下载备份')
+      await ensureRemote(source)
+      const remote = await updateWorkspace(id, { name })
+      remoteRequests.current.set(id, Promise.resolve(remote))
+      setRemoteWorkspaces(items => items.map(item => item.id === id ? remote : item))
+      if (!(await editor.renameProject(name, id))) throw new Error('项目名称已同步到账户，本机保存失败，请重试保存')
+      setLocalProjects(items => items.map(item => item.id === id ? { ...item, name } : item))
+      setStatus(`已重命名项目：${name}`)
+    } catch (error) {
+      if (error.status === 410) void recoverDeletedProject(id)
+      setStatus(error.message)
+      setProjectError(error.message)
+    } finally {
+      projectOperationRef.current = false
+      setRemoteBusy(false)
+    }
+  }
+
+  const duplicateProject = async () => {
+    if (busy || projectOperationRef.current) return
+    projectOperationRef.current = true
+    setRemoteBusy(true)
+    let session
+    let duplicate
+    try {
+      finishMainAdjustment()
+      if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试或下载备份')
+      const name = duplicateProjectName(projectName(currentRef.current))
+      session = await createSession(name)
+      duplicate = await editor.duplicateProject({ id: crypto.randomUUID(), sessionId: session.id, name })
+      if (!duplicate) throw new Error('副本未能保存，源项目已保留，请查看草稿提示')
+      setSessions(items => [session, ...items])
+      await ensureRemote(duplicate)
+      setStatus('已复制当前调色效果与样张设置，可以在副本中继续创作')
+    } catch (error) {
+      if (session && !duplicate) await deleteSession(session.id).catch(() => {})
+      setStatus(error.message)
+    } finally {
+      projectOperationRef.current = false
+      setRemoteBusy(false)
+    }
+  }
+
+  const removeProject = async (id = workspace.id) => {
+    if (busy || projectOperationRef.current) return
+    const source = projects.find(project => project.id === id)
+    if (!source) return
+    const ownerProjectId = workspace.id
+    const confirmed = await dialogs.confirm({ title: `删除“${projectName(source)}”？`,
+      description: '将删除此项目的草稿、预览缓存、版本、报告及专属对话记录。已保存到“我的 LUT”的成果、电脑上的原照片和已导出文件会保留。此操作无法撤销。',
+      confirmLabel: '删除调色项目', destructive: true })
+    if (!confirmed || currentRef.current.id !== ownerProjectId || projectOperationRef.current) return
+    projectOperationRef.current = true
+    setRemoteBusy(true)
+    let deleted = false
+    const removingCurrent = id === ownerProjectId
+    let replacementId = null
+    try {
+      if (id !== currentRef.current.id && !(await editor.flush())) throw new Error('当前草稿未能保存，请先重试或下载备份')
+      try { await deleteWorkspace(id) }
+      catch (error) {
+        if (!(error.status === 404 && source.localOnly)) throw error
+        const registration = { ...source, name: '未命名调色项目', session_id: null }
+        try { await ensureRemote(registration) }
+        catch (pendingError) {
+          if (pendingError.status === 404) await ensureRemote(registration)
+          else throw pendingError
+        }
+        await deleteWorkspace(id)
+      }
+      deleted = true
+      setRetiredProjectIds(ids => [...new Set([...ids, id])])
+      remoteRequests.current.delete(id)
+      const retired = await editor.retireProject(id, { broadcast: !removingCurrent })
+      setRemoteWorkspaces(items => items.filter(item => item.id !== id))
+      setLocalProjects(items => items.filter(item => item.id !== id))
+      if (removingCurrent) {
+        const next = projects.find(project => project.id !== id)
+        if (next) await loadProject(next)
+        else {
+          const empty = await editor.loadWorkspace({ id: crypto.randomUUID(), params: defaultParams(),
+            legacy: false, sessionId: null, name: '未命名调色项目', view_state: EMPTY_PROJECT_VIEW })
+          if (!empty) throw new Error('空白项目未能载入，请刷新页面')
+          await ensureRemote(empty)
+        }
+        const saved = await editor.flush()
+        if (!saved) throw new Error('替代项目未能保存，请查看本机草稿提示')
+        replacementId = saved.workspace.id
+      }
+      listSessions().then(setSessions).catch(() => {})
+      setProjectError(retired ? '' : '项目已删除，本机缓存清理未完成，请重试同步')
+      setStatus(retired ? '调色项目已删除；已保存 LUT 和原照片已保留' : '项目已删除，本机缓存清理未完成，请重试同步')
+    } catch (error) {
+      const message = deleted ? `项目已删除；切换项目失败：${error.message}` : `删除项目失败：${error.message}`
+      setStatus(message)
+      setProjectError(message)
+    } finally {
+      if (deleted && removingCurrent) editor.notifyProjectDeletion(id, replacementId)
+      projectOperationRef.current = false
       setRemoteBusy(false)
     }
   }
@@ -526,7 +728,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         name: sessions.find((s) => s.id === id)?.title || '',
       })
       if (!loaded) throw new Error('会话草稿未能载入，请查看本机保存提示')
-      setStatus('旧会话已转为工作区，保存可复用风格前需确认旧参数来源')
+      setStatus('旧会话已转为调色项目，保存可复用风格前需确认旧参数来源')
     } catch (e) {
       setStatus(e.message)
     } finally {
@@ -537,7 +739,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const removeSession = async (id) => {
     if (busy) return
     const workspaceId = workspace.id
-    if (!(await dialogs.confirm({ title: '删除历史对话？', description: '删除此会话及聊天记录。关联工作区、版本与风格资产将保留。', confirmLabel: '删除对话', destructive: true }))) return
+    if (!(await dialogs.confirm({ title: '删除历史对话？', description: '删除此会话及聊天记录。关联调色项目、版本与风格资产将保留。', confirmLabel: '删除对话', destructive: true }))) return
     if (currentRef.current.id !== workspaceId) return
     setRemoteBusy(true)
     try {
@@ -631,7 +833,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         main_sample_id: request.primary_id,
       })
       if (!requestMatches(request)) {
-        setStatus('工作区已变化，本次响应未应用')
+        setStatus('调色项目已变化，本次响应未应用')
         return
       }
       setMessages((m) => [...m, { role: 'agent', text: resp.reply }])
@@ -918,7 +1120,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           }
         }
       }
-      if (!stillCurrent()) throw new Error('工作区、参数或照片已变化，识别结果未写入草稿')
+      if (!stillCurrent()) throw new Error('调色项目、参数或照片已变化，识别结果未写入草稿')
       await updateSubjectMetadata(id, { subject_detection: detection })
       if (detection.status === 'failed') setStatus('人物识别未完成，未启用自动肤色保护；可重试识别或人工框选，调色可继续')
       else if (detection.status === 'uncertain') setStatus('人物识别暂不确定，可人工修正照片内容与皮肤区域，调色可继续')
@@ -990,7 +1192,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           )
         : { results: [] }
       if (!requestMatches(request)) {
-        setStatus('工作区已变化，统计结果未覆盖当前验证')
+        setStatus('调色项目已变化，统计结果未覆盖当前验证')
         return
       }
       editor.setMeta({
@@ -1170,29 +1372,34 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   return (
     <div className="gen-workbench">
       <header className="workbench-header">
-        <button className="btn workspace-history-toggle" aria-label="打开工作区历史" onClick={() => setWorkspaceHistory(true)}>历史</button>
+        <button className="btn workspace-history-toggle" aria-label="打开对话历史" onClick={() => setWorkspaceHistory(true)}>对话历史</button>
         <label className="workspace-select">
-          工作区
+          调色项目
           <SelectField
             value={workspace.id}
-            aria-label="工作区"
+            aria-label="调色项目"
             onChange={(e) => openWorkspace(e.target.value)}
             disabled={busy}
           >
             <option value={workspace.id} description="正在编辑的草稿">
-              {workspace.name ||
-                remoteWorkspaces.find((w) => w.id === workspace.id)?.name ||
-                '当前调色工作区'}
+              {projectName(workspace)}
             </option>
-            {remoteWorkspaces
+            {projects
               .filter((w) => w.id !== workspace.id)
               .map((w) => (
-                <option key={w.id} value={w.id} description="切换到此工作区">
-                  {w.name || `工作区 ${w.id.slice(0, 8)}`}
+                <option key={w.id} value={w.id} description="切换到此调色项目">
+                  {projectName(w)}
                 </option>
               ))}
           </SelectField>
         </label>
+        <ActionMenu label="项目管理" disabled={busy} trigger={<button type="button" className="btn project-management-trigger">项目管理 <span aria-hidden="true">⌄</span></button>} items={[
+          { id: 'name', type: 'label', label: projectName(workspace) },
+          { id: 'rename', label: '重命名项目', onSelect: () => renameProject() },
+          { id: 'duplicate', label: '复制当前项目', description: '保留当前效果与样张，独立继续创作', onSelect: duplicateProject },
+          { id: 'all', label: '管理全部项目', separator: true, onSelect: manageProjects },
+          { id: 'delete', label: '删除当前项目', description: '保留已保存 LUT 和原照片', separator: true, destructive: true, onSelect: () => removeProject() },
+        ]} />
         <WorkspaceToolbar mode="header" editor={toolbarEditor} busy={busy} onNew={newWorkspace} onBackup={backup}
           onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
         <div className="delivery-actions">
@@ -1212,7 +1419,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       </header>
       {status && <div className="workbench-notice" role="status"><span>{status}</span>{activeAiIntent && !(toolTab === 'ai' && aiIntent === activeAiIntent) && <button className="btn" onClick={() => { setToolTab('ai'); setAiIntent(activeAiIntent) }}>{grading ? '查看作业与取消' : '查看当前操作'}</button>}</div>}
       <div className="workbench-body">
-        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片工作区" tabIndex={0}>
+        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片调色项目" tabIndex={0}>
         <div className="preview-toolbar">
           <label className="mode-select">
             展示形式
@@ -1441,7 +1648,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
               {PRESETS.map(p => <button key={p.name} className="chip" disabled={busy} onClick={() => applyPreset(p)}>{p.name}</button>)}
             </div></details>
             <div className="latest-reply" aria-live="polite">{sending ? '正在提取调整项…' : messages.filter(m => m.role === 'agent').at(-1)?.text}</div>
-            <details className="chat-history"><summary>查看本工作区对话记录 · {messages.length} 条</summary><div className="chat-messages">
+            <details className="chat-history"><summary>查看本调色项目对话记录 · {messages.length} 条</summary><div className="chat-messages">
               {messages.map((m, i) => <div key={i} className={`msg ${m.role === 'user' ? 'msg-user' : 'msg-agent'}`}>{m.text}</div>)}
             </div></details>
             </div>
@@ -1575,7 +1782,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         </fieldset>
           </section></TabsContent>
           <TabsContent value="versions" forceMount asChild><section className="tool-view">
-            <label className="workspace-name-label">工作区 / LUT 名称<input className="name-input" value={workspace.name} onChange={e => editor.setMeta({ name: e.target.value })} placeholder="为当前效果命名" aria-label="LUT 名称" disabled={busy} /></label>
+            <div className="workspace-name-label project-version-name"><span>当前调色项目<strong>{projectName(workspace)}</strong></span><button type="button" className="btn" disabled={busy} onClick={() => renameProject()}>重命名</button></div>
         <VersionPanel
           expanded
           versions={versions}
@@ -1630,8 +1837,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         </aside>
         </TabsRoot>
       </div>
-      {workspaceHistory && <WorkbenchDialog title="工作区历史" onClose={() => setWorkspaceHistory(false)}>
-        <p className="tool-note">从顶部选择工作区，或在这里打开此前对话对应的调色工作区。</p>
+      {projectManager && <ProjectManager projects={projects} currentId={workspace.id} busy={busy}
+        loading={projectLoading} error={projectError} onClose={() => setProjectManager(false)} onOpen={openWorkspace}
+        onNew={newWorkspace} onRename={renameProject} onDelete={removeProject} onRetry={refreshProjects} />}
+      {workspaceHistory && <WorkbenchDialog title="对话历史" onClose={() => setWorkspaceHistory(false)}>
+        <p className="tool-note">这里管理 AI 对话记录。调色项目的重命名、复制与删除，请使用顶部“项目管理”。</p>
           <div className="session-list">
             {sessions.map((s) => (
               <div

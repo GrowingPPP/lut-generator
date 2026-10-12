@@ -403,7 +403,7 @@ export function generateLUT(params = defaultParams(), size = 33) {
   if (external && (inputMode
     ? external.input_encoding !== 'VLOG' || external.output_encoding !== 'Rec709'
     : external.input_encoding !== outputEncoding || external.output_encoding !== outputEncoding)) {
-    throw new Error('外部 LUT 的输入与输出信号不匹配当前工作区')
+    throw new Error('外部 LUT 的输入与输出信号不匹配当前调色项目')
   }
   const freeCurves = prepareFreeCurves(params.curve_points)
   let idx = 0
