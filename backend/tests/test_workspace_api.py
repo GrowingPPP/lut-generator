@@ -224,6 +224,39 @@ def test_multisample_partial_failure_actual_digest_dimensions_and_persistence(he
     assert "data:image" not in record["payload_json"] and len(record["payload_json"]) < 10000
 
 
+def test_multisample_subject_modes_survive_multipart_and_persistence(headers):
+    wid = workspace(headers)["id"]
+    samples = [{"id":mode,"input_contract":input_contract({}),"subject_mode":mode}
+               for mode in ("unknown","portrait","non_portrait")]
+    samples.append({"id":"legacy","input_contract":input_contract({})})
+    response = client.post(f"/api/workspaces/{wid}/validate",headers=headers,
+        data={"params":"{}","samples":json.dumps(samples)},
+        files=[("files",(f"{sample['id']}.png",png(),"image/png")) for sample in samples])
+    assert response.status_code == 200,response.text
+    report = response.json()
+    results = {result["id"]:result for result in report["results"]}
+    assert {key:result["subject_mode"] for key,result in results.items()} == {
+        "unknown":"unknown","portrait":"portrait","non_portrait":"non_portrait","legacy":"unknown"}
+    assert all(result["status"] == "no_new_risk" for result in results.values())
+    assert {key:result["skin_protection_applied"] for key,result in results.items()} == {
+        "unknown":False,"portrait":True,"non_portrait":False,"legacy":False}
+    stored = client.get(f"/api/workspaces/{wid}/validation",headers=headers)
+    assert stored.status_code == 200 and stored.json() == report
+
+
+@pytest.mark.parametrize("subject_mode",["auto","",None,True,["portrait"],{"mode":"portrait"}])
+def test_multisample_rejects_invalid_subject_mode_without_saving_report(headers,subject_mode):
+    wid = workspace(headers)["id"]
+    sample = {"id":"sample","input_contract":input_contract({}),"subject_mode":subject_mode}
+    response = client.post(f"/api/workspaces/{wid}/validate",headers=headers,
+        data={"params":"{}","samples":json.dumps([sample])},
+        files={"files":("sample.png",png(),"image/png")})
+    assert response.status_code == 422,response.text
+    assert "subject_mode" in response.json()["detail"]
+    assert "literal_error" in response.json()["detail"]
+    assert client.get(f"/api/workspaces/{wid}/validation",headers=headers).json() is None
+
+
 def test_vlog_validation_baseline_keeps_display_mapping(headers):
     wid = workspace(headers)["id"]
     params = {"base_photo_style":"VLOG","tone_map":.7}

@@ -32,13 +32,13 @@ db-init: ## 创建 MySQL 数据库
 	@mysql -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) -e "CREATE DATABASE IF NOT EXISTS $(MYSQL_DATABASE) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 	@echo "数据库 $(MYSQL_DATABASE) 就绪"
 
-backend: ## 启动后端(后台,端口 8000)
+backend: ## 启动开发后端(后台,端口 8000,源码变动自动重载)
 	@if [ -f $(BACKEND_PID) ] && kill -0 `cat $(BACKEND_PID)` 2>/dev/null; then \
 		echo "后端已在运行 (PID `cat $(BACKEND_PID)`)"; \
 	else \
-		cd $(BACKEND) && nohup ../$(VENV)/bin/uvicorn api.main:app --port 8000 > /tmp/chroma-backend.log 2>&1 & \
-		echo $$! > ../$(BACKEND_PID); \
-		echo "后端已启动 (PID `cat ../$(BACKEND_PID)`, 日志 /tmp/chroma-backend.log)"; \
+		(cd $(BACKEND) && exec nohup ../$(VENV)/bin/uvicorn api.main:app --port 8000 --reload --reload-dir api --reload-dir agent --reload-dir photo --reload-dir lut_engine --reload-dir storage > /tmp/chroma-backend.log 2>&1) & \
+		echo $$! > $(BACKEND_PID); \
+		echo "后端已启动 (PID `cat $(BACKEND_PID)`, 日志 /tmp/chroma-backend.log)"; \
 	fi
 
 frontend: ## 启动前端(后台,端口 5173)
