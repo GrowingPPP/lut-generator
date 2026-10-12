@@ -87,6 +87,8 @@ export async function decodeSample(file, params, existing) {
 }
 
 export async function restoreSample(blob, metadata) {
+  if (metadata.preview_digest && await contentDigest(blob) !== metadata.preview_digest)
+    throw new Error('缓存预览与样张不一致，请重新绑定原文件')
   const url = URL.createObjectURL(blob)
   try {
     const img = new Image()

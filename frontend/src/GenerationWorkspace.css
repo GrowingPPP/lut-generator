@@ -1823,3 +1823,29 @@
     transition: none;
   }
 }
+.gen-workbench .sample-binding-status {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--info-line);
+  border-radius: 8px;
+  background: var(--info-soft);
+  color: var(--info);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.gen-workbench .sample-binding-status[data-phase='error'] {
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.gen-workbench .sample-binding-status[data-phase='success'] {
+  border-color: var(--success-line);
+  background: var(--success-soft);
+  color: var(--success);
+}
+.gen-workbench .sample-binding-status[data-phase='warning'] {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn);
+}

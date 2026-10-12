@@ -18,6 +18,7 @@ import { inputContract, applyStyleRecipe } from './lib/styleRecipe.js'
 import { lockConflicts } from './lib/workspace.js'
 import { duplicateProjectName } from './lib/projectManagement.js'
 import { decodeSample, restoreSample, sampleMatches, sampleIsNormalized, editingContextForSample } from './lib/samples.js'
+import { mergeRestoredMedia, sampleMediaMatches } from './lib/sampleMedia.js'
 import { diffParams } from './lib/autoGrade.js'
 import { parameterSignature, effectivePhases, versionSource, equivalentCandidate, contextSignature, reportIsHistorical } from './lib/workspaceFlow.js'
 import WorkspaceToolbar from './components/WorkspaceToolbar.jsx'
@@ -166,7 +167,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const [baselineFields, setBaselineFields] = useState([])
   const [media, setMedia] = useState(new Map())
   const [selectedId, setSelectedId] = useState(null)
-  const [rebindingId, setRebindingId] = useState(null)
+  const [sampleBinding, setSampleBinding] = useState(null)
   const originalRef = useRef(null)
   const gradedRef = useRef(null)
   const curveWorkbenchRef = useRef(null)
@@ -175,6 +176,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const photoAdjustmentsRef = useRef(null)
   const draggingRef = useRef(false)
   const fileInputRef = useRef(null)
+  const fileSelectionRef = useRef(null)
   const openRequestRef = useRef(0)
   const projectOperationRef = useRef(false)
   const recoveringProjectsRef = useRef(new Set())
@@ -290,6 +292,8 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   useEffect(() => {
     if (!ready) return
     let cancelled = false
+    fileSelectionRef.current = null
+    setSampleBinding(null)
     setVersions([])
     const view = workspace.view_state || {}
     setDisplayMode(
@@ -362,6 +366,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           const blob = cached?.blob || cached
           if (blob instanceof Blob) {
             try {
+              if (cached?.metadata && !sampleMediaMatches({ metadata: cached.metadata }, sample)) continue
               restored.set(sample.id, await restoreSample(blob, sample))
             } catch {
               /* A missing preview leaves the sample available for rebinding. */
@@ -369,7 +374,8 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           }
         }
       }
-      if (!cancelled) setMedia(restored)
+      if (!cancelled && currentRef.current.id === workspace.id)
+        setMedia(current => mergeRestoredMedia(current, restored, currentRef.current.samples))
     }
     restore()
     return () => {
@@ -967,18 +973,52 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     }
   }
 
-  const addSamples = async (files) => {
-    if (busy) return
-    const sourceWorkspaceId = workspace.id
+  const openSamplePicker = (sampleId = null) => {
+    const current = currentRef.current
+    fileSelectionRef.current = { workspaceId: current.id, userId: current.user_id, sampleId }
+    const input = fileInputRef.current
+    if (input) {
+      input.value = ''
+      input.multiple = !sampleId
+      input.click()
+    }
+  }
+
+  const addSamples = async (event) => {
+    const files = [...event.target.files]
+    const selection = fileSelectionRef.current
+    fileSelectionRef.current = null
+    event.target.value = ''
+    if (!files.length) return
+    const sourceWorkspace = currentRef.current
+    const isCurrent = () => currentRef.current.id === sourceWorkspace.id
+      && currentRef.current.user_id === sourceWorkspace.user_id
+    if (!selection || selection.workspaceId !== sourceWorkspace.id || selection.userId !== sourceWorkspace.user_id) {
+      setStatus('调色项目已变化，请在当前项目重新选择照片')
+      return
+    }
+    const feedback = (phase, message) => {
+      if (!isCurrent()) return
+      setSampleBinding({ workspaceId: sourceWorkspace.id, sampleId: selection.sampleId, phase, message })
+      setStatus(message)
+    }
+    if (busy) {
+      feedback('error', '当前操作尚未完成，照片未绑定。请等待完成后重新选择同一文件。')
+      return
+    }
+    const rebindingId = selection.sampleId
     setSampleLoading(true)
-    let nextSamples = [...samples],
-      nextMedia = new Map(media)
+    feedback('loading', `${rebindingId ? '正在重新绑定' : '正在载入'} ${files[0].name}…`)
+    let nextSamples = [...sourceWorkspace.samples]
+    const decodedMedia = new Map()
     try {
+      if (rebindingId && !nextSamples.some(sample => sample.id === rebindingId))
+        throw new Error('该样张已移除，请添加为新的样张')
       for (const file of files) {
         const existing = rebindingId ? nextSamples.find((s) => s.id === rebindingId) : null
         if (!existing && nextSamples.length >= 5) throw new Error('最多保留 5 张样张')
-        const decoded = await decodeSample(file, params, existing)
-        if (currentRef.current.id !== sourceWorkspaceId) return
+        const decoded = await decodeSample(file, sourceWorkspace.params, existing)
+        if (!isCurrent()) return
         const metadata = {
           ...decoded.metadata,
           input_confirmed: existing?.input_confirmed || false,
@@ -986,26 +1026,40 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         nextSamples = existing
           ? nextSamples.map((s) => (s.id === existing.id ? metadata : s))
           : [...nextSamples, metadata]
-        nextMedia.set(metadata.id, decoded)
-        setSelectedId(metadata.id)
-        if (retainPreviews) await editor.cachePreview(metadata.id, decoded.blob, metadata)
-        if (currentRef.current.id !== sourceWorkspaceId) return
+        decodedMedia.set(metadata.id, decoded)
         if (rebindingId) break
       }
-      setMedia(nextMedia)
-      await editor.setMeta({
+      const updated = editor.setMeta({
         samples: nextSamples,
-        primary_sample_id: primaryId || nextSamples[0]?.id,
-        validation: validation ? { ...validation, stale: true } : null,
+        primary_sample_id: sourceWorkspace.primary_sample_id || nextSamples[0]?.id,
+        validation: sourceWorkspace.validation ? { ...sourceWorkspace.validation, stale: true } : null,
       })
+      if (!updated) throw new Error('照片未能绑定到当前草稿，请查看草稿提示后重试')
+      setMedia(previous => {
+        const next = new Map(previous)
+        for (const [id, decoded] of decodedMedia) next.set(id, decoded)
+        return mergeRestoredMedia(next, new Map(), updated.samples)
+      })
+      const lastId = [...decodedMedia.keys()].at(-1)
+      setSelectedId(lastId)
       setComparison(null)
-      setStatus('样张已载入，请确认照片输入基准')
+      const selected = nextSamples.find(sample => sample.id === lastId)
+      const message = rebindingId ? `已重新绑定 ${selected.name}，原文件已恢复`
+        : `已载入 ${decodedMedia.size} 张样张`
+      const inputMessage = selected.input_confirmed && sampleMatches(selected, sourceWorkspace.params)
+        ? '，可继续查看效果、分析或导出照片。' : '，请确认照片输入并与当前 LUT 基准匹配。'
+      feedback('success', message + inputMessage)
+      if (sourceWorkspace.retain_previews) {
+        for (const [id, decoded] of decodedMedia) {
+          if (!isCurrent()) return
+          const cached = await editor.cachePreview(id, decoded.blob, nextSamples.find(sample => sample.id === id))
+          if (!cached) feedback('warning', message + inputMessage + ' 本机预览未保存，刷新后仍需重新绑定。')
+        }
+      }
     } catch (e) {
-      setStatus(e.message)
+      feedback('error', `照片${rebindingId ? '绑定' : '载入'}失败：${e.message}`)
     } finally {
       setSampleLoading(false)
-      setRebindingId(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
   const confirmSample = async (id, contract) => {
@@ -1445,10 +1499,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           <button
             className="upload-sm"
             disabled={busy || samples.length >= 5}
-            onClick={() => {
-              setRebindingId(null)
-              fileInputRef.current?.click()
-            }}
+            onClick={() => openSamplePicker()}
           >
             上传样张
           </button>
@@ -1456,9 +1507,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             ref={fileInputRef}
             type="file"
             accept="image/jpeg,image/png,image/webp"
-            multiple={!rebindingId}
+            multiple
             style={{ display: 'none' }}
-            onChange={(e) => addSamples([...e.target.files])}
+            onChange={addSamples}
+            onCancel={() => { fileSelectionRef.current = null }}
           />
         </div>
         <p className="input-context">
@@ -1466,6 +1518,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             ? '输入需为未经显示转换的 V-Log/V-Gamut 帧；普通 JPEG 不代表 V-Log 信号。'
             : `当前 LUT 需要 ${params.base_photo_style} Photo Style 的相机直出信号。`}
         </p>
+        {sampleBinding?.workspaceId === workspace.id && (!sampleBinding.sampleId || sampleBinding.sampleId === selectedSample?.id) && (
+          <p className="sample-binding-status" data-phase={sampleBinding.phase}
+            role={sampleBinding.phase === 'error' ? 'alert' : 'status'}>{sampleBinding.message}</p>
+        )}
         <div className="photo-stage" style={{ '--photo-ratio': selectedMedia?.canvas ? selectedMedia.canvas.width / selectedMedia.canvas.height : 800 / 560 }}>
         {comparison && (
           <ComparisonPreview
@@ -1480,14 +1536,12 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             selectedMedia ? <SampleInputPreview key={`${workspace.id}:${selectedSample.id}:${selectedSample.input_contract?.base_photo_style}`}
               sample={selectedSample} media={selectedMedia} params={params} busy={busy}
               onConfirm={contract => confirmSample(selectedSample.id, contract)}
-              onRebind={() => { setRebindingId(selectedSample.id); fileInputRef.current?.click() }}
+              onRebind={() => openSamplePicker(selectedSample.id)}
               onDetails={() => setDetailsRequest(value => value + 1)} onInput={() => setToolTab('manual')} /> :
             <div className="preview-empty">
               样张文件仅保留于上次页面内存，请重新绑定照片。
               <div className="preview-empty-actions">
-                <button className="btn-primary" disabled={busy} onClick={() => {
-                  setRebindingId(selectedSample.id); fileInputRef.current?.click()
-                }}>重新绑定照片</button>
+                <button className="btn-primary" disabled={busy} onClick={() => openSamplePicker(selectedSample.id)}>重新绑定照片</button>
                 <button className="btn" onClick={() => setToolTab('manual')}>检查 LUT 输入</button>
               </div>
             </div>
@@ -1556,14 +1610,8 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           onRemove={removeSample}
           onConfirm={confirmSample}
           onSubjectChange={setSampleSubject}
-          onAdd={() => {
-            setRebindingId(null)
-            fileInputRef.current?.click()
-          }}
-          onRebind={(id) => {
-            setRebindingId(id)
-            fileInputRef.current?.click()
-          }}
+          onAdd={() => openSamplePicker()}
+          onRebind={openSamplePicker}
           onValidate={validate}
           retainPreviews={retainPreviews}
           onRetain={retain}

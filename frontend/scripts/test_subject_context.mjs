@@ -141,3 +141,13 @@ test('restored preview retains valid per-photo annotations and migrates missing 
     assert.deepEqual(metadata, frozen)
   }
 })
+
+test('restoring a known preview checks its pixels instead of relabeling a stale cached blob', async t => {
+  mockPhotoBrowser(t)
+  const preview = new Blob(['current-preview'])
+  const metadata = { id: 'main', source_digest: 'original', preview_digest: await samples.contentDigest(preview) }
+  const restored = await samples.restoreSample(preview, metadata)
+  assert.equal(restored.metadata.preview_digest, metadata.preview_digest)
+  assert.equal(restored.file, null)
+  await assert.rejects(samples.restoreSample(new Blob(['old-preview']), metadata), /缓存预览与样张不一致/)
+})
