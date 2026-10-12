@@ -124,7 +124,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
       {changes.length > 3 && (
         <details className="auto-details">
           <summary>其余 {changes.length - 3} 项参数变化</summary>
-          <div>
+          <div className="auto-chip-list">
             {changes.slice(3).map((c) => <span key={c.key} className="chip delta">{c.text}</span>)}
           </div>
         </details>
@@ -132,7 +132,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
       {styleApplied.length > 0 && (
         <details className="auto-details">
           <summary>风格贡献 · {styleApplied.length} 项调整已计入候选</summary>
-          <div>
+          <div className="auto-chip-list">
             {styleApplied.map((c) => <span key={c.key} className="chip delta chip-style">{c.text}</span>)}
           </div>
         </details>
@@ -141,7 +141,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
         <details className="auto-details auto-style-blocked">
           <summary>风格被拦下 · {styleBlocked.length} 项提议未应用</summary>
           <div className="auto-small">模型理解为以下调整，但未通过安全校验，没有计入候选：</div>
-          <div>
+          <div className="auto-chip-list">
             {styleBlocked.map((c) => <span key={c.key} className="chip chip-blocked">{c.text}</span>)}
           </div>
           {result.style_rejections?.length > 0 && (

@@ -32,7 +32,7 @@ export default function ProjectManager({ projects, currentId, busy, loading, err
         <input type="search" aria-label="搜索调色项目" placeholder="搜索项目名称" value={query} onChange={event => setQuery(event.target.value)} />
         <button type="button" className="btn-primary" disabled={busy} onClick={onNew}>新建调色项目</button>
       </div>
-      {error && <div className="project-manager-error" role="alert">{error}<button type="button" className="btn" onClick={onRetry} disabled={busy}>重试同步</button></div>}
+      {error && <div className="project-manager-error" role="alert"><span className="project-manager-error-text">{error}</span><button type="button" className="btn" onClick={onRetry} disabled={busy}>重试同步</button></div>}
       <div className="project-manager-list" aria-label="项目列表" aria-busy={busy || loading}>
         {filtered.map(project => <article key={project.id} className="project-manager-row" data-current={project.id === currentId || undefined}>
           <div className="project-manager-mark" aria-hidden="true">{project.id === currentId ? '●' : '◇'}</div>

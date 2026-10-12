@@ -273,7 +273,7 @@ export default function StyleSaveDialog({
               checked={replace}
               onChange={(e) => setReplace(e.target.checked)}
             />
-            更新「{savedAsset.name}」，保留旧修订
+            <span className="asset-update-text">更新「{savedAsset.name}」，保留旧修订</span>
           </label>
         )}
         {error && (

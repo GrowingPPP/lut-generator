@@ -38,7 +38,9 @@
 .project-row-more { min-width: 36px; letter-spacing: .08em; }
 .project-manager-empty { padding: 24px 10px; color: var(--muted); text-align: center; font-size: 13px; }
 .project-manager-footer { padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; }
-.project-manager-error { color: var(--danger); font-size: 13px; justify-content: space-between; }
+.project-manager-error { color: var(--danger); font-size: 13px; justify-content: space-between; flex-wrap: wrap; }
+.project-manager-error-text { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.project-manager-error > .btn { flex-shrink: 0; }
 .project-manager :where(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 540px) {
   .project-manager { padding: 20px 16px; gap: 16px; }
