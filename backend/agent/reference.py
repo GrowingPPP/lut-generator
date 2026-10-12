@@ -4,7 +4,8 @@ from copy import deepcopy
 import numpy as np
 
 from agent.editing import application_reasons, normalize_context
-from lut_engine import lut_params_from_dict
+from agent.subject_context import protection_context, protection_mask, protection_report
+from lut_engine import lut_params_from_dict, technical_baseline_params
 from photo import render as R, stats as S, quality as Q
 
 MATCH_VERSION = "distribution-match-1"
@@ -54,7 +55,8 @@ def match_reference(image, reference, params, context=None, *, color=True, tone=
     """返回未应用候选；最终距离与风险用实际 33³ LUT 重新测量。"""
     if not isinstance(strength, (float, int)) or isinstance(strength, bool) or not 0 <= strength <= 1:
         raise ValueError("匹配强度必须在 0 到 1")
-    ctx = normalize_context(context)
+    frozen_context = normalize_context(context)
+    ctx = protection_context(frozen_context)
     before = deepcopy(params)
     for field in ("gain", "gamma", "lift"):
         before[field] = list(before[field])
@@ -97,7 +99,8 @@ def match_reference(image, reference, params, context=None, *, color=True, tone=
             candidate[field][channel] = before[field][channel] + strength * (best[field][channel] - before[field][channel])
     risk_image = S.downsample(image, S.MAX_ANALYZE_SIDE)
     rendered_before = R.render_lut(R.lut_from_params(before), risk_image)
-    skin = S.skin_mask_of(rendered_before)
+    neutral_before = R.render_lut(R.lut_from_params(technical_baseline_params(before)), risk_image)
+    skin = protection_mask(_display(neutral_before, before), frozen_context)
     measured_before = S.analyze(rendered_before, skin_mask=skin)
     reasons = []
     from agent.auto import check_hard_rules
@@ -128,4 +131,5 @@ def match_reference(image, reference, params, context=None, *, color=True, tone=
             "changed_fields": changed, "distance_before": distance_before, "distance_after": distance_after,
             "improvement_pct": max(0.0, (distance_before - distance_after) / max(distance_before, 1e-9) * 100),
             "warnings": warnings, "color": bool(color), "tone": bool(tone), "strength": float(strength),
-            "model_called": False}
+            "model_called": False,
+            "subject_protection": protection_report(frozen_context, measured_before)}

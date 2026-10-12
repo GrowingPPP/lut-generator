@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+from copy import deepcopy
 from dataclasses import asdict
 from typing import List, Literal, Optional
 from urllib.parse import quote
@@ -21,7 +22,7 @@ from agent.editing import EditingContext
 from lut_engine import RecipeError, apply_recipe, input_contract, neutral_recipe_params, validate_recipe, validate_input_contract
 from lut_engine import generate_lut, lut_to_cube, lut_params_from_dict
 from storage import db
-from api.workspaces import router as workspace_router, require_workspace, recipe_http_error, ENGINE_VERSION, validation_slot
+from api.workspaces import router as workspace_router, require_workspace, recipe_http_error, ENGINE_VERSION, validation_slot, require_subject_source
 from api.auto_jobs import router as auto_jobs_router
 from api.photos import router as photos_router
 from api.imported_luts import router as imported_luts_router, resolver_for_user
@@ -90,6 +91,7 @@ class AssetApply(BaseModel):
     model_config = ConfigDict(extra="forbid")
     params: LutParamsModel
     context: EditingContext = Field(default_factory=EditingContext)
+    source_digest: Optional[str] = Field(None, max_length=128)
     revision_id: Optional[int] = None
     applied_revision_ids: List[int] = Field(default_factory=list, max_length=100)
     allow_repeat: bool = False
@@ -408,12 +410,15 @@ def apply_asset_with_image(lut_id: int,request: Request,body: str=Form(...,max_l
                            file: UploadFile=File(...),user: dict=Depends(auth.get_current_user)):
     """有主样张时,对候选沿用确定性图像风险检查,图片不留存。"""
     from agent.auto import check_hard_rules
+    from agent.subject_context import protection_context, protection_mask, protection_report
     from photo import stats as S,render as R,quality as Q
+    from photo.color_management import display_rgb
     from photo.types import PhotoError,ImageTooLargeError
     try:
         parsed = AssetApply.model_validate(json.loads(body))
     except (ValueError,TypeError) as exc:
         raise HTTPException(422,str(exc)) from exc
+    require_subject_source(parsed.context, parsed.source_digest, parsed.params.base_photo_style)
     out = apply_asset(lut_id,parsed,user)
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > MAX_AUTO_IMAGE_BYTES+1024*1024:
@@ -434,16 +439,18 @@ def apply_asset_with_image(lut_id: int,request: Request,body: str=Form(...,max_l
         current = parsed.params.model_dump()
         neutral = technical_baseline_params(current)
         baseline_image = R.render_lut(R.lut_from_params(neutral),image)
-        mask = S.skin_mask_of(baseline_image)
+        mask = protection_mask(display_rgb(baseline_image, current["base_photo_style"]), parsed.context)
         baseline = S.analyze(baseline_image,skin_mask=mask)
         before = S.analyze(R.render_lut(R.lut_from_params(current),image),skin_mask=mask)
-        allowed,reasons = check_hard_rules(before,out["params"],baseline,Q.limits_for(before),current,image,mask,parsed.context)
+        allowed,reasons = check_hard_rules(before,out["params"],baseline,Q.limits_for(before),current,image,mask,
+                                          protection_context(parsed.context))
         if not allowed:
             raise HTTPException(409,{"code":"image_risk","message":"图像风险检查未通过,候选未应用","reasons":reasons})
         out["validation_status"] = "measured"
         out["validation"] = {"engine_version":ENGINE_VERSION,"input_contract":input_contract(current),
                              "preview_dimensions":{"width":image.shape[1],"height":image.shape[0]},
-                             "sampled_pixels":before.sampled_px}
+                             "sampled_pixels":before.sampled_px,
+                             "subject_protection":protection_report(parsed.context, baseline)}
         return out
 
 
@@ -722,11 +729,15 @@ def auto_grade_endpoint(
 
     `base_params` **必填且不接受默认值**:增量语义下「用默认值兜底」会把用户手调静默抹掉。
     """
-    img, parsed, ctx = _prepare_auto_grade(request, file, base_params, context,
-                                           workspace_id, sample_origin, user)
+    img, parsed, ctx, actual_source_digest = _prepare_auto_grade(
+        request, file, base_params, context, workspace_id, sample_origin, user, include_digest=True)
+    if ctx and ctx.subject_analysis is not None:
+        require_subject_source(ctx, actual_source_digest, parsed.base_photo_style)
+        require_subject_source(ctx, source_digest, parsed.base_photo_style)
     _reserve_auto_grade(user["id"])
     out = _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
-                              workspace_id, source_digest, main_sample_id, user_id=user["id"])
+                              workspace_id, source_digest, main_sample_id, user_id=user["id"],
+                              actual_source_digest=actual_source_digest)
     try:
         out.session_id = _persist_auto_grade(user["id"], out)
     except Exception as exc:
@@ -789,10 +800,12 @@ def _reserve_auto_grade(user_id):
 
 def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
                         workspace_id, source_digest, main_sample_id,
-                        *, progress=None, cancel_check=None, resume=None, continued_from=None, user_id=None):
+                        *, progress=None, cancel_check=None, resume=None, continued_from=None, user_id=None,
+                        actual_source_digest=None):
     from agent.auto import AutoGradeCancelled, auto_grade as run_auto_grade
     from agent.llm import BudgetExhaustedError
 
+    require_subject_source(ctx, actual_source_digest or source_digest, parsed.base_photo_style)
     style_text = (style or "").strip()[:200] or None
     client = None
     style_extractor = None
@@ -844,6 +857,10 @@ def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
         logger.exception("auto/grade 未预期失败")
         raise HTTPException(status_code=502, detail="分析服务暂时不可用,请稍后重试") from exc
 
+    subject_protection = deepcopy(result.subject_protection)
+    if isinstance(subject_protection.get("detection"), dict):
+        subject_protection["detection"].update(source_digest=actual_source_digest or source_digest,
+                                              input_style=parsed.base_photo_style)
     out = AutoGradeOut(
         params=LutParamsModel(**{k: v for k, v in result.params.items()
                                  if k in LutParamsModel.model_fields}),
@@ -862,7 +879,7 @@ def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
         style_rejections=result.style_rejections,
         review=result.review,
         review_skip_reason=result.review_skip_reason,
-        subject_protection=result.subject_protection,
+        subject_protection=subject_protection,
         degraded=result.degraded,
         usage=result.usage,workspace_id=workspace_id,source_digest=source_digest,
         main_sample_id=main_sample_id,context=ctx,

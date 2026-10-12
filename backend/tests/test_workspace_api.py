@@ -10,6 +10,8 @@ from PIL import Image
 
 from api.auth import create_token
 from api.main import app, LutParamsModel
+from agent.editing import EditingContext
+from agent.subjects import SubjectAnalysis, SubjectRegion
 from lut_engine.recipe import apply_recipe, input_contract, RecipeError, validate_recipe
 from storage import db
 
@@ -116,7 +118,7 @@ def test_restore_atomic_input_and_lock_conflict(headers):
     body.update(unlock_conflicts=True,allow_input_change=True)
     restored = client.post(route,headers=headers,json=body).json()
     assert restored["params"] == version["params"]
-    assert restored["context"] == {"goal_mode":"style_only","locked_fields":["gain"],"subject_mode":"unknown"}
+    assert restored["context"] == EditingContext(goal_mode="style_only",locked_fields=["gain"]).model_dump()
     assert client.get(f"/api/workspaces/{wid}/versions/{version['id']}",headers=headers).json()["context"]["locked_fields"] == ["temp"]
 
 
@@ -239,9 +241,70 @@ def test_multisample_subject_modes_survive_multipart_and_persistence(headers):
         "unknown":"unknown","portrait":"portrait","non_portrait":"non_portrait","legacy":"unknown"}
     assert all(result["status"] == "no_new_risk" for result in results.values())
     assert {key:result["skin_protection_applied"] for key,result in results.items()} == {
-        "unknown":False,"portrait":True,"non_portrait":False,"legacy":False}
+        "unknown":False,"portrait":False,"non_portrait":False,"legacy":False}
     stored = client.get(f"/api/workspaces/{wid}/validation",headers=headers)
     assert stored.status_code == 200 and stored.json() == report
+
+
+def subject_analysis(source_digest="a" * 64, **overrides):
+    body = SubjectAnalysis(status="resolved",subject_mode="portrait",confidence=.95,
+        regions=[SubjectRegion(bounds=[.5,0,1,1],kind="face",confidence=.95)],
+        source_digest=source_digest,input_style="STD").model_dump()
+    return {**body,**overrides}
+
+
+def test_multisample_automatic_regions_survive_multipart_and_report_persistence(headers):
+    wid = workspace(headers)["id"]
+    sample = {"id":"person","input_contract":input_contract({}),"source_digest":"a"*64,
+              "subject_detection_mode":"auto","subject_mode":"unknown",
+              "subject_analysis":subject_analysis(),"skin_regions":None,"skin_mask_mode":"skin_candidates"}
+    response = client.post(f"/api/workspaces/{wid}/validate",headers=headers,
+        data={"params":"{}","samples":json.dumps([sample])},files={"files":("normalized.png",png(),"image/png")})
+    assert response.status_code == 200,response.text
+    result = response.json()["results"][0]
+    assert result["subject_mode"] == "portrait"
+    assert result["skin_pixels"] == 48*32
+    assert result["subject_protection"]["enabled"] is True
+    assert result["subject_protection"]["source"] == "auto"
+    assert result["subject_protection"]["detection"]["source_digest"] == "a"*64
+    assert client.get(f"/api/workspaces/{wid}/validation",headers=headers).json() == response.json()
+
+
+@pytest.mark.parametrize("changes", [{"source_digest":"b"*64},{"input_style":"NAT"}])
+def test_multisample_rejects_stale_subject_regions_without_saving_report(headers,changes):
+    wid = workspace(headers)["id"]
+    sample = {"id":"person","input_contract":input_contract({}),"source_digest":"a"*64,
+              "subject_detection_mode":"auto","subject_analysis":subject_analysis(**changes)}
+    response = client.post(f"/api/workspaces/{wid}/validate",headers=headers,
+        data={"params":"{}","samples":json.dumps([sample])},files={"files":("p.png",png(),"image/png")})
+    assert response.status_code == 422
+    assert client.get(f"/api/workspaces/{wid}/validation",headers=headers).json() is None
+
+
+def test_asset_risk_check_uses_local_regions_and_original_source_declaration(headers,monkeypatch):
+    import agent.auto as auto
+    captured = []
+    monkeypatch.setattr(auto,"check_hard_rules",lambda *args: (captured.append(args) or True,[]))
+    asset = client.post("/api/luts",headers=headers,json={"name":"regions","params":{}}).json()
+    body = {"params":{},"source_digest":"a"*64,"context":{"subject_detection_mode":"auto",
+            "subject_mode":"unknown","subject_analysis":subject_analysis()}}
+    response = client.post(f"/api/luts/{asset['id']}/apply-validated",headers=headers,
+        data={"body":json.dumps(body)},files={"file":("normalized.png",png(),"image/png")})
+    assert response.status_code == 200,response.text
+    assert captured[0][6].sum() == 48*32
+    assert captured[0][7].subject_mode == "portrait"
+    assert response.json()["validation"]["subject_protection"]["source"] == "auto"
+
+
+@pytest.mark.parametrize("changes", [{"source_digest":"b"*64},{"input_style":"NAT"}])
+def test_asset_rejects_regions_bound_to_another_source_before_measuring(headers,changes):
+    asset = client.post("/api/luts",headers=headers,json={"name":"regions","params":{}}).json()
+    body = {"params":{},"source_digest":"a"*64,"context":{"subject_detection_mode":"auto",
+            "subject_analysis":subject_analysis(**changes)}}
+    response = client.post(f"/api/luts/{asset['id']}/apply-validated",headers=headers,
+        data={"body":json.dumps(body)},files={"file":("p.png",png(),"image/png")})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "subject_source_conflict"
 
 
 @pytest.mark.parametrize("subject_mode",["auto","",None,True,["portrait"],{"mode":"portrait"}])

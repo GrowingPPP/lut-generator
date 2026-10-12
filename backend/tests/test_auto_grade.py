@@ -674,7 +674,8 @@ def test_style_cannot_bypass_hard_rules():
     """风格阶段必须再过一次硬校验 —— 这是最容易被忽略的后门。"""
     img = make_fixture("skin_tone")
     r = A.auto_grade(img, {}, "日系清透", client=stub_client([], review=None), use_vision=False,
-                     context={"subject_mode": "portrait"},
+                     context={"subject_mode": "portrait", "skin_regions": [
+                         {"bounds": [0., 0., 1., 1.], "kind": "face", "confidence": 1.}]},
                      style_extractor=_style_extractor({"temp": 900, "saturation": 0.5}))
     applied = [s for s in r.steps if s.stage == "style" and s.applied]
     assert not applied, "风格提议绕过了硬校验"
@@ -805,7 +806,8 @@ def test_rejected_style_does_not_masquerade_as_applied():
     img = make_fixture("skin_tone")      # 有可测肤色,大色温改动必被拒
     r = A.auto_grade(img, {}, "极暖", client=stub_client([], review=None),
                      use_vision=False,
-                     context={"subject_mode": "portrait"},
+                     context={"subject_mode": "portrait", "skin_regions": [
+                         {"bounds": [0., 0., 1., 1.], "kind": "face", "confidence": 1.}]},
                      style_extractor=_style_extractor({"temp": 900, "saturation": 0.5}))
     assert r.style_params, "提议本身应被记录,便于排查"      # 提议保留
     assert r.style_applied is False, "被拒时 style_applied 必须为 False"

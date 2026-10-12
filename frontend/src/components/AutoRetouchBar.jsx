@@ -7,7 +7,7 @@ import { captureAutoRequest, sameAutoConditions, sameAutoMetadata, bindAutoReque
 import { createAutoJobStorage } from '../lib/autoJobStorage.js'
 
 export default function AutoRetouchBar({
-  file, params, onResult, onBeforeRun, onRestoreResult, getAppliedJob,
+  file, params, onResult, onBeforeRun, onPrepare, onRestoreResult, getAppliedJob,
   userId, workspaceReady = true, hasRealPhoto, running, setRunning, setStatus,
   context, workspaceId, sourceDigest, mainSampleId, sampleName, disabled, jobStorage,
 }) {
@@ -17,6 +17,7 @@ export default function AutoRetouchBar({
   const [job, setJob] = useState(null)
   const [failedRequest, setFailedRequest] = useState(null)
   const [cancelling, setCancelling] = useState(false)
+  const [preparing, setPreparing] = useState(false)
   const [continuable, setContinuable] = useState(null)
   const [recoveryMissing, setRecoveryMissing] = useState(false)
   const [recoveryChecked, setRecoveryChecked] = useState(false)
@@ -127,6 +128,7 @@ export default function AutoRetouchBar({
     activeRef.current = null
     setRecoveryMissing(false)
     setCancelling(false)
+    setPreparing(false)
     callbacksRef.current.setRunning(false)
   }
   useEffect(() => {
@@ -197,9 +199,9 @@ export default function AutoRetouchBar({
   const run = async (retry = null, continuing = false) => {
     if (retry ? !(continuing ? canContinue : canRetry) : !canRun) return
     const original = retry ? bindAutoRequest(retry.args, conditionsRef.current) : conditionsRef.current
-    const args = captureAutoRequest({ ...original, request_id: crypto.randomUUID(),
+    let args = captureAutoRequest({ ...original, request_id: crypto.randomUUID(),
       ...(retry ? {} : { style, useVision }) })
-    const token = { id: args.request_id, userId, workspaceId, cancelRequested: false }
+    const token = { id: args.request_id, userId, workspaceId, cancelRequested: false, preparing: true }
     activeRef.current = token
     setRunning(true)
     setCancelling(false)
@@ -209,8 +211,16 @@ export default function AutoRetouchBar({
     setStatus('正在保存请求摘要并提交分析…')
     let request = null, submitted = false, receiptSaved = false
     try {
+      if (!retry && onPrepare) {
+        setPreparing(true)
+        setStatus('正在检查人物与肤色保护区域…')
+        const prepared = await onPrepare({ useVision, isCurrent: () => current(token) && !token.cancelRequested })
+        if (!prepared || !current(token) || token.cancelRequested) return
+        conditionsRef.current = prepared
+        args = captureAutoRequest({ ...prepared, request_id: token.id, style, useVision })
+      }
       request = onBeforeRun ? await onBeforeRun(args.params) : null
-      if (request === false || !current(token)) return
+      if (request === false || !current(token) || token.cancelRequested) return
       if (!sameAutoConditions(args, conditionsRef.current)) {
         setStatus('工作区、参数或主样张已变化，请用当前条件重新开始')
         return
@@ -219,6 +229,12 @@ export default function AutoRetouchBar({
       token.summary = receipt.request
       receiptSaved = true
       if (!current(token)) return
+      if (token.cancelRequested) {
+        await patchReceipt(token, { state: 'rejected', message: '已取消，调色作业未提交' })
+        return
+      }
+      token.preparing = false
+      setPreparing(false)
       submitted = true
       const initial = await ensureAutoJob(args, {
         start: startAutoJob, get: id => getAutoJob(id, workspaceId), isCurrent: () => current(token),
@@ -243,6 +259,10 @@ export default function AutoRetouchBar({
     if (!token?.id || cancelling) return
     token.cancelRequested = true
     setCancelling(true)
+    if (token.preparing) {
+      setStatus('已取消本次分析，等待当前识别请求返回；调色作业不会提交')
+      return
+    }
     setStatus(recoveryMissing ? '正在确认结束未登记提交…' : '正在取消，等待服务端确认…')
     try {
       await patchReceipt(token, { cancel_requested: true }).catch(() => {})
@@ -278,11 +298,11 @@ export default function AutoRetouchBar({
           {running ? '正在分析与调整…' : '分析并应用'}
         </button>
         {running && <button type="button" className="btn" onClick={cancel}
-          disabled={(!recoveryMissing && !job?.can_cancel) || cancelling} title={job?.progress?.stage === 'save' ? '保存已开始，不能取消' : ''}>
+          disabled={(!preparing && !recoveryMissing && !job?.can_cancel) || cancelling} title={job?.progress?.stage === 'save' ? '保存已开始，不能取消' : ''}>
           {cancelling ? '正在取消…' : recoveryMissing ? '结束未确认提交' : job?.progress?.stage === 'save' ? '正在保存…' : '取消分析'}</button>}
-        <label className="auto-vision" title="开启后会把照片与修图结果发送给模型做主观复检。关闭后只根据客观数据调整。">
+        <label className="auto-vision" title="开启后在调色前识别人和皮肤区域，并对修图结果复核；关闭后不向模型发送图片。已有区域仍可用于确定性检查。">
           <CheckboxField checked={useVision} onChange={(e) => setUseVision(e.target.checked)} disabled={running || disabled} />
-          <span>视觉复核</span>
+          <span>图像分析与复核</span>
         </label>
       </div>
       {failedRequest && <p className="workspace-note">
@@ -295,7 +315,7 @@ export default function AutoRetouchBar({
         {canContinue ? ' 从已应用的正式候选继续尝试；已完成阶段保留，本次另建可撤销操作。'
           : ' 已应用候选或来源已变化，或尚未绑定原文件，不能继续原阶段。'}
       </p>}
-      <p className="text-muted">开启视觉复核会将照片与调色预览发送给模型；关闭后只发送统计数据。上传的照片不会保存在本系统中。</p>
+      <p className="text-muted">开启后会将照片发送给模型识别人和皮肤区域，并复核调色预览。关闭后只发送统计数据；已有区域可继续用于检查。照片不会保存在本系统中。</p>
       <p className="workspace-note">AI 分析主样张：{sampleName || '尚未选择'}{hasRealPhoto ? '' : ' · 请确认输入并绑定原文件'}</p>
       {job && <div className="auto-progress" aria-live="polite">
         <div className="auto-progress-head"><span className="auto-spinner" aria-hidden="true">{running ? '◐' : '·'}</span><span>{head}</span></div>

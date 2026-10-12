@@ -19,6 +19,9 @@ from photo import stats as S
 from photo.types import AutoGradeResult, Issue, PhotoStats, StepReport
 from .editing import (application_reasons, context_prompt, normalize_context,
                       parameter_snapshot, writable_fields)
+from .subjects import detect_subjects, get_subject_client
+from .subject_context import protection_context, protection_mask, protection_report
+from photo.color_management import display_rgb
 
 MAX_OPTIMIZE_ROUNDS = 2
 MAX_STYLE_ROUNDS = 2
@@ -160,8 +163,9 @@ def check_hard_rules(
 
     # R3:肤色保护(仅在有可测肤色时)。两个亮度无关的指标,详见 quality.skin_shift:
     # 色相/饱和度用严格阈值(真把肤色调坏了),明度用宽松阈值(只挡洗白/压死)。
-    if (normalize_context(context).subject_mode == "portrait"
-            and stats_baseline.skin_ratio > 0.02 and stats_baseline.skin_mean_rgb is not None):
+    if (protection_context(context).subject_mode == "portrait"
+            and round(stats_baseline.sampled_px * stats_baseline.skin_ratio) >= 32
+            and stats_baseline.skin_mean_rgb is not None):
         chroma, luma = Q.skin_shift(stats_baseline, after)
         if chroma > Q.SKIN_CHROMA_LIMIT:
             reasons.append(
@@ -452,8 +456,10 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
         text = VISION_REVIEW_PROMPT.replace("左边是原图", "左边是本次调整前的效果") + "\n" + context_prompt(context, "review")
         if style:
             text += f"\n(用户指定的风格是「{style}」,请一并判断是否贴合)"
-        resp = client.chat.completions.create(
-            model=model or _default_model(),
+        import os
+        vision_client = get_subject_client(client)
+        resp = vision_client.chat.completions.create(
+            model=model or os.environ.get("CHROMA_VISION_MODEL", "").strip() or _default_model(),
             max_tokens=max_tokens,
             messages=[{
                 "role": "user",
@@ -499,6 +505,7 @@ def auto_grade(
     缺省上下文沿用自然校正;阶段来源保存真实生效的前后参数。
     """
     from .schemas import ExtractResult
+    from lut_engine import technical_baseline_params
 
     def notify(stage, state, round_no=0, reason=None):
         _check_cancelled(cancel_check)
@@ -507,14 +514,26 @@ def auto_grade(
                       **({"reason": reason} if reason else {})})
         _check_cancelled(cancel_check)
 
-    notify("measure", "running")
+    _check_cancelled(cancel_check)
     ctx = normalize_context(context)
+    usage_total: Dict[str, Any] = {}
     resume = resume or {}
     skip_correction = bool(resume.get("skip_correction"))
     skip_style = bool(resume.get("skip_style"))
     base = clamp_params(parameter_snapshot(base_params))
     baseline_img = R.render_lut(R.lut_from_params(base), img)
-    skin_mask = S.skin_mask_of(baseline_img)
+    neutral = R.render_lut(R.lut_from_params(technical_baseline_params(base)), img)
+    display_source = display_rgb(neutral, base["base_photo_style"])
+    notify("subjects", "running")
+    if ctx.subject_detection_mode == "auto" and ctx.subject_analysis is None:
+        analysis, usage = detect_subjects(client, display_source, enabled=use_vision)
+        _accumulate_usage(usage_total, usage)
+        ctx = normalize_context({**ctx.model_dump(), "subject_analysis": analysis})
+    ctx = protection_context(ctx)
+    notify("subjects", "done" if ctx.subject_analysis and ctx.subject_analysis.status == "resolved"
+           else "skipped", reason=ctx.subject_analysis.status if ctx.subject_analysis else "manual")
+    notify("measure", "running")
+    skin_mask = protection_mask(display_source, ctx)
     stats0 = S.analyze(baseline_img, skin_mask)
     observations = Q.diagnose(stats0)
     issues = Q.diagnose_for_goal(stats0, ctx.goal_mode)
@@ -525,7 +544,6 @@ def auto_grade(
     steps: List[StepReport] = []
     blocked: List[str] = list(resume.get("blocked_reasons") or [])
     rejections: List[str] = []
-    usage_total: Dict[str, Any] = {}
     model_attempted = False
     model_succeeded = False
     model_failed = False
@@ -746,10 +764,7 @@ def auto_grade(
         style_params=style_params, style_applied=style_applied,
         style_applied_params=style_applied_params, style_rejections=style_rejections,
         review=review, review_skip_reason=review_skip_reason,
-        subject_protection={"subject_mode": ctx.subject_mode,
-                            "enabled": ctx.subject_mode == "portrait" and stats0.skin_ratio > 0.02
-                                       and stats0.skin_mean_rgb is not None,
-                            "suspected_skin_ratio": stats0.skin_ratio, "method": "color_heuristic"},
+        subject_protection=protection_report(ctx, stats0),
         degraded=goal_status in {"partially_met", "unchanged"}, usage=usage_total,
         goal_status=goal_status, execution_status=execution_status,
         blocked_reasons=list(dict.fromkeys(blocked)),

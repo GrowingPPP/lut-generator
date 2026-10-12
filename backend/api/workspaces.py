@@ -11,9 +11,11 @@ from uuid import UUID
 import numpy as np
 import pymysql
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.editing import EditingContext
+from agent.subjects import SubjectAnalysis, SubjectRegion
+from agent.subject_context import protection_context, protection_mask, protection_report
 from api import auth
 from api.models import LutParamsModel, checked_metadata
 from lut_engine import input_contract, validate_recipe, validate_input_contract, RecipeError, technical_baseline_params
@@ -22,7 +24,7 @@ from storage import db
 router = APIRouter(prefix="/api/workspaces")
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_BATCH_BYTES = 64 * 1024 * 1024
-MEASUREMENT_VERSION = "icc-srgb-exif-lanczos2048-stats512-subject-v3"
+MEASUREMENT_VERSION = "icc-srgb-exif-lanczos2048-stats512-subject-regions-v4"
 _engine_path = Path(__file__).resolve().parents[1] / "lut_engine"
 ENGINE_VERSION = "chroma-lut-" + hashlib.sha256(b"".join(
     path.read_bytes() for path in sorted(_engine_path.glob("*.py")))).hexdigest()[:12]
@@ -234,11 +236,40 @@ class ValidationSample(BaseModel):
     origin: Literal["source","restored_preview"] = "source"
     name: Optional[str] = Field(None,max_length=255)
     subject_mode: Literal["unknown","portrait","non_portrait"] = "unknown"
+    subject_detection_mode: Literal["manual","auto"] = "manual"
+    subject_analysis: Optional[SubjectAnalysis] = None
+    skin_regions: Optional[list[SubjectRegion]] = Field(None, max_length=16)
+    skin_mask_mode: Literal["skin_candidates","all_pixels"] = "skin_candidates"
 
     @field_validator("input_contract")
     @classmethod
     def valid_input(cls,value):
         return validate_input_contract(value)
+
+    @model_validator(mode="after")
+    def subject_source_matches(self):
+        error = subject_source_error(self.subject_analysis, self.source_digest,
+                                     self.input_contract["base_photo_style"])
+        if error:
+            raise ValueError(error)
+        return self
+
+
+def subject_source_error(analysis, source_digest, input_style):
+    """冻结的人物证据只能用于同一照片输入，上传预览可具有不同文件编码。"""
+    if analysis is None:
+        return None
+    if not source_digest or analysis.source_digest != source_digest:
+        return "人物识别与样张来源不一致，请重新识别"
+    if analysis.input_style != input_style:
+        return "人物识别与样张输入基准不一致，请重新识别"
+    return None
+
+
+def require_subject_source(context, source_digest, input_style):
+    error = subject_source_error(context.subject_analysis if context else None, source_digest, input_style)
+    if error:
+        raise HTTPException(409, {"code": "subject_source_conflict", "message": error})
 
 
 def params_digest(params):
@@ -252,23 +283,28 @@ def pixel_digest(pixels):
 
 def measure_sample(raw, sample, params, baseline_lut, current_lut):
     from photo import stats as S, render as R, quality as Q
+    from photo.color_management import display_rgb
+    frozen_context = EditingContext.model_validate(sample.model_dump(include={
+        "subject_mode", "subject_detection_mode", "subject_analysis", "skin_regions", "skin_mask_mode"}))
+    context = protection_context(frozen_context)
     image = S.load_image(raw, params["base_photo_style"])
     baseline = R.render_lut(baseline_lut,image)
     current = R.render_lut(current_lut,image)
-    mask = S.skin_mask_of(baseline)
+    mask = protection_mask(display_rgb(baseline, params["base_photo_style"]), frozen_context)
     before, after = S.analyze(baseline,skin_mask=mask), S.analyze(current,skin_mask=mask)
     measured = S.downsample(image)
     bright_delta = after.highlight_clip_pct-before.highlight_clip_pct
     dark_delta = after.shadow_clip_pct-before.shadow_clip_pct
     skin_pixels = int(mask.sum())
-    skin_available = skin_pixels >= 32 and before.skin_ratio > 0.02
+    skin_available = skin_pixels >= 32 and before.skin_mean_rgb is not None
     chroma, luma = Q.skin_shift(before,after) if skin_available else (None,None)
     risks = []
     if bright_delta > Q.MAX_CLIP_INCREASE_PCT:
         risks.append("高光裁剪增加")
     if dark_delta > Q.MAX_CLIP_INCREASE_PCT:
         risks.append("暗部裁剪增加")
-    skin_protection = sample.subject_mode == "portrait" and skin_available
+    subject_protection = protection_report(frozen_context, before)
+    skin_protection = subject_protection["enabled"]
     if skin_protection and chroma > Q.SKIN_CHROMA_LIMIT:
         risks.append("肤色色彩偏移")
     if skin_protection and luma > Q.SKIN_LUMA_LIMIT:
@@ -281,7 +317,8 @@ def measure_sample(raw, sample, params, baseline_lut, current_lut):
             "preview_dimensions":{"width":image.shape[1],"height":image.shape[0]},
             "measurement_dimensions":{"width":measured.shape[1],"height":measured.shape[0]},
             "sampled_pixels":after.sampled_px,"skin_pixels":skin_pixels,
-            "subject_mode":sample.subject_mode,"skin_evidence":"suspected_color",
+            "subject_mode":context.subject_mode,"skin_evidence":subject_protection["method"],
+            "subject_detection_mode":sample.subject_detection_mode,"subject_protection":subject_protection,
             "skin_protection_applied":skin_protection,
             "skin_measurable":skin_available,"skin_chroma_shift":chroma,"skin_luma_shift":luma,
             "highlight_clip_delta_pct":bright_delta,"shadow_clip_delta_pct":dark_delta,
@@ -292,7 +329,7 @@ def measure_sample(raw, sample, params, baseline_lut, current_lut):
 
 @router.post("/{workspace_id}/validate")
 def validate_samples(workspace_id: str, request: Request, params: str = Form(...,max_length=8192),
-                     samples: str = Form(...,max_length=16384), files: list[UploadFile] = File(...),
+                     samples: str = Form(...,max_length=65536), files: list[UploadFile] = File(...),
                      user=Depends(auth.get_current_user)):
     from photo import render as R
     from photo.types import PhotoError

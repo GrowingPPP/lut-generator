@@ -95,7 +95,8 @@ def test_original_sync_and_new_job_both_persist_the_same_formal_parameters(owner
     assert final["status"] == "succeeded" and final["persisted"]
     result = final["result"]
     assert result["before_params"] == DEFAULT_PARAMS
-    assert result["context"] == CONTEXT
+    assert result["context"] == {**CONTEXT, "subject_detection_mode": "manual", "subject_analysis": None,
+                                 "skin_regions": None, "skin_mask_mode": "skin_candidates"}
     assert result["workspace_id"] == wid
     assert result["source_digest"] == hashlib.sha256(raw).hexdigest()
     assert result["main_sample_id"] == "main-photo"

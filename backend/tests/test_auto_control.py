@@ -15,6 +15,7 @@ def test_progress_reports_real_boundary_and_goal_skips():
                           context={'goal_mode': 'style_only'}, progress=events.append)
     assert result.execution_status == 'skipped'
     assert [(e['stage'], e['state']) for e in events] == [
+        ('subjects', 'running'), ('subjects', 'skipped'),
         ('measure', 'running'), ('measure', 'done'), ('optimize', 'skipped'),
         ('style', 'skipped'), ('rules', 'skipped'), ('review', 'skipped')]
 

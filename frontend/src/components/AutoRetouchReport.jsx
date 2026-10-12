@@ -31,7 +31,9 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
     ? new Set(requestContext.locked_fields).size : null
   const protection = result.subject_protection
   const hasProtection = protection && normalizeSubjectMode(protection.subject_mode) === protection.subject_mode
-    && typeof protection.enabled === 'boolean' && protection.method === 'color_heuristic'
+    && typeof protection.enabled === 'boolean'
+    && ['color_heuristic', 'localized_regions', 'manual_regions'].includes(protection.method)
+  const localized = hasProtection && protection.method !== 'color_heuristic'
   const subjectMode = hasProtection ? protection.subject_mode : requestContext?.subject_mode
   const subjectLabel = subjectMode === undefined ? '未记录'
     : SUBJECT_MODE_LABELS[normalizeSubjectMode(subjectMode)]
@@ -55,10 +57,11 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
           <dt>当次目标</dt>
           <dd>{goal}</dd>
           <dt>当次照片内容</dt>
-          <dd>{subjectLabel}{subjectMode === 'portrait' || subjectMode === 'non_portrait' ? '（用户标注）' : ''}</dd>
+          <dd>{subjectLabel}{subjectMode === 'portrait' || subjectMode === 'non_portrait'
+            ? protection?.source === 'auto' ? '（自动识别）' : '（人工确认）' : ''}</dd>
           <dt>人物颜色保护</dt>
-          <dd>{hasProtection ? protection.enabled ? '已启用 · 疑似肤色颜色' : '未启用' : '执行情况未记录'}</dd>
-          {suspectedRatio && <><dt>疑似肤色颜色占比</dt><dd>{suspectedRatio}</dd></>}
+          <dd>{hasProtection ? protection.enabled ? localized ? '已启用 · 已定位区域' : '已启用 · 疑似肤色颜色' : '未启用' : '执行情况未记录'}</dd>
+          {suspectedRatio && <><dt>{localized ? '可测皮肤区域占比' : '疑似肤色颜色占比'}</dt><dd>{suspectedRatio}</dd></>}
           <dt>已保护</dt>
           <dd>{protectedCount === null ? '未记录' : `${protectedCount} 项参数`}</dd>
           <dt>{result._applied_at ? '应用时间' : '报告时间'}</dt>
@@ -66,7 +69,10 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
             {validTime ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleString('zh-CN')}</time> : '未记录'}
           </dd>
         </dl>
-        {hasProtection && <p className="workspace-note">疑似肤色只依据颜色范围，当前没有人物检测或分割。</p>}
+        {hasProtection && <p className="workspace-note">{localized
+          ? protection.enabled ? '肤色质量检查使用固定皮肤区域，暖色背景不参与。自动框为估计区域，可人工修正；此检查不提供局部调色。'
+            : '本次没有足够的可测皮肤区域，未启用肤色保护；可查看人物识别结果或人工框选。'
+          : '这份旧报告的疑似肤色只依据颜色范围，当时没有人物检测或分割。'}</p>}
       </header>
       {historical && (
         <p className="workspace-note">以下为当次报告。参数、主样张或创作上下文已变化，或当次上下文未记录。</p>

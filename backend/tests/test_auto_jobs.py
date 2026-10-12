@@ -20,6 +20,10 @@ from agent.auto import AutoGradeCancelled
     ("portrait", None, False), ("non_portrait", None, False),
     ("unknown", "file", False), ("unknown", "params", False),
     ("unknown", "recorded_subject", False),
+    ("unknown", "default_subject_fields", True), ("unknown", "auto", False),
+    ("unknown", "analysis", False), ("unknown", "clear_regions", False),
+    ("unknown", "regions", False), ("unknown", "all_pixels", False),
+    ("unknown", "recorded_detection", False),
 ])
 def test_saved_legacy_fingerprint_replay_defaults_to_unknown_only(monkeypatch, mode, change, allowed):
     from fastapi import HTTPException, UploadFile
@@ -50,6 +54,22 @@ def test_saved_legacy_fingerprint_replay_defaults_to_unknown_only(monkeypatch, m
         params = {**params, "exposure": .1}
     elif change == "recorded_subject":
         saved["result"]["context"] = {**legacy_context, "subject_mode": "unknown"}
+    elif change == "default_subject_fields":
+        context.update(subject_detection_mode="manual", subject_analysis=None,
+                       skin_regions=None, skin_mask_mode="skin_candidates")
+    elif change == "auto":
+        context["subject_detection_mode"] = "auto"
+    elif change == "analysis":
+        context["subject_analysis"] = {"version": "subject-regions-1", "status": "resolved",
+            "subject_mode": "non_portrait", "confidence": .9, "regions": [], "source": "auto"}
+    elif change == "clear_regions":
+        context["skin_regions"] = []
+    elif change == "regions":
+        context["skin_regions"] = [{"bounds": [.1, .2, .3, .4], "kind": "face", "confidence": .9}]
+    elif change == "all_pixels":
+        context["skin_mask_mode"] = "all_pixels"
+    elif change == "recorded_detection":
+        saved["result"]["context"] = {**legacy_context, "subject_detection_mode": "manual"}
 
     def replay():
         return auto_jobs.create_job(request=SimpleNamespace(headers={}),
@@ -203,7 +223,8 @@ def test_progress_uses_known_fields_and_copies_completed_results():
     source['params']['gain'][0] = 2
     final['result']['params']['gain'][1] = 3
     assert registry.get(job['id'], 1)['result']['params']['gain'] == [1, 1, 1]
-    assert final['stages'][0] == {'stage': 'measure', 'state': 'done', 'round': 0}
+    assert final['stages'][0] == {'stage': 'subjects', 'state': 'pending', 'round': 0}
+    assert final['stages'][1] == {'stage': 'measure', 'state': 'done', 'round': 0}
 
 
 def test_expiration_cancels_active_at_boundary_and_reclaims_terminal():

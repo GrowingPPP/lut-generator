@@ -21,7 +21,7 @@ from api import auth
 
 logger = logging.getLogger("chroma.auto_jobs")
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
-STAGES = ("measure", "optimize", "style", "rules", "review", "save")
+STAGES = ("subjects", "measure", "optimize", "style", "rules", "review", "save")
 
 
 class JobNotFound(Exception):
@@ -61,7 +61,7 @@ class _Job:
     status: str = "queued"
     stages: dict = field(default_factory=lambda: {
         stage: {"stage": stage, "state": "pending", "round": 0} for stage in STAGES})
-    progress: dict = field(default_factory=lambda: {"stage": "measure", "state": "pending", "round": 0})
+    progress: dict = field(default_factory=lambda: {"stage": "subjects", "state": "pending", "round": 0})
     cancelled: Event = field(default_factory=Event)
     committing: bool = False
     result: Optional[dict] = None
@@ -390,6 +390,24 @@ def _request_fingerprint(data):
                                      allow_nan=False).encode()).hexdigest()
 
 
+def _saved_fingerprint_matches(result, data):
+    """旧报告仅省略当时不存在、且本次仍为默认值的上下文字段。"""
+    saved_fingerprint = result.get("job_fingerprint")
+    if saved_fingerprint == _request_fingerprint(data):
+        return True
+    saved_context, context = result.get("context"), data.get("context")
+    if not isinstance(saved_context, dict) or not isinstance(context, dict):
+        return False
+    defaults = {"subject_mode": "unknown", "subject_detection_mode": "manual",
+                "subject_analysis": None, "skin_regions": None, "skin_mask_mode": "skin_candidates"}
+    omitted = {key for key, value in defaults.items()
+               if key not in saved_context and key in context and context[key] == value}
+    if not omitted:
+        return False
+    legacy_context = {key: value for key, value in context.items() if key not in omitted}
+    return saved_fingerprint == _request_fingerprint({**data, "context": legacy_context})
+
+
 @router.post("", status_code=202)
 def create_job(request: Request, file: UploadFile = File(...),
                base_params: str = Form(..., max_length=8192), style: Optional[str] = Form(None),
@@ -405,6 +423,7 @@ def create_job(request: Request, file: UploadFile = File(...),
     from api.main import (LutParamsModel, MAX_AUTO_IMAGE_BYTES, _prepare_auto_grade,
                           _compute_auto_grade, _persist_auto_grade, _reserve_auto_grade)
     from agent.editing import EditingContext, normalize_context
+    from api.workspaces import require_subject_source
     require_single_worker()
     try:
         parsed = LutParamsModel.model_validate(json.loads(base_params))
@@ -418,6 +437,8 @@ def create_job(request: Request, file: UploadFile = File(...),
     actual_digest = hashlib.sha256(raw).hexdigest()
     if source_digest and source_digest != actual_digest:
         raise HTTPException(409, "来源文件摘要不一致，请重新绑定主样张")
+    require_subject_source(ctx, actual_digest, parsed.base_photo_style)
+    require_subject_source(ctx, source_digest, parsed.base_photo_style)
     request_data = {"style": (style or "").strip()[:200] or None,
                     "use_vision": use_vision, "max_rounds": max_rounds,
                     "context": normalize_context(ctx).model_dump(), "actual_digest": actual_digest}
@@ -441,15 +462,7 @@ def create_job(request: Request, file: UploadFile = File(...),
         raise _request_blocked() from exc
     saved = _saved_job(job_id, user["id"], workspace_id)
     if saved:
-        saved_fingerprint = saved["result"].get("job_fingerprint")
-        matches = saved_fingerprint == fingerprint
-        saved_context = saved["result"].get("context")
-        if (not matches and request_data["context"]["subject_mode"] == "unknown"
-                and isinstance(saved_context, dict) and "subject_mode" not in saved_context):
-            legacy_context = {key: value for key, value in request_data["context"].items()
-                              if key != "subject_mode"}
-            matches = saved_fingerprint == _request_fingerprint({**fingerprint_data, "context": legacy_context})
-        if not matches:
+        if not _saved_fingerprint_matches(saved["result"], fingerprint_data):
             raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始")
         return saved
     if continue_from:
@@ -479,7 +492,7 @@ def create_job(request: Request, file: UploadFile = File(...),
                                        max_rounds, workspace_id, source_digest, main_sample_id,
                                        progress=progress, cancel_check=cancel_check,
                                        resume=request_data.get("resume"), continued_from=continue_from,
-                                       user_id=user["id"])
+                                       user_id=user["id"], actual_source_digest=actual_digest)
             return {**out.model_dump(), "_continuation_stages": continuation_stages(
                 prepared[0], out, request_data["style"], prepared[2], request_data.get("resume"))}
 

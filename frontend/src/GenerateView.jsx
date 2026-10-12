@@ -16,12 +16,14 @@ import CheckboxField from './components/ui/CheckboxField.jsx'
 import Tooltip from './components/ui/Tooltip.jsx'
 import { inputContract, applyStyleRecipe } from './lib/styleRecipe.js'
 import { lockConflicts } from './lib/workspace.js'
-import { decodeSample, restoreSample, sampleMatches, sampleIsNormalized, editingContextForSample, normalizeSubjectMode } from './lib/samples.js'
+import { decodeSample, restoreSample, sampleMatches, sampleIsNormalized, editingContextForSample } from './lib/samples.js'
 import { diffParams } from './lib/autoGrade.js'
 import { parameterSignature, effectivePhases, versionSource, equivalentCandidate, contextSignature, reportIsHistorical } from './lib/workspaceFlow.js'
 import WorkspaceToolbar from './components/WorkspaceToolbar.jsx'
 import InputConfirmationDialog from './components/InputConfirmationDialog.jsx'
 import SampleGallery from './components/SampleGallery.jsx'
+import SubjectProtectionPanel from './components/SubjectProtectionPanel.jsx'
+import { effectiveSubjectProtection, normalizeSubjectDetection, subjectSelection, SUBJECT_ANALYSIS_VERSION } from './lib/subjectAnalysis.js'
 import SampleInputPreview from './components/SampleInputPreview.jsx'
 import VersionPanel from './components/VersionPanel.jsx'
 import StyleSaveDialog from './components/StyleSaveDialog.jsx'
@@ -31,7 +33,7 @@ import ComparisonPreview, { RenderedImage } from './components/ComparisonPreview
 import {
   createLut, chatSession,
   listSessions, createSession, deleteSession, updateSession, listMessages,
-  saveTextFile, cameraFileName, listWorkspaces, createWorkspace, updateWorkspace, listVersions, createVersion, renameVersion, deleteVersion, applyLut, validateWorkspace, updateLut, getAutoReport,
+  saveTextFile, cameraFileName, listWorkspaces, createWorkspace, updateWorkspace, listVersions, createVersion, renameVersion, deleteVersion, applyLut, validateWorkspace, updateLut, getAutoReport, analyzePhotoSubjects,
 } from './lib/api.js'
 import { paramsToCube } from './lib/lutEngine.js'
 import { sameAutoMetadata } from './lib/autoJobs.js'
@@ -128,6 +130,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const [grading, setGrading] = useState(false)
   const [validating, setValidating] = useState(false)
   const [sampleLoading, setSampleLoading] = useState(false)
+  const [detectingSampleId, setDetectingSampleId] = useState(null)
   const [advancedLoading, setAdvancedLoading] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [referenceBusy, setReferenceBusy] = useState(false)
@@ -167,6 +170,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const remoteRequests = useRef(new Map())
   const consumedPreviewRef = useRef(null)
   const deletedAssetIds = useRef(new Set())
+  const subjectRequestRef = useRef(0)
+  const subjectMountedRef = useRef(true)
+  useEffect(() => { subjectMountedRef.current = true; return () => { subjectMountedRef.current = false; subjectRequestRef.current += 1 } }, [])
   const viewWorkspaceRef = useRef(null)
   const mediaRef = useRef(media)
   mediaRef.current = media
@@ -185,7 +191,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     setSavedAsset(current => current?.id === deletedAssetId ? null : current)
     setPendingAsset(current => current?.lut.id === deletedAssetId ? null : current)
   }, [deletedAssetId])
-  const baseBusy = sending || grading || validating || sampleLoading || remoteBusy || resourceLoading || !ready
+  const baseBusy = sending || grading || validating || sampleLoading || detectingSampleId !== null || remoteBusy || resourceLoading || !ready
   const busy = baseBusy || advancedLoading
   const samples = workspace.samples || []
   const primaryId = workspace.primary_sample_id || null
@@ -215,7 +221,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       s.preview_digest,
       s.input_contract,
       s.input_confirmed,
-      normalizeSubjectMode(s.subject_mode),
+      editingContextForSample(workspace, s),
       media.get(s.id)?.metadata.origin,
     ]),
   )
@@ -717,6 +723,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         {
           params,
           context: { ...context, locked_fields: allowedLocks },
+          source_digest: primarySample?.source_digest,
           revision_id: lut.revision_id,
           allow_repeat: repeated,
           allow_input_change: inputChanged,
@@ -841,30 +848,98 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     })
     if (selectedId === id) setSelectedId(remaining[0]?.id || null)
   }
-  const setSampleSubject = async (id, mode) => {
-    if (busy) return
+  const updateSubjectMetadata = async (id, patch) => {
     const ws = currentRef.current
     const sample = ws.samples.find(item => item.id === id)
-    if (!sample) return
-    const subjectMode = normalizeSubjectMode(mode)
-    if (normalizeSubjectMode(sample.subject_mode) === subjectMode) return
-    const marked = { ...sample, subject_mode: subjectMode }
+    if (!sample) throw new Error('样张已移除，请重新选择照片')
+    const marked = { ...sample, ...patch }
+    marked.subject_mode = effectiveSubjectProtection(marked).subject_mode
+    const next = editor.setMeta({ samples: ws.samples.map(item => item.id === id ? marked : item),
+      validation: ws.validation ? { ...ws.validation, stale: true } : null })
+    if (!next) throw new Error('照片内容未能写入草稿，请查看保存提示')
+    currentRef.current = next
+    const nextMedia = new Map(mediaRef.current), item = nextMedia.get(id)
+    if (item) nextMedia.set(id, { ...item, metadata: marked })
+    mediaRef.current = nextMedia
+    setMedia(nextMedia)
+    if (next.retain_previews && item?.blob) await editor.cachePreview(id, item.blob, marked)
+    if (!(await editor.flush())) throw new Error('人物识别与保护区域未能保存，请先重试草稿保存')
+    return marked
+  }
+  const changeSubjectMetadata = async (id, patch) => {
+    if (busy) return
     setSampleLoading(true)
     try {
-      const item = mediaRef.current.get(id)
-      if (ws.retain_previews && item?.blob) await editor.cachePreview(id, item.blob, marked)
-      const latest = currentRef.current
-      if (latest.id !== ws.id || latest.samples.find(s => s.id === id)?.source_digest !== sample.source_digest) return
-      await editor.setMeta({ samples: latest.samples.map(s => s.id === id ? { ...s, subject_mode: subjectMode } : s),
-        validation: latest.validation ? { ...latest.validation, stale: true } : null })
-      setMedia(previous => {
-        const next = new Map(previous), existing = next.get(id)
-        if (existing) next.set(id, { ...existing, metadata: { ...existing.metadata, subject_mode: subjectMode } })
-        return next
-      })
-      setStatus(`已记录 ${sample.name} 的照片内容；现有参数保持不变，统计验证需重新运行`)
-    } catch (error) { setStatus(`照片内容未能保存：${error.message}`) }
+      await updateSubjectMetadata(id, patch)
+      setStatus('已保存照片内容与肤色保护区域，统计验证需重新运行')
+    } catch (failure) { setStatus(failure.message) }
     finally { setSampleLoading(false) }
+  }
+  const setSampleSubject = (id, selection) => {
+    if (!['auto', 'portrait', 'non_portrait'].includes(selection)) return
+    return changeSubjectMetadata(id, { subject_selection: selection })
+  }
+  const currentAutoConditions = () => {
+    const ws = currentRef.current
+    const sample = ws.samples.find(item => item.id === ws.primary_sample_id)
+    return { file: mediaRef.current.get(sample?.id)?.file, params: ws.params,
+      context: editingContextForSample(ws, sample), workspace_id: ws.id,
+      source_digest: sample?.source_digest, main_sample_id: sample?.id }
+  }
+  const detectSampleSubjects = async (id, { enabled = true, force = false, isCurrent = () => true } = {}) => {
+    const ws = currentRef.current
+    const sample = ws.samples.find(item => item.id === id)
+    if (!sample) throw new Error('样张已变化，请重新选择照片')
+    const cached = normalizeSubjectDetection(sample.subject_detection, sample.source_digest, sample.input_contract?.base_photo_style)
+    if (!force && cached && (!enabled || ['resolved', 'uncertain'].includes(cached.status))) return cached
+    const request = captureRequest()
+    const requestId = ++subjectRequestRef.current
+    const stillCurrent = () => subjectMountedRef.current && requestId === subjectRequestRef.current
+      && requestMatches(request) && isCurrent()
+    setDetectingSampleId(id)
+    let detection
+    try {
+      const fallback = (status, reason) => ({ version: SUBJECT_ANALYSIS_VERSION, status, subject_mode: 'unknown',
+        confidence: 0, regions: [], source: 'auto', reason, mask_mode: 'skin_candidates',
+        source_digest: sample.source_digest, input_style: sample.input_contract?.base_photo_style })
+      if (!enabled) detection = fallback('disabled', 'disabled')
+      else {
+        const item = mediaRef.current.get(id)
+        if (!item?.file) detection = fallback('failed', 'source_required')
+        else {
+          setStatus(`正在识别 ${sample.name} 的人物与肤色区域；照片将发送给模型`)
+          try {
+            const result = await analyzePhotoSubjects({ file: item.file, params: ws.params, source_digest: sample.source_digest })
+            detection = normalizeSubjectDetection(result, sample.source_digest, sample.input_contract?.base_photo_style)
+              || fallback('failed', 'invalid')
+          } catch (failure) {
+            if (failure.status === 401) throw failure
+            detection = fallback('failed', 'failed')
+          }
+        }
+      }
+      if (!stillCurrent()) throw new Error('工作区、参数或照片已变化，识别结果未写入草稿')
+      await updateSubjectMetadata(id, { subject_detection: detection })
+      if (detection.status === 'failed') setStatus('人物识别未完成，未启用自动肤色保护；可重试识别或人工框选，调色可继续')
+      else if (detection.status === 'uncertain') setStatus('人物识别暂不确定，可人工修正照片内容与皮肤区域，调色可继续')
+      else if (detection.status === 'resolved') setStatus('人物识别已保存，可查看或修正肤色保护区域')
+      return detection
+    } finally {
+      if (subjectMountedRef.current && requestId === subjectRequestRef.current) setDetectingSampleId(null)
+    }
+  }
+  const prepareAutoSubjects = async ({ useVision = true, isCurrent = () => true } = {}) => {
+    const ws = currentRef.current
+    const sample = ws.samples.find(item => item.id === ws.primary_sample_id)
+    if (sample && subjectSelection(sample) === 'auto') {
+      await detectSampleSubjects(sample.id, { enabled: useVision, isCurrent })
+    }
+    return currentAutoConditions()
+  }
+  const detectSubjectsManually = async id => {
+    if (busy) return
+    try { await detectSampleSubjects(id, { force: true }) }
+    catch (failure) { setStatus(failure.message) }
   }
   const retain = async (enabled) => {
     if (busy) return
@@ -905,13 +980,12 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         ? await validateWorkspace(
             workspace.id,
             params,
-            measurable.map((s) => ({
-              id: s.id,
-              input_contract: s.input_contract,
-              source_digest: s.source_digest,
-              subject_mode: normalizeSubjectMode(s.subject_mode),
-              origin: media.get(s.id).metadata.origin,
-            })),
+            measurable.map((s) => {
+              const { subject_mode, subject_detection_mode, subject_analysis, skin_regions, skin_mask_mode } = editingContextForSample(workspace, s)
+              return { id: s.id, input_contract: s.input_contract, source_digest: s.source_digest,
+                subject_mode, subject_detection_mode, subject_analysis, skin_regions, skin_mask_mode,
+                origin: media.get(s.id).metadata.origin }
+            }),
             measurable.map((s) => media.get(s.id).blob),
           )
         : { results: [] }
@@ -976,13 +1050,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         params,
         context,
         source,
-        sample_refs: samples.map(({ id, name, source_digest, input_contract, subject_mode }) => ({
-          id,
-          name,
-          source_digest,
-          input_contract,
-          subject_mode: normalizeSubjectMode(subject_mode),
-        })),
+        sample_refs: samples.map(sample => ({ id: sample.id, name: sample.name, source_digest: sample.source_digest,
+          input_contract: sample.input_contract, subject_mode: effectiveSubjectProtection(sample).subject_mode,
+          subject_selection: subjectSelection(sample), subject_detection: sample.subject_detection || null,
+          subject_regions: sample.subject_regions ?? null, subject_region_mask_mode: sample.subject_region_mask_mode || 'skin_candidates' })),
         validation_summary: validation && !validationStale ? { results: validation.results } : null,
       })
       if (currentRef.current.id === workspaceId && version.workspace_id === workspaceId) {
@@ -1307,14 +1378,21 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           <TabsContent value="ai" forceMount asChild><section className="tool-view">
             <h2 className="tool-heading">形成你想要的效果</h2>
             <div className="ai-intents" role="group" aria-label="创作方式">{AI_INTENTS.map(([key, label]) => <button key={key} aria-pressed={aiIntent === key} onClick={() => setAiIntent(key)}>{label}</button>)}</div>
-            <WorkspaceToolbar mode="context" editor={toolbarEditor} busy={busy} onBackup={backup}
-              sample={primarySample} onSubjectChange={mode => setSampleSubject(primaryId, mode)} />
+            <WorkspaceToolbar mode="context" editor={toolbarEditor} busy={busy} onBackup={backup} />
             <div className="ai-context"><span>AI 主样张</span><strong>{primarySample?.name || '尚未选择'}</strong>
               {primaryId !== selectedSample?.id && primarySample && <p>当前正在查看 {selectedSample?.name}。照片优化与参考匹配使用主样张，开始时会切回该照片。</p>}
             </div>
+            {primarySample && <div className="ai-subject-protection"><SubjectProtectionPanel sample={primarySample}
+              previewUrl={primaryMedia?.thumbnail} busy={busy} detecting={detectingSampleId === primaryId}
+              onDetect={primaryCompatible && primaryMedia?.file ? () => detectSubjectsManually(primaryId) : undefined}
+              onSelectionChange={selection => setSampleSubject(primaryId, selection)}
+              onRegionsChange={regions => changeSubjectMetadata(primaryId, { subject_regions: regions,
+                ...(regions === null ? { subject_region_mask_mode: 'skin_candidates' } : {}) })}
+              onMaskModeChange={mode => changeSubjectMetadata(primaryId, { subject_region_mask_mode: mode })} /></div>}
             <div className="ai-method" hidden={aiIntent !== 'optimize'}>
               <h3 className="tool-subheading">根据照片分析并应用调整</h3>
         <AutoRetouchBar
+          onPrepare={prepareAutoSubjects}
           file={primaryMedia?.file}
           params={params}
           context={context}

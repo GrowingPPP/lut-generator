@@ -25,7 +25,8 @@ def _unexpected_call(*args, **kwargs):
 
 def test_context_is_metadata_and_legacy_default_is_natural():
     assert normalize_context().goal_mode == "natural"
-    assert set(EditingContext.model_fields) == {"goal_mode", "locked_fields", "subject_mode"}
+    assert set(EditingContext.model_fields) == {"goal_mode", "locked_fields", "subject_mode",
+        "subject_detection_mode", "subject_analysis", "skin_regions", "skin_mask_mode"}
     assert normalize_context().subject_mode == "unknown"
     assert set(PARAM_FIELDS) == set(A.LutParams.__dataclass_fields__)
     assert normalize_context({"locked_fields": ["gamma", "gamma"]}).locked_fields == ["gamma"]

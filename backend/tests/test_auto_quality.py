@@ -92,12 +92,15 @@ def test_empty_review_has_one_terminal_stage_notification():
 
 @pytest.mark.parametrize("mode,applied", [("unknown", True), ("non_portrait", True), ("portrait", False)])
 def test_subject_evidence_controls_only_the_person_guard(mode, applied):
+    regions = [{"bounds": [0., 0., 1., 1.], "kind": "face", "confidence": 1.}]
     result = A.auto_grade(warm_scene(), {}, "改变色相", client=object(), use_vision=False,
-                          context={"goal_mode": "style_only", "subject_mode": mode},
+                          context={"goal_mode": "style_only", "subject_mode": mode, "skin_regions": regions},
                           style_extractor=lambda *_: {"hue": 40.0})
     assert result.style_applied is applied
-    assert result.subject_protection == {"subject_mode": mode, "enabled": mode == "portrait",
-                                         "suspected_skin_ratio": 1.0, "method": "color_heuristic"}
+    assert result.subject_protection["subject_mode"] == mode
+    assert result.subject_protection["enabled"] is (mode == "portrait")
+    assert result.subject_protection["suspected_skin_ratio"] == (1.0 if mode == "portrait" else 0.0)
+    assert result.subject_protection["method"] == "manual_regions"
     assert bool(result.style_rejections) is (not applied)
     if not applied:
         assert all("肤色" in reason for reason in result.style_rejections)
@@ -152,13 +155,14 @@ def test_each_batch_sample_uses_its_own_subject_annotation(monkeypatch):
     baseline_lut, current_lut = A.R.lut_from_params({}), A.R.lut_from_params(params)
     measured = {}
     for mode in ("unknown", "non_portrait", "portrait"):
-        sample = ValidationSample(id=mode, input_contract=input_contract(params), subject_mode=mode)
+        sample = ValidationSample(id=mode, input_contract=input_contract(params), subject_mode=mode,
+            skin_regions=[{"bounds": [0., 0., 1., 1.], "kind": "face", "confidence": 1.}])
         measured[mode] = measure_sample(b"source", sample, params, baseline_lut, current_lut)
     assert not measured["unknown"]["risks"]
     assert not measured["non_portrait"]["risks"]
     assert measured["portrait"]["risks"] == ["肤色色彩偏移"]
     assert [measured[mode]["skin_protection_applied"] for mode in measured] == [False, False, True]
-    assert all(result["skin_evidence"] == "suspected_color" for result in measured.values())
+    assert all(result["skin_evidence"] == "manual_regions" for result in measured.values())
 
 
 def test_suspected_colors_are_not_presented_to_the_model_as_person_evidence():
@@ -168,4 +172,4 @@ def test_suspected_colors_are_not_presented_to_the_model_as_person_evidence():
     assert stats["suspected_skin_ratio"] == 1.0
     assert "skin_ratio" not in stats
     assert "不能推断人物" in context_prompt({}, "correction")
-    assert "不是人脸检测或人物分割" in context_prompt({"subject_mode": "portrait"}, "style")
+    assert "不是人物分割" in context_prompt({"subject_mode": "portrait"}, "style")

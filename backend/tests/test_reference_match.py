@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from agent.reference import match_reference, matching_features
+from agent.subjects import SubjectAnalysis, SubjectRegion
 from api import auth
 from api.models import LutParamsModel
 from api import reference_match as route
@@ -121,3 +122,15 @@ def test_signal_conflict_is_actionable_422(client, monkeypatch):
     monkeypatch.setattr(route,"match_reference",conflict)
     data,files=request_data()
     assert client.post("/api/reference/match",data=data,files=files).status_code == 422
+
+
+@pytest.mark.parametrize("changes", [{"source_digest":"b"*64},{"input_style":"NAT"}])
+def test_reference_rejects_subject_regions_bound_to_another_source(client,changes):
+    data,files = request_data()
+    analysis = SubjectAnalysis(status="resolved",subject_mode="portrait",confidence=.95,
+        regions=[SubjectRegion(bounds=[.1,.1,.3,.3],kind="face",confidence=.9)],
+        source_digest=data["source_digest"],input_style="STD").model_dump()
+    data["context"] = json.dumps({"subject_detection_mode":"auto","subject_analysis":{**analysis,**changes}})
+    response = client.post("/api/reference/match",data=data,files=files)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "subject_source_conflict"

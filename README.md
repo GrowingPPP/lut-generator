@@ -120,6 +120,8 @@ make test      # 运行后端测试
 | 环境变量 | 说明 | 默认 |
 |---|---|---|
 | `CHROMA_LLM_MODEL` | 模型名 | `deepseek-flash` |
+| `CHROMA_VISION_MODEL` | 人物识别与效果复核模型，需要支持图像输入与工具调用 | 复用调色模型 |
+| `CHROMA_VISION_BASE_URL` / `CHROMA_VISION_API_KEY` | 可选的独立视觉模型端点与密钥 | 复用调色配置 |
 | `CHROMA_LLM_BASE_URL` | API 地址 | `https://api.deepseek.com` |
 | `CHROMA_LLM_API_KEY` | API key | 无(必须配置) |
 | `CHROMA_LLM_MAX_TOKENS` | 单次最大 token | `2000` |

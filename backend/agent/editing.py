@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lut_engine import LutParams
+from .subjects import SubjectAnalysis, SubjectRegion
 
 PARAM_FIELDS = tuple(LutParams.__dataclass_fields__)
 AUTO_READONLY_FIELDS = ("base_photo_style", "tone_map")
@@ -20,6 +21,10 @@ class EditingContext(BaseModel):
     goal_mode: Literal["natural", "preserve", "style_only"] = "natural"
     locked_fields: list[str] = Field(default_factory=list)
     subject_mode: Literal["unknown", "portrait", "non_portrait"] = "unknown"
+    subject_detection_mode: Literal["manual", "auto"] = "manual"
+    subject_analysis: SubjectAnalysis | None = None
+    skin_regions: list[SubjectRegion] | None = Field(None, max_length=16)
+    skin_mask_mode: Literal["skin_candidates", "all_pixels"] = "skin_candidates"
 
     @field_validator("locked_fields")
     @classmethod
@@ -90,9 +95,9 @@ def context_prompt(context: EditingContext | dict | None, stage: str) -> str:
     ctx = normalize_context(context)
     text = "编辑上下文:" + json.dumps(ctx.model_dump(), ensure_ascii=False)
     if ctx.subject_mode == "portrait":
-        text += "\n用户确认这张照片包含人物;按疑似肤色颜色区域限制漂移。颜色掩膜不是人脸检测或人物分割。"
+        text += "\n这张照片包含人物;肤色检查仅使用已定位或人工修正的皮肤区域。区域为估计矩形，不是人物分割；无可测区域时不能宣称已保护肤色。"
     elif ctx.subject_mode == "non_portrait":
-        text += "\n用户确认这张照片无人物;疑似肤色颜色统计不能称为确定肤色或作为人物证据。"
+        text += "\n这张照片无人物;暖色颜色统计不能称为确定肤色或作为人物证据，不启用肤色硬保护。"
     else:
         text += "\n这张照片是否包含人物尚未确认;疑似肤色只表示颜色命中,不能推断人物,不启用人物肤色硬保护。"
     if ctx.goal_mode == "preserve":

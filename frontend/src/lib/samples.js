@@ -1,5 +1,6 @@
 import { inputContract } from './styleRecipe.js'
 import { normalizePhoto } from './photoApi.js'
+import { effectiveSubjectProtection, normalizeSubjectDetection, subjectSelection } from './subjectAnalysis.js'
 
 export const SUBJECT_MODE_LABELS = Object.freeze({ unknown: '未确认', portrait: '包含人物', non_portrait: '无人物' })
 
@@ -9,10 +10,15 @@ export function normalizeSubjectMode(value) {
 
 export function editingContextForSample(workspace, sample) {
   const metadata = sample?.metadata || sample
+  const protection = effectiveSubjectProtection(metadata)
   return {
     goal_mode: workspace?.goal_mode || 'natural',
     locked_fields: [...(workspace?.locked_fields || [])],
-    subject_mode: normalizeSubjectMode(metadata?.subject_mode),
+    subject_mode: protection.subject_mode,
+    subject_detection_mode: protection.selection === 'auto' ? 'auto' : 'manual',
+    subject_analysis: protection.detection,
+    skin_regions: protection.manual_regions ? protection.regions : null,
+    skin_mask_mode: protection.mask_mode,
   }
 }
 
@@ -51,7 +57,11 @@ export async function decodeSample(file, params, existing) {
     return {
       metadata: {
         ...existing,
-        subject_mode: normalizeSubjectMode(existing?.subject_mode),
+        subject_mode: effectiveSubjectProtection(existing).subject_mode,
+        subject_selection: existing ? subjectSelection(existing) : 'auto',
+        subject_detection: normalizeSubjectDetection(existing?.subject_detection, digest, inputStyle),
+        subject_regions: existing?.subject_regions ?? null,
+        subject_region_mask_mode: existing?.subject_region_mask_mode === 'all_pixels' ? 'all_pixels' : 'skin_candidates',
         id: existing?.id || crypto.randomUUID(),
         name: file.name,
         source_digest: digest,
@@ -87,7 +97,12 @@ export async function restoreSample(blob, metadata) {
     canvas.height = img.naturalHeight
     canvas.getContext('2d').drawImage(img, 0, 0)
     return {
-      metadata: { ...metadata, subject_mode: normalizeSubjectMode(metadata?.subject_mode),
+      metadata: { ...metadata, subject_mode: effectiveSubjectProtection(metadata).subject_mode,
+        subject_selection: subjectSelection(metadata),
+        subject_detection: normalizeSubjectDetection(metadata?.subject_detection, metadata?.source_digest,
+          metadata?.input_contract?.base_photo_style),
+        subject_regions: metadata?.subject_regions ?? null,
+        subject_region_mask_mode: metadata?.subject_region_mask_mode === 'all_pixels' ? 'all_pixels' : 'skin_candidates',
         origin: 'restored_preview', needs_rebind: true },
       file: null,
       canvas,

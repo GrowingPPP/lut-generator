@@ -173,6 +173,27 @@ export async function getAutoReport(workspaceId) {
 
 export const undoAutoGrade = () => jsonFetch(`${BASE}/auto/undo`, { method: 'POST' })
 
+export async function analyzePhotoSubjects({ file, params, source_digest, enabled = true }) {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('input_style', params.base_photo_style)
+  body.append('tone_map', String(params.tone_map ?? 1))
+  body.append('params', JSON.stringify(params))
+  body.append('source_digest', source_digest)
+  body.append('enabled', String(enabled))
+  const response = await fetch(`${BASE}/photos/subjects`, { method: 'POST', body, credentials: 'include' })
+  if (response.status === 401) {
+    window.dispatchEvent(new Event('chroma:unauthorized'))
+    throw Object.assign(new Error('登录已过期，请重新登录'), { status: 401 })
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw Object.assign(new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || `人物识别失败：${response.status}`),
+      { status: response.status })
+  }
+  return response.json()
+}
+
 // 自动修图。multipart 提交,base_params 必填(服务端拒绝默认值兜底)。
 async function submitAutoGrade(path, {
   file,

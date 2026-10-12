@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api import auth
 from api.models import LutParamsModel
-from api.workspaces import require_workspace
+from api.workspaces import require_workspace, require_subject_source
 from agent.editing import EditingContext
 from photo import stats as S, render as R
 from agent.reference import match_reference
@@ -35,6 +35,7 @@ def create_match(file: UploadFile = File(...), reference: UploadFile = File(...)
             raise ValueError("请至少选择色彩或影调匹配")
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, "匹配参数或目标不合法") from exc
+    require_subject_source(ctx, source_digest, parsed.base_photo_style)
     raw = file.file.read(MAX_BYTES + 1)
     ref_raw = reference.file.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES or len(ref_raw) > MAX_BYTES:

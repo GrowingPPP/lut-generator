@@ -43,8 +43,10 @@ test('sample context follows each actual photo and migrates invalid old annotati
   assert.equal(typeof samples.editingContextForSample, 'function')
   const workspace = { ...context, subject_mode: 'portrait' }
   for (const subject_mode of ['unknown', 'portrait', 'non_portrait']) {
-    assert.deepEqual(samples.editingContextForSample(workspace, { metadata: { subject_mode } }), { ...context, subject_mode })
-    assert.deepEqual(samples.editingContextForSample(workspace, { subject_mode }), { ...context, subject_mode })
+    const expected = { ...context, subject_mode, subject_detection_mode: subject_mode === 'unknown' ? 'auto' : 'manual',
+      subject_analysis: null, skin_regions: null, skin_mask_mode: 'skin_candidates' }
+    assert.deepEqual(samples.editingContextForSample(workspace, { metadata: { subject_mode } }), expected)
+    assert.deepEqual(samples.editingContextForSample(workspace, { subject_mode }), expected)
   }
   for (const value of [undefined, null, '', 'person', 1, [], ['portrait'], {}, 'toString']) {
     assert.equal(samples.normalizeSubjectMode(value), 'unknown')
@@ -117,7 +119,7 @@ test('fresh source defaults to unknown and rebinding the same SHA preserves per-
     { status: 200, headers: { 'X-Photo-Metadata': JSON.stringify(photoMetadata) } }))
   const first = await samples.decodeSample(file, defaultParams())
   assert.equal(first.metadata.subject_mode, 'unknown')
-  const existing = { ...first.metadata, subject_mode: 'portrait', input_confirmed: true }
+  const existing = { ...first.metadata, subject_selection: 'portrait', subject_mode: 'portrait', input_confirmed: true }
   const frozen = structuredClone(existing)
   const rebound = await samples.decodeSample(file, defaultParams(), existing)
   assert.equal(rebound.metadata.subject_mode, 'portrait')

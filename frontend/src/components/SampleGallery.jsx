@@ -4,6 +4,7 @@ import SelectField from './SelectField.jsx'
 import { inputContract } from '../lib/styleRecipe.js'
 import { photoMetadataNotes } from '../lib/photoMetadata.js'
 import { normalizeSubjectMode, sampleIsNormalized, SUBJECT_MODE_LABELS } from '../lib/samples.js'
+import { subjectSelection, subjectStatusText, SUBJECT_SELECTION_LABELS } from '../lib/subjectAnalysis.js'
 import './SampleGallery.css'
 
 const VALIDATION_LABELS = { no_new_risk: '无新增风险', attention: '风险待关注', unmeasurable: '无法测量' }
@@ -20,7 +21,7 @@ function SampleThumbnail({ sample, media, selected, primary, result, stale, onSe
       <span className="sg-thumb-roles">{selected && <span className="sg-view-tag">查看中</span>}
         {primary && <span className="sg-primary-tag">★ AI 主样张</span>}{!selected && !primary && <span>验证图</span>}</span>
       <span className={'sg-input-tag ' + (!sample.input_confirmed || !sampleIsNormalized(sample) ? 'needs-attention' : '')}>{inputStatus(sample)}</span>
-      <span>照片内容：{SUBJECT_MODE_LABELS[normalizeSubjectMode(sample.subject_mode)]}</span>
+      <span>{subjectStatusText(sample)}</span>
       {result && <span className={'sg-risk-tag ' + (!stale && result.status === 'attention' ? 'needs-attention' : !stale && result.status === 'no_new_risk' ? 'is-verified' : '')}>
         {stale ? '验证已过期' : VALIDATION_LABELS[result.status] || result.label || result.status}</span>}
     </span>
@@ -50,11 +51,12 @@ function SampleDetails({ sample, media, primary, result, stale, busy, onPrimary,
         : <span className="sg-confirmed">已确认 · {style}</span>}
     </div>
     {onSubjectChange && <div className="sg-input-row"><label>当前照片内容
-      <SelectField aria-label={sample.name + ' 照片内容'} value={normalizeSubjectMode(sample.subject_mode)}
+      <SelectField aria-label={sample.name + ' 照片内容'} value={subjectSelection(sample)}
         onChange={event => onSubjectChange(event.target.value)} disabled={busy}>
-        {Object.entries(SUBJECT_MODE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        {Object.entries(SUBJECT_SELECTION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </SelectField>
     </label><span>仅用于这张照片</span></div>}
+    {onSubjectChange && <p className="sg-help">{subjectStatusText(sample)}。主样张的保护区域可在“AI 创作”中查看与修正。</p>}
     {needsConfirmation && <p className="sg-help">{needsDecode && !media?.file ? '请先重新绑定同一原文件，再更新或确认输入。' : metadata.input}</p>}
     {!media?.file && media?.canvas && <p className="sg-help">兼容的缓存预览可继续手调、比较版本与保存或导出 LUT；照片分析、参考匹配和原尺寸照片导出需要原文件。</p>}
     <div className="sg-detail-actions"><button className="btn sg-action" onClick={onPrimary} disabled={busy || primary}>设为 AI 主样张</button>
@@ -65,7 +67,7 @@ function SampleDetails({ sample, media, primary, result, stale, busy, onPrimary,
       {stale && '此前验证 · '}{result.summary || result.label || VALIDATION_LABELS[result.status] || result.status}{result.reason && ' · ' + result.reason}</p>}
     {result && <dl className="sg-metadata"><dt>当次照片内容</dt>
       <dd>{Object.hasOwn(result, 'subject_mode') ? SUBJECT_MODE_LABELS[normalizeSubjectMode(result.subject_mode)] : '未记录'}</dd>
-      <dt>疑似肤色颜色保护</dt><dd>{typeof result.skin_protection_applied === 'boolean'
+      <dt>肤色区域保护</dt><dd>{typeof result.skin_protection_applied === 'boolean'
         ? result.skin_protection_applied ? '已参与验证' : '未参与验证' : '未记录'}</dd>
     </dl>}
   </div>
@@ -100,7 +102,7 @@ export default function SampleGallery({ samples, media, selectedId, primaryId, v
       <div className="sg-gallery-settings"><div className="sg-validation-actions"><button className="btn sg-action" onClick={onValidate} disabled={busy || !samples.length}>验证全部样张的当前效果</button>
         {!selected && <button className="btn sg-action" onClick={() => onGuide()} disabled={busy}>输入与相机引导</button>}<span>统计测量，不调用模型</span></div>
         {validation && <details className="sg-validation-details"><summary>{stale ? '参数或样张已变化，上次验证仅供回看' : '查看全部统计验证详情'}</summary>
-          <p className="sg-help">疑似肤色只表示颜色范围，不代表人物检测或分割。只有标为“包含人物”的照片才验证该区域的颜色漂移。</p>
+          <p className="sg-help">人物识别或人工标注确定保护区域后，统计检查区域内的肤色变化。自动区域是近似矩形；尚无可用区域时不按全图暖色猜测肤色。</p>
           <pre>{JSON.stringify(validation.results, null, 2)}</pre></details>}
         <label className="sg-preview-cache"><CheckboxField checked={retainPreviews} onChange={(event) => onRetain(event.target.checked)} disabled={busy} />
           <span>在本机保留缩小预览<small>最多 24MB，7 天后过期；不保留原文件</small></span></label>

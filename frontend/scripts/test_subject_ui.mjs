@@ -76,12 +76,23 @@ test('old report annotation remains unrecorded while unknown does not claim prot
   assert.doesNotMatch(unknown, /已启用/)
 })
 
+test('localized report accurately labels automatic recognition and measured protection', () => {
+  const html = render(Report, { result: { params: defaultParams(), context: workspace,
+    subject_protection: { subject_mode: 'portrait', enabled: true, source: 'auto',
+      suspected_skin_ratio: .01, method: 'localized_regions' } } })
+  assert.match(html, /自动识别/)
+  assert.match(html, /已启用 · 已定位区域/)
+  assert.match(html, /可人工修正/)
+  assert.doesNotMatch(html, /没有人物检测/)
+  assert.doesNotMatch(html, /用户标注|人工确认/)
+})
+
 test('gallery keeps distinct photo annotations and allows the selected validation photo to be marked', () => {
   const other = { ...sample, id: 'other', name: 'Person.jpg', subject_mode: 'portrait' }
   const html = render(Gallery, { samples: [sample, other], media: new Map(), selectedId: 's', primaryId: 'other',
     busy: true, onSubjectChange() {} })
-  assert.match(html, /照片内容：无人物/)
-  assert.match(html, /照片内容：包含人物/)
+  assert.match(html, /人工确认：无人物/)
+  assert.match(html, /人工确认：包含人物/)
   assert.match(html, /aria-label="Tree.jpg 照片内容"[^>]*disabled=""/)
   assert.match(html, /value="non_portrait" selected=""/)
 })

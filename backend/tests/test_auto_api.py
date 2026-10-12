@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app, LutParamsModel
+from agent.subjects import SubjectAnalysis, SubjectRegion
 from photo.fixtures import make_jpeg_bytes
 from storage import db
 
@@ -50,6 +51,58 @@ def _post(auth, kind="under_exposed", params=None, **form):
         data=data,
         headers=auth,
     )
+
+
+def cached_subject_analysis(raw, **overrides):
+    import hashlib
+    result = SubjectAnalysis(status="resolved",subject_mode="portrait",confidence=.95,
+        regions=[SubjectRegion(bounds=[.1,.1,.3,.3],kind="face",confidence=.95)],
+        source_digest=hashlib.sha256(raw).hexdigest(),input_style="STD").model_dump()
+    return {**result,**overrides}
+
+
+def test_cached_subject_analysis_is_bound_to_actual_uploaded_photo_before_reserving(auth,monkeypatch):
+    import hashlib
+    from api import main as M
+    source = make_jpeg_bytes("neutral")
+    different = make_jpeg_bytes("under_exposed")
+    reserved = []
+    monkeypatch.setattr(M,"_reserve_auto_grade",lambda *args: reserved.append(args))
+    context = {"subject_detection_mode":"auto","subject_analysis":cached_subject_analysis(source)}
+    response = client.post("/api/auto/grade",headers=auth,
+        data={"base_params":"{}","source_digest":hashlib.sha256(source).hexdigest(),"context":json.dumps(context)},
+        files={"file":("different.jpg",different,"image/jpeg")})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "subject_source_conflict"
+    assert reserved == []
+
+
+@pytest.mark.parametrize("changes", [{"source_digest":"b"*64},{"input_style":"NAT"}])
+def test_cached_subject_analysis_rejects_stale_source_or_signal(auth,changes):
+    import hashlib
+    raw = make_jpeg_bytes("neutral")
+    context = {"subject_detection_mode":"auto","subject_analysis":cached_subject_analysis(raw,**changes)}
+    response = client.post("/api/auto/grade",headers=auth,
+        data={"base_params":"{}","source_digest":hashlib.sha256(raw).hexdigest(),"context":json.dumps(context)},
+        files={"file":("p.jpg",raw,"image/jpeg")})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "subject_source_conflict"
+
+
+def test_cached_subject_analysis_survives_with_original_frozen_context(auth):
+    import hashlib
+    from agent.editing import EditingContext
+    raw = make_jpeg_bytes("neutral")
+    context = {"subject_detection_mode":"auto","subject_mode":"unknown",
+               "subject_analysis":cached_subject_analysis(raw)}
+    response = client.post("/api/auto/grade",headers=auth,
+        data={"base_params":"{}","source_digest":hashlib.sha256(raw).hexdigest(),"context":json.dumps(context)},
+        files={"file":("p.jpg",raw,"image/jpeg")})
+    assert response.status_code == 200,response.text
+    result = response.json()
+    assert result["context"] == EditingContext.model_validate(context).model_dump()
+    assert result["subject_protection"]["detection"]["source_digest"] == hashlib.sha256(raw).hexdigest()
+    assert result["subject_protection"]["detection"]["input_style"] == "STD"
 
 
 # ---- 鉴权与基本可用 ----

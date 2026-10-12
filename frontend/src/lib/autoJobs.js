@@ -2,6 +2,7 @@ import { contextSignature, parameterSignature } from './workspaceFlow.js'
 
 export const AUTO_JOB_TERMINAL = new Set(['succeeded', 'failed', 'cancelled'])
 const STAGE_TITLES = {
+  subjects: '识别人和肤色区域',
   measure: '测量照片', optimize: '修正影调与色彩', style: '风格化',
   rules: '规则保守调整', review: '视觉复核', save: '保存报告',
 }
