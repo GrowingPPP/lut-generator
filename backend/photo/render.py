@@ -89,13 +89,18 @@ def render_lut(lut: np.ndarray, img: np.ndarray) -> np.ndarray:
     return np.clip(out, 0.0, 1.0).astype(np.float32)
 
 
+def quantize_rgb8(img: np.ndarray) -> np.ndarray:
+    """将显示 RGB 量化为传给视觉模型的 8 位像素。"""
+    return (np.clip(img[:, :, :3], 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+
 def to_data_url(img: np.ndarray, max_side: int = PREVIEW_MAX_SIDE,
                 quality: int = PREVIEW_QUALITY) -> str:
     """float RGB(0..1)→ JPEG base64 data URL,供视觉复检发给模型。
 
     长边压到 max_side:模型侧 token 有上限(每张约 1024),压缩只影响传输体积。
     """
-    arr = (np.clip(img[:, :, :3], 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    arr = quantize_rgb8(img)
     pil = Image.fromarray(arr, "RGB")
     h, w = arr.shape[:2]
     if max(h, w) > max_side:

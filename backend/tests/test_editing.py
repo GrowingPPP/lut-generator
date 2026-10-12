@@ -25,7 +25,8 @@ def _unexpected_call(*args, **kwargs):
 
 def test_context_is_metadata_and_legacy_default_is_natural():
     assert normalize_context().goal_mode == "natural"
-    assert set(EditingContext.model_fields) == {"goal_mode", "locked_fields"}
+    assert set(EditingContext.model_fields) == {"goal_mode", "locked_fields", "subject_mode"}
+    assert normalize_context().subject_mode == "unknown"
     assert set(PARAM_FIELDS) == set(A.LutParams.__dataclass_fields__)
     assert normalize_context({"locked_fields": ["gamma", "gamma"]}).locked_fields == ["gamma"]
 
@@ -33,7 +34,7 @@ def test_context_is_metadata_and_legacy_default_is_natural():
 @pytest.mark.parametrize("context", [
     {"goal_mode": "sunset"}, {"locked_fields": ["clarity"]},
     {"locked_fields": [True]}, {"locked_fields": "temp"}, {"exposure": 1},
-    [], False,
+    [], False, {"subject_mode": "auto"}, {"subject_mode": True}, {"subject_mode": None},
 ])
 def test_unknown_context_values_are_rejected(context):
     with pytest.raises(ValidationError):

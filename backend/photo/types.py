@@ -117,9 +117,9 @@ class AutoGradeResult:
     style_applied_params: Optional[Dict[str, Any]] = None  # 真正生效的部分
     style_rejections: List[str] = field(default_factory=list)   # 被拒原因
     review: Optional[str] = None                     # 视觉复检意见
-    # 复检未执行的原因。三选一:disabled(用户关闭)/ failed(调用失败)/ no_client(未配置模型)。
-    # 必须与「复检完成但没意见」区分开 —— 否则失败会被显示成「你关的」。
+    # 区分没有效果变化、无有效意见、关闭与模型调用失败。
     review_skip_reason: Optional[str] = None
+    subject_protection: dict = field(default_factory=dict)
     degraded: bool = False                           # 未达标,已采用保守解
     usage: Dict[str, Any] = field(default_factory=dict)
     goal_status: Literal["met", "partially_met", "unchanged", "not_evaluated"] = "not_evaluated"

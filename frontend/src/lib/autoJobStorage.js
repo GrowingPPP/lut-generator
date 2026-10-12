@@ -1,4 +1,5 @@
-import { validateParams, PARAM_FIELDS, domainError } from './styleRecipe.js'
+import { validateParams, domainError } from './styleRecipe.js'
+import { contextSignature } from './workspaceFlow.js'
 
 const DB_NAME = 'chroma-auto-job-receipts'
 const keyFor = (userId, workspaceId) => JSON.stringify([String(userId), workspaceId])
@@ -27,8 +28,7 @@ function jobSummary(job, receipt) {
 export function autoJobReceipt(args, userId, now = Date.now()) {
   validateParams(args.params)
   const context = args.context || { goal_mode: 'natural', locked_fields: [] }
-  if (!['natural', 'preserve', 'style_only'].includes(context.goal_mode)
-      || !Array.isArray(context.locked_fields) || context.locked_fields.some(field => !PARAM_FIELDS.includes(field)))
+  if (!contextSignature(context))
     throw domainError('invalid_context', '作业上下文不正确')
   if (!UUID.test(args.request_id || '') || !UUID.test(args.workspace_id || '') || !userId || userId === 'guest')
     throw domainError('invalid_job_receipt', '作业需要有效账号和工作区标识')

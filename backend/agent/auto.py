@@ -115,6 +115,7 @@ def check_hard_rules(
     base_params: Dict[str, Any],
     img: np.ndarray,
     skin_mask: Optional[np.ndarray] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, List[str]]:
     """候选参数是否可接受。返回 (是否通过, 拒绝原因列表)。
 
@@ -159,7 +160,8 @@ def check_hard_rules(
 
     # R3:肤色保护(仅在有可测肤色时)。两个亮度无关的指标,详见 quality.skin_shift:
     # 色相/饱和度用严格阈值(真把肤色调坏了),明度用宽松阈值(只挡洗白/压死)。
-    if stats_baseline.skin_ratio > 0.02 and stats_baseline.skin_mean_rgb is not None:
+    if (normalize_context(context).subject_mode == "portrait"
+            and stats_baseline.skin_ratio > 0.02 and stats_baseline.skin_mean_rgb is not None):
         chroma, luma = Q.skin_shift(stats_baseline, after)
         if chroma > Q.SKIN_CHROMA_LIMIT:
             reasons.append(
@@ -248,7 +250,7 @@ def conservative_iterative(img: np.ndarray, base: Dict[str, Any],
         reasons = application_reasons(params, candidate, ctx, "rules")
         if not reasons:
             _, reasons = check_hard_rules(best_stats, candidate, baseline, Q.limits_for(baseline),
-                                          best_params, img, skin_mask)
+                                          best_params, img, skin_mask, ctx)
         if reasons:
             if blocked_reasons is not None:
                 blocked_reasons.extend(reasons)
@@ -424,8 +426,10 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
                   ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
     """把调整前后已渲染的编码 RGB 转到 sRGB 后发给模型做主观复检。
 
-    返回 (意见, usage, 跳过原因)。跳过原因三选一:
-      None      复检正常执行(可能仍返回空意见)
+    返回 (意见, usage, 未完成原因):
+      None      复检返回有效意见
+      "unchanged" 实际效果未变化,不评价前后改善
+      "empty"   模型未返回有效文字
       "failed"  调用失败(模型/网络)
       "no_client" 未配置客户端
 
@@ -435,9 +439,15 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
     """
     if client is None:
         return None, {}, "no_client"
+    if np.array_equal(before, after):
+        return None, {}, "unchanged"
     try:
         from photo.color_management import display_rgb
-        panel = R.side_by_side(display_rgb(before, base_photo_style), display_rgb(after, base_photo_style))
+        before_display = display_rgb(before, base_photo_style)
+        after_display = display_rgb(after, base_photo_style)
+        if np.array_equal(R.quantize_rgb8(before_display), R.quantize_rgb8(after_display)):
+            return None, {}, "unchanged"
+        panel = R.side_by_side(before_display, after_display)
         url = R.to_data_url(panel)
         text = VISION_REVIEW_PROMPT.replace("左边是原图", "左边是本次调整前的效果") + "\n" + context_prompt(context, "review")
         if style:
@@ -455,7 +465,8 @@ def vision_review(client: Any, before: np.ndarray, after: np.ndarray,
         )
         usage = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
         content = resp.choices[0].message.content if resp.choices else None
-        return (content.strip() or None if isinstance(content, str) else None), usage, None
+        opinion = content.strip() if isinstance(content, str) else ""
+        return opinion or None, usage, None if opinion else "empty"
     except AutoGradeCancelled:
         raise
     except Exception:
@@ -569,7 +580,7 @@ def auto_grade(
             reasons = application_reasons(base, candidate, ctx, "correction")
             if not reasons:
                 _, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
-                                              img, skin_mask)
+                                              img, skin_mask, ctx)
             if reasons:
                 rejections.extend(reasons)
                 blocked.extend(reasons)
@@ -634,7 +645,7 @@ def auto_grade(
             reasons = application_reasons(base, candidate, ctx, "style")
             if not reasons:
                 _, reasons = check_hard_rules(stats_current, candidate, stats0, limits, params,
-                                              img, skin_mask)
+                                              img, skin_mask, ctx)
             if reasons:
                 style_rejections = reasons
                 blocked.extend(reasons)
@@ -695,6 +706,8 @@ def auto_grade(
         review_skip_reason = "not_requested"
     elif not can_correct and not (style and can_style):
         review_skip_reason = "locked"
+    elif params == base:
+        review_skip_reason = "unchanged"
     else:
         notify("review", "running")
         after_img = R.render_lut(R.lut_from_params(params), img)
@@ -702,9 +715,9 @@ def auto_grade(
             client, baseline_img, after_img, style=style, context=ctx,
             base_photo_style=params["base_photo_style"])
         _accumulate_usage(usage_total, usage)
-        notify("review", "done" if review_skip_reason is None else "skipped",
-               reason=review_skip_reason)
-    if review_skip_reason and review_skip_reason != "failed":
+        if review_skip_reason is None:
+            notify("review", "done")
+    if review_skip_reason:
         notify("review", "skipped", reason=review_skip_reason)
 
     changed = params != base
@@ -733,6 +746,10 @@ def auto_grade(
         style_params=style_params, style_applied=style_applied,
         style_applied_params=style_applied_params, style_rejections=style_rejections,
         review=review, review_skip_reason=review_skip_reason,
+        subject_protection={"subject_mode": ctx.subject_mode,
+                            "enabled": ctx.subject_mode == "portrait" and stats0.skin_ratio > 0.02
+                                       and stats0.skin_mean_rgb is not None,
+                            "suspected_skin_ratio": stats0.skin_ratio, "method": "color_heuristic"},
         degraded=goal_status in {"partially_met", "unchanged"}, usage=usage_total,
         goal_status=goal_status, execution_status=execution_status,
         blocked_reasons=list(dict.fromkeys(blocked)),

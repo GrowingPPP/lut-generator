@@ -197,7 +197,7 @@ test('reviewSkipText 对未知原因与空值安全', () => {
 
 test('REVIEW_SKIP_TEXT 覆盖后端会返回的全部原因', () => {
   // 与 agent/auto.py 的 review_skip_reason 取值保持同步
-  assert.deepEqual(Object.keys(REVIEW_SKIP_TEXT).sort(), ['disabled', 'failed', 'no_client'])
+  assert.deepEqual(Object.keys(REVIEW_SKIP_TEXT).sort(), ['disabled', 'empty', 'failed', 'locked', 'no_client', 'not_requested', 'unchanged'])
 })
 
 test('goal-aware headline does not call blocked or skipped adjustments good photo quality', () => {

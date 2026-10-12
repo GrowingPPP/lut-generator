@@ -81,6 +81,10 @@ export const REVIEW_SKIP_TEXT = {
   disabled: '已关闭视觉复核,本次仅依据客观数据调整。',
   failed: '视觉复核未能完成(模型或网络问题),本次仅依据客观数据调整。',
   no_client: '服务未配置模型,本次未做视觉复核。',
+  unchanged: '实际效果未变化，本次跳过前后改善评价。',
+  empty: '模型未返回有效意见，视觉复核未完成。',
+  locked: '可调字段已保护，本次未做视觉复核。',
+  not_requested: '本次未请求视觉复核。',
 }
 
 export function reviewSkipText(reason) {

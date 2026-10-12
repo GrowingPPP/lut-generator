@@ -6,6 +6,7 @@ import {
   styleDiff,
 } from '../lib/autoGrade.js'
 import { contextSignature } from '../lib/workspaceFlow.js'
+import { normalizeSubjectMode, SUBJECT_MODE_LABELS } from '../lib/samples.js'
 
 const GOAL_LABELS = {
   natural: '自然校正',
@@ -28,6 +29,15 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
   const goal = GOAL_LABELS[requestContext?.goal_mode || result.goal_mode] || '未记录'
   const protectedCount = contextSignature(requestContext)
     ? new Set(requestContext.locked_fields).size : null
+  const protection = result.subject_protection
+  const hasProtection = protection && normalizeSubjectMode(protection.subject_mode) === protection.subject_mode
+    && typeof protection.enabled === 'boolean' && protection.method === 'color_heuristic'
+  const subjectMode = hasProtection ? protection.subject_mode : requestContext?.subject_mode
+  const subjectLabel = subjectMode === undefined ? '未记录'
+    : SUBJECT_MODE_LABELS[normalizeSubjectMode(subjectMode)]
+  const suspectedRatio = hasProtection && Number.isFinite(protection.suspected_skin_ratio)
+    && protection.suspected_skin_ratio >= 0 && protection.suspected_skin_ratio <= 1
+    ? `${(protection.suspected_skin_ratio * 100).toFixed(1)}%` : null
   const sampleId = result._sample_id ?? result.main_sample_id
   const sampleName = result._sample_name || (sampleId ? '样张名称未记录' : '未记录')
   const recordedTime = result._applied_at || result.created_at
@@ -44,6 +54,11 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
           <dd title={sampleId || undefined}>{sampleName}</dd>
           <dt>当次目标</dt>
           <dd>{goal}</dd>
+          <dt>当次照片内容</dt>
+          <dd>{subjectLabel}{subjectMode === 'portrait' || subjectMode === 'non_portrait' ? '（用户标注）' : ''}</dd>
+          <dt>人物颜色保护</dt>
+          <dd>{hasProtection ? protection.enabled ? '已启用 · 疑似肤色颜色' : '未启用' : '执行情况未记录'}</dd>
+          {suspectedRatio && <><dt>疑似肤色颜色占比</dt><dd>{suspectedRatio}</dd></>}
           <dt>已保护</dt>
           <dd>{protectedCount === null ? '未记录' : `${protectedCount} 项参数`}</dd>
           <dt>{result._applied_at ? '应用时间' : '报告时间'}</dt>
@@ -51,6 +66,7 @@ export default function AutoRetouchReport({ result, beforeParams, onUndo, histor
             {validTime ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleString('zh-CN')}</time> : '未记录'}
           </dd>
         </dl>
+        {hasProtection && <p className="workspace-note">疑似肤色只依据颜色范围，当前没有人物检测或分割。</p>}
       </header>
       {historical && (
         <p className="workspace-note">以下为当次报告。参数、主样张或创作上下文已变化，或当次上下文未记录。</p>

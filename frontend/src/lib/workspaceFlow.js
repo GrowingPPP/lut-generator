@@ -1,4 +1,5 @@
 import { PARAM_FIELDS } from './styleRecipe.js'
+import { normalizeSubjectMode } from './samples.js'
 
 export function parameterSignature(params) {
   return JSON.stringify(PARAM_FIELDS.map((field) => [field, params[field]]))
@@ -8,10 +9,13 @@ export function contextSignature(context) {
   if (!context || typeof context !== 'object' || Array.isArray(context)
     || !['natural', 'preserve', 'style_only'].includes(context.goal_mode)
     || !Array.isArray(context.locked_fields)
-    || context.locked_fields.some(field => !PARAM_FIELDS.includes(field))) return null
+    || context.locked_fields.some(field => !PARAM_FIELDS.includes(field))
+    || (Object.hasOwn(context, 'subject_mode')
+      && normalizeSubjectMode(context.subject_mode) !== context.subject_mode)) return null
   return JSON.stringify({
     goal_mode: context.goal_mode,
     locked_fields: [...new Set(context.locked_fields)].sort(),
+    subject_mode: normalizeSubjectMode(context.subject_mode),
   })
 }
 

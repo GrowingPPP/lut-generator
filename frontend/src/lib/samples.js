@@ -1,6 +1,21 @@
 import { inputContract } from './styleRecipe.js'
 import { normalizePhoto } from './photoApi.js'
 
+export const SUBJECT_MODE_LABELS = Object.freeze({ unknown: '未确认', portrait: '包含人物', non_portrait: '无人物' })
+
+export function normalizeSubjectMode(value) {
+  return typeof value === 'string' && Object.hasOwn(SUBJECT_MODE_LABELS, value) ? value : 'unknown'
+}
+
+export function editingContextForSample(workspace, sample) {
+  const metadata = sample?.metadata || sample
+  return {
+    goal_mode: workspace?.goal_mode || 'natural',
+    locked_fields: [...(workspace?.locked_fields || [])],
+    subject_mode: normalizeSubjectMode(metadata?.subject_mode),
+  }
+}
+
 export async function contentDigest(value) {
   const bytes =
     value instanceof Blob
@@ -36,6 +51,7 @@ export async function decodeSample(file, params, existing) {
     return {
       metadata: {
         ...existing,
+        subject_mode: normalizeSubjectMode(existing?.subject_mode),
         id: existing?.id || crypto.randomUUID(),
         name: file.name,
         source_digest: digest,
@@ -71,7 +87,8 @@ export async function restoreSample(blob, metadata) {
     canvas.height = img.naturalHeight
     canvas.getContext('2d').drawImage(img, 0, 0)
     return {
-      metadata: { ...metadata, origin: 'restored_preview', needs_rebind: true },
+      metadata: { ...metadata, subject_mode: normalizeSubjectMode(metadata?.subject_mode),
+        origin: 'restored_preview', needs_rebind: true },
       file: null,
       canvas,
       blob,

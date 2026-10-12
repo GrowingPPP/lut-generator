@@ -48,11 +48,17 @@ def test_style_cancellation_exception_is_not_swallowed():
 
 
 def test_vision_cancellation_exception_is_not_swallowed():
+    calls, events = [], []
     def create(**kwargs):
+        calls.append(kwargs)
         raise A.AutoGradeCancelled()
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     with pytest.raises(A.AutoGradeCancelled):
-        A.auto_grade(make_fixture('neutral'), {}, client=client, use_vision=True)
+        A.auto_grade(make_fixture('neutral'), {}, '轻微增加对比', client=client, use_vision=True,
+                     context={'goal_mode': 'style_only'}, style_extractor=lambda *args: {'contrast': .02},
+                     progress=events.append)
+    assert len(calls) == 1
+    assert events[-1]['stage'] == 'review' and events[-1]['state'] == 'running'
 
 
 def test_resume_skips_completed_style_and_keeps_new_report_baseline():

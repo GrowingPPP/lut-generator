@@ -1,6 +1,7 @@
 """作业注册表纯回归，不连接数据库或调用真实模型。"""
 from copy import deepcopy
 from io import BytesIO
+import hashlib
 import json
 import sys
 from threading import Event, Thread
@@ -12,6 +13,57 @@ import pytest
 from api.auto_jobs import (AutoJobRegistry, JobLimitExceeded, JobNotFound, JobRequestConflict,
                            JobRequestExpired, JobRequestBlocked)
 from agent.auto import AutoGradeCancelled
+
+
+@pytest.mark.parametrize("mode,change,allowed", [
+    (None, None, True), ("unknown", None, True),
+    ("portrait", None, False), ("non_portrait", None, False),
+    ("unknown", "file", False), ("unknown", "params", False),
+    ("unknown", "recorded_subject", False),
+])
+def test_saved_legacy_fingerprint_replay_defaults_to_unknown_only(monkeypatch, mode, change, allowed):
+    from fastapi import HTTPException, UploadFile
+    from api import auto_jobs
+    from api.models import LutParamsModel
+
+    job_id, workspace_id = str(uuid4()), str(uuid4())
+    raw = b"original source bytes"
+    params = LutParamsModel().model_dump()
+    legacy_context = {"goal_mode": "preserve", "locked_fields": []}
+    payload = {"style": None, "use_vision": False, "max_rounds": 2,
+               "context": legacy_context, "actual_digest": hashlib.sha256(raw).hexdigest(),
+               "params": params, "workspace_id": workspace_id, "source_digest": None,
+               "main_sample_id": "source", "sample_origin": "source", "continue_from": None}
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    saved = {"id": job_id, "status": "succeeded", "persisted": True,
+             "result": {"job_fingerprint": fingerprint, "context": legacy_context}}
+    monkeypatch.setitem(sys.modules, "api.main", SimpleNamespace(
+        LutParamsModel=LutParamsModel, MAX_AUTO_IMAGE_BYTES=1024,
+        _prepare_auto_grade=None, _compute_auto_grade=None, _persist_auto_grade=None, _reserve_auto_grade=None))
+    monkeypatch.setattr(auto_jobs, "require_single_worker", lambda: None)
+    monkeypatch.setattr(auto_jobs, "registry", make_registry()[0])
+    monkeypatch.setattr(auto_jobs, "_saved_job", lambda *_: saved)
+    context = {**legacy_context, **({"subject_mode": mode} if mode is not None else {})}
+    if change == "file":
+        raw += b"changed"
+    elif change == "params":
+        params = {**params, "exposure": .1}
+    elif change == "recorded_subject":
+        saved["result"]["context"] = {**legacy_context, "subject_mode": "unknown"}
+
+    def replay():
+        return auto_jobs.create_job(request=SimpleNamespace(headers={}),
+            file=UploadFile(file=BytesIO(raw)), base_params=json.dumps(params),
+            style=None, use_vision=False, max_rounds=2, workspace_id=workspace_id,
+            context=json.dumps(context), source_digest=None, main_sample_id="source",
+            continue_from=None, request_id=job_id, sample_origin="source", user={"id": 1})
+
+    if allowed:
+        assert replay() is saved
+    else:
+        with pytest.raises(HTTPException) as error:
+            replay()
+        assert error.value.status_code == 409
 
 
 class ManualExecutor:

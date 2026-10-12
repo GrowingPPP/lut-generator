@@ -270,7 +270,7 @@ class AutoJobRegistry:
                          "round": event.get("round") or job.stages[stage]["round"]}
                 if event.get("reason") in {"goal", "locked", "no_issues", "no_client", "disabled",
                                            "not_requested", "not_needed", "failed", "blocked", "unchanged",
-                                           "no_writable_fields", "continued"}:
+                                           "no_writable_fields", "continued", "empty"}:
                     value["reason"] = event["reason"]
                 job.progress = value
                 job.stages[stage] = value
@@ -385,6 +385,11 @@ def _request_blocked():
                               "message": "此请求已明确结束，不会重新提交；请使用新的请求标识重新开始"})
 
 
+def _request_fingerprint(data):
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False,
+                                     allow_nan=False).encode()).hexdigest()
+
+
 @router.post("", status_code=202)
 def create_job(request: Request, file: UploadFile = File(...),
                base_params: str = Form(..., max_length=8192), style: Optional[str] = Form(None),
@@ -416,11 +421,12 @@ def create_job(request: Request, file: UploadFile = File(...),
     request_data = {"style": (style or "").strip()[:200] or None,
                     "use_vision": use_vision, "max_rounds": max_rounds,
                     "context": normalize_context(ctx).model_dump(), "actual_digest": actual_digest}
-    fingerprint = hashlib.sha256(json.dumps({
+    fingerprint_data = {
         **request_data, "params": parsed.model_dump(), "workspace_id": workspace_id,
         "source_digest": source_digest, "main_sample_id": main_sample_id,
         "sample_origin": sample_origin, "continue_from": continue_from,
-    }, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    }
+    fingerprint = _request_fingerprint(fingerprint_data)
     try:
         repeated = registry.replay(job_id, user["id"], fingerprint)
         if repeated is not None:
@@ -435,7 +441,15 @@ def create_job(request: Request, file: UploadFile = File(...),
         raise _request_blocked() from exc
     saved = _saved_job(job_id, user["id"], workspace_id)
     if saved:
-        if saved["result"].get("job_fingerprint") != fingerprint:
+        saved_fingerprint = saved["result"].get("job_fingerprint")
+        matches = saved_fingerprint == fingerprint
+        saved_context = saved["result"].get("context")
+        if (not matches and request_data["context"]["subject_mode"] == "unknown"
+                and isinstance(saved_context, dict) and "subject_mode" not in saved_context):
+            legacy_context = {key: value for key, value in request_data["context"].items()
+                              if key != "subject_mode"}
+            matches = saved_fingerprint == _request_fingerprint({**fingerprint_data, "context": legacy_context})
+        if not matches:
             raise HTTPException(409, "请求标识已用于不同的修图条件，请重新开始")
         return saved
     if continue_from:

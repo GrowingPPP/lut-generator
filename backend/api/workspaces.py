@@ -22,7 +22,7 @@ from storage import db
 router = APIRouter(prefix="/api/workspaces")
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_BATCH_BYTES = 64 * 1024 * 1024
-MEASUREMENT_VERSION = "icc-srgb-exif-lanczos2048-stats512-v2"
+MEASUREMENT_VERSION = "icc-srgb-exif-lanczos2048-stats512-subject-v3"
 _engine_path = Path(__file__).resolve().parents[1] / "lut_engine"
 ENGINE_VERSION = "chroma-lut-" + hashlib.sha256(b"".join(
     path.read_bytes() for path in sorted(_engine_path.glob("*.py")))).hexdigest()[:12]
@@ -233,6 +233,7 @@ class ValidationSample(BaseModel):
     source_digest: Optional[str] = Field(None,max_length=128)
     origin: Literal["source","restored_preview"] = "source"
     name: Optional[str] = Field(None,max_length=255)
+    subject_mode: Literal["unknown","portrait","non_portrait"] = "unknown"
 
     @field_validator("input_contract")
     @classmethod
@@ -267,9 +268,10 @@ def measure_sample(raw, sample, params, baseline_lut, current_lut):
         risks.append("高光裁剪增加")
     if dark_delta > Q.MAX_CLIP_INCREASE_PCT:
         risks.append("暗部裁剪增加")
-    if chroma is not None and chroma > Q.SKIN_CHROMA_LIMIT:
+    skin_protection = sample.subject_mode == "portrait" and skin_available
+    if skin_protection and chroma > Q.SKIN_CHROMA_LIMIT:
         risks.append("肤色色彩偏移")
-    if luma is not None and luma > Q.SKIN_LUMA_LIMIT:
+    if skin_protection and luma > Q.SKIN_LUMA_LIMIT:
         risks.append("肤色明度漂移")
     return {"id":sample.id,"status":"attention" if risks else "no_new_risk",
             "label":"待关注" if risks else "暂未发现新增风险","risks":risks,
@@ -279,6 +281,8 @@ def measure_sample(raw, sample, params, baseline_lut, current_lut):
             "preview_dimensions":{"width":image.shape[1],"height":image.shape[0]},
             "measurement_dimensions":{"width":measured.shape[1],"height":measured.shape[0]},
             "sampled_pixels":after.sampled_px,"skin_pixels":skin_pixels,
+            "subject_mode":sample.subject_mode,"skin_evidence":"suspected_color",
+            "skin_protection_applied":skin_protection,
             "skin_measurable":skin_available,"skin_chroma_shift":chroma,"skin_luma_shift":luma,
             "highlight_clip_delta_pct":bright_delta,"shadow_clip_delta_pct":dark_delta,
             "baseline":asdict(before),"current":asdict(after),
@@ -341,6 +345,7 @@ def validate_samples(workspace_id: str, request: Request, params: str = Form(...
             if error:
                 results.append({"id":sample.id,"status":"unmeasurable","label":"无法测量",
                                 "reason":error,"source_digest":sample.source_digest,
+                                "subject_mode":sample.subject_mode,
                                 "origin":sample.origin,"input_contract":sample.input_contract})
         out = {"workspace_id":workspace_id,"params_digest":params_digest(full),
                "engine_version":ENGINE_VERSION,"measurement_version":MEASUREMENT_VERSION,

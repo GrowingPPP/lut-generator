@@ -8,8 +8,8 @@ from api.models import LutParamsModel
 from lut_engine import LutParams
 
 
-APP = Path(__file__).resolve().parents[2] / "frontend/src/App.jsx"
-PARAMETER_CONTROLS = APP.parent / "lib/parameterControls.js"
+GENERATOR = Path(__file__).resolve().parents[2] / "frontend/src/GenerateView.jsx"
+PARAMETER_CONTROLS = GENERATOR.parent / "lib/parameterControls.js"
 
 
 def _value_schema(schema):
@@ -30,7 +30,7 @@ def _ui_ranges():
             r"\{ key: '(\w+)', label: '[^']*', min: (-?[\d.]+), max: (-?[\d.]+)", source
         )
     }
-    mapping = re.search(r'aria-label="V-Log 显示映射"(.*?)onChange=', APP.read_text(encoding="utf-8"), re.S)
+    mapping = re.search(r'aria-label="V-Log 显示映射"(.*?)onChange=', GENERATOR.read_text(encoding="utf-8"), re.S)
     assert mapping, "V-Log 显示映射控件未定义"
     low = re.search(r"min=\{([\d.]+)\}", mapping.group(1))
     high = re.search(r"max=\{([\d.]+)\}", mapping.group(1))
@@ -59,7 +59,7 @@ def test_ai_absolute_value_bounds_match_api_and_manual_controls():
         if key not in MANUAL_EFFECT_FIELDS:
             assert _bounds(_value_schema(ai[key])) == bounds, f"{key}: AI 范围与手调控件不一致"
     assert _value_schema(ai["base_photo_style"])["enum"] == api["base_photo_style"]["enum"]
-    styles = re.search(r"const PHOTO_STYLES = \[(.*?)\n\]", APP.read_text(encoding="utf-8"), re.S)
+    styles = re.search(r"const PHOTO_STYLES = \[(.*?)\n\]", GENERATOR.read_text(encoding="utf-8"), re.S)
     assert styles, "输入基准控件选项未定义"
     assert re.findall(r"value: '([^']+)'", styles.group(1)) == api["base_photo_style"]["enum"]
     for key in ("lift", "gamma", "gain"):

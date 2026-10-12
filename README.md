@@ -315,6 +315,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 | [docs/specs/generation-layout-review.md](docs/specs/generation-layout-review.md) | 生成页布局评估、照片与任务工具的重构方案、AI 状态表达、实施任务及布局概念 |
 | [docs/specs/sample-photo-compatibility.md](docs/specs/sample-photo-compatibility.md) | 相机 JPEG 主照片与缩略图兼容、明确 Adobe RGB 转换、上传确认及实际样张验收 |
 | [docs/specs/ai-retouch-photo-consistency.md](docs/specs/ai-retouch-photo-consistency.md) | 实际模型修图、预览与原尺寸导出的像素核对、JPEG 压缩边界及修图质量发现 |
+| [docs/specs/ai-quality-and-loading.md](docs/specs/ai-quality-and-loading.md) | 非人物误保护、零变化／空复核修复，样张内容上下文与前端按需加载验收 |
 | [docs/specs/theme-design.md](docs/specs/theme-design.md) | 四种界面主题选择、偏好恢复、照片与图表配色边界、对比度与浏览器验收 |
 | [docs/specs/test-plan.md](docs/specs/test-plan.md) | 测试分层、合成样张、硬校验断言 |
 | [docs/leftover-issues.md](docs/leftover-issues.md) | 已知问题的记录与处理结果 |

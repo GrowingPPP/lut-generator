@@ -19,6 +19,7 @@ class EditingContext(BaseModel):
 
     goal_mode: Literal["natural", "preserve", "style_only"] = "natural"
     locked_fields: list[str] = Field(default_factory=list)
+    subject_mode: Literal["unknown", "portrait", "non_portrait"] = "unknown"
 
     @field_validator("locked_fields")
     @classmethod
@@ -88,6 +89,12 @@ def application_reasons(before: dict, candidate: dict,
 def context_prompt(context: EditingContext | dict | None, stage: str) -> str:
     ctx = normalize_context(context)
     text = "编辑上下文:" + json.dumps(ctx.model_dump(), ensure_ascii=False)
+    if ctx.subject_mode == "portrait":
+        text += "\n用户确认这张照片包含人物;按疑似肤色颜色区域限制漂移。颜色掩膜不是人脸检测或人物分割。"
+    elif ctx.subject_mode == "non_portrait":
+        text += "\n用户确认这张照片无人物;疑似肤色颜色统计不能称为确定肤色或作为人物证据。"
+    else:
+        text += "\n这张照片是否包含人物尚未确认;疑似肤色只表示颜色命中,不能推断人物,不启用人物肤色硬保护。"
     if ctx.goal_mode == "preserve":
         text += "\n保留氛围:暗调和暖冷倾向属于观察,不要默认视为错误或要求归一化。"
         if stage == "correction":

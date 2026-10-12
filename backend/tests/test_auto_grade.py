@@ -153,12 +153,12 @@ def test_pipeline_rejects_out_of_range_raw_proposal_before_clamping():
 # 硬校验:每条规则一拒一过
 # --------------------------------------------------------------------------
 
-def _check(img, base, delta, before=None):
+def _check(img, base, delta, before=None, context=None):
     """在真实图片上跑硬校验(集成视角)。"""
     stats_before = before if before is not None else S.analyze(img)
     candidate = A.clamp_params(A.merge_params(base, delta))
     return A.check_hard_rules(stats_before, candidate, stats_before,
-                              Q.limits_for(stats_before), base, img)
+                              Q.limits_for(stats_before), base, img, context=context)
 
 
 # 构造式基准 stats:规则测试用它隔离验证,不受真实图片副作用干扰。
@@ -203,7 +203,7 @@ def test_r2_rejects_shadow_crush_increase():
 
 def test_r3_rejects_skin_shift():
     img = make_fixture("skin_tone")
-    ok, reasons = _check(img, {}, {"temp": 900, "saturation": 0.5})
+    ok, reasons = _check(img, {}, {"temp": 900, "saturation": 0.5}, context={"subject_mode": "portrait"})
     assert not ok
     assert any("肤色" in r for r in reasons), reasons
 
@@ -674,6 +674,7 @@ def test_style_cannot_bypass_hard_rules():
     """风格阶段必须再过一次硬校验 —— 这是最容易被忽略的后门。"""
     img = make_fixture("skin_tone")
     r = A.auto_grade(img, {}, "日系清透", client=stub_client([], review=None), use_vision=False,
+                     context={"subject_mode": "portrait"},
                      style_extractor=_style_extractor({"temp": 900, "saturation": 0.5}))
     applied = [s for s in r.steps if s.stage == "style" and s.applied]
     assert not applied, "风格提议绕过了硬校验"
@@ -804,6 +805,7 @@ def test_rejected_style_does_not_masquerade_as_applied():
     img = make_fixture("skin_tone")      # 有可测肤色,大色温改动必被拒
     r = A.auto_grade(img, {}, "极暖", client=stub_client([], review=None),
                      use_vision=False,
+                     context={"subject_mode": "portrait"},
                      style_extractor=_style_extractor({"temp": 900, "saturation": 0.5}))
     assert r.style_params, "提议本身应被记录,便于排查"      # 提议保留
     assert r.style_applied is False, "被拒时 style_applied 必须为 False"
@@ -875,7 +877,8 @@ def test_pure_exposure_does_not_trigger_skin_rule():
     base = A.S.analyze(img, mask)
     for ev in (0.2, 0.3, 0.5, 0.6):
         ok, reasons = A.check_hard_rules(
-            base, A.clamp_params({"exposure": ev}), base, Q.limits_for(base), {}, img, mask)
+            base, A.clamp_params({"exposure": ev}), base, Q.limits_for(base), {}, img, mask,
+            {"subject_mode": "portrait"})
         assert not any("肤色色相" in r for r in reasons), \
             f"纯曝光 +{ev}EV 被误判为肤色色相偏移:{reasons}"
 
@@ -887,7 +890,8 @@ def test_skin_hue_damage_is_still_blocked():
     base = A.S.analyze(img, mask)
     for delta in ({"saturation": 0.9}, {"hue": 40}, {"hue": -60}):
         ok, reasons = A.check_hard_rules(
-            base, A.clamp_params(delta), base, Q.limits_for(base), {}, img, mask)
+            base, A.clamp_params(delta), base, Q.limits_for(base), {}, img, mask,
+            {"subject_mode": "portrait"})
         assert not ok, f"{delta} 应被拦下"
         assert any("肤色" in r for r in reasons), reasons
 

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:loading": "node scripts/check_build_loading.mjs",
     "test": "node --test 'scripts/test_*.mjs'",
     "preview": "vite preview"
   },
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "0.25.12",
     "vite": "^6.0.7"
   }
 }

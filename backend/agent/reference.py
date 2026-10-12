@@ -103,7 +103,7 @@ def match_reference(image, reference, params, context=None, *, color=True, tone=
     from agent.auto import check_hard_rules
     for _ in range(5):
         allowed, reasons = check_hard_rules(measured_before, candidate, measured_before,
-                                           Q.limits_for(measured_before), before, risk_image, skin)
+                                           Q.limits_for(measured_before), before, risk_image, skin, ctx)
         if allowed and measure(candidate, 33) <= distance_before + 1e-9:
             break
         for field, channel, _, _ in coordinates:

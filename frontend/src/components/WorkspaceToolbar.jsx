@@ -1,5 +1,6 @@
 import SelectField from './SelectField.jsx'
 import Tooltip from './ui/Tooltip.jsx'
+import { editingContextForSample, SUBJECT_MODE_LABELS } from '../lib/samples.js'
 const GOALS = [
   ['preserve', '保留氛围', '基础校正保留全局曝光、冷暖与绿洋红；明确的风格要求可调整未锁定项。'],
   ['natural', '自然校正', '按照片测量结果克制地校正亮度、色偏和影调。'],
@@ -13,7 +14,7 @@ const SAVE_STATES = {
   conflict: '另一标签页已更新草稿',
 }
 
-export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHistory, mode = 'full' }) {
+export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHistory, mode = 'full', sample, onSubjectChange }) {
   const {
     workspace,
     setGoal,
@@ -30,6 +31,7 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
   } = editor
   const showHeader = mode !== 'context'
   const showContext = mode !== 'header'
+  const showSubject = showContext && sample && typeof onSubjectChange === 'function'
   const purposeControl = (
     <label className="purpose-select">
       本次手调与对话用途
@@ -63,6 +65,13 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
             ))}
           </SelectField>
         </label>}
+        {showSubject && <label>
+          AI 主样张照片内容
+          <SelectField aria-label="AI 主样张照片内容" value={editingContextForSample(workspace, sample).subject_mode}
+            onChange={event => onSubjectChange(event.target.value)} disabled={busy}>
+            {Object.entries(SUBJECT_MODE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </SelectField>
+        </label>}
         {showHeader && <span className={`draft-status ${saveStatus}`} role="status">
           {SAVE_STATES[saveStatus] || saveStatus}
         </span>}
@@ -82,6 +91,13 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
         {GOALS.find(([v]) => v === workspace.goal_mode)?.[2]} · 已保护{' '}
         {workspace.locked_fields.length} 项参数
       </p>}
+      {showSubject && <p className="workspace-note">
+        AI 主样张：{sample.metadata?.name || sample.name || '未命名照片'}。有人物的照片请选择“包含人物”，限制疑似肤色区域的色彩漂移。此标注只用于这张样张。
+      </p>}
+      {showSubject && <details className="workspace-advanced">
+        <summary>人物颜色保护说明</summary>
+        <p className="workspace-note">疑似肤色只依据颜色范围，当前没有人物检测或分割。未确认或无人物时，不启用人物颜色保护。</p>
+      </details>}
       {showContext && (mode === 'context' ? (
         <details className="workspace-advanced">
           <summary>高级设置 · 调整贡献归类</summary>

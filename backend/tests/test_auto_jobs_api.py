@@ -28,7 +28,7 @@ class ManualExecutor:
 
 client = TestClient(app)
 DEFAULT_PARAMS = LutParamsModel().model_dump()
-CONTEXT = {"goal_mode": "natural", "locked_fields": []}
+CONTEXT = {"goal_mode": "natural", "locked_fields": [], "subject_mode": "unknown"}
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +123,8 @@ def test_replayed_uuid_is_one_task_one_quota_and_conflicting_conditions_are_reje
     assert len(executor.tasks) == 1 and quota == []
     changed = {**data, "base_params": json.dumps({**DEFAULT_PARAMS, "contrast": .1})}
     assert post(headers, raw, changed).status_code == 409
+    changed_subject = {**data, "context": json.dumps({**CONTEXT, "subject_mode": "portrait"})}
+    assert post(headers, raw, changed_subject).status_code == 409
     other_raw, other = request_data(wid, raw=make_jpeg_bytes("neutral"), request_id=data["request_id"])
     assert post(headers, other_raw, other).status_code == 409
     executor.next()
@@ -297,7 +299,7 @@ def test_continuation_uses_the_formal_candidate_as_a_new_request_and_report(owne
     assert not executor.tasks
 
 
-@pytest.mark.parametrize("change", ["params", "context", "workspace", "sample", "sha", "style", "vision"])
+@pytest.mark.parametrize("change", ["params", "context", "subject", "workspace", "sample", "sha", "style", "vision"])
 def test_continuation_rejects_changed_formal_candidate_conditions(owner, clean, monkeypatch, change):
     _, headers, wid = owner
     _, executor = clean
@@ -311,6 +313,8 @@ def test_continuation_rejects_changed_formal_candidate_conditions(owner, clean, 
         data["base_params"] = json.dumps({**completed["result"]["params"], "exposure": .2})
     elif change == "context":
         data["context"] = json.dumps({"goal_mode": "preserve", "locked_fields": []})
+    elif change == "subject":
+        data["context"] = json.dumps({**CONTEXT, "subject_mode": "portrait"})
     elif change == "workspace":
         data["workspace_id"] = client.post("/api/workspaces", headers=headers, json={}).json()["id"]
     elif change == "sample":

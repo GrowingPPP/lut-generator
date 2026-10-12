@@ -1,4 +1,4 @@
-import { parameterSignature } from './workspaceFlow.js'
+import { contextSignature, parameterSignature } from './workspaceFlow.js'
 
 export const AUTO_JOB_TERMINAL = new Set(['succeeded', 'failed', 'cancelled'])
 const STAGE_TITLES = {
@@ -10,6 +10,8 @@ const SKIP_TEXT = {
   no_client: '未启用模型', disabled: '已关闭', not_requested: '未请求',
   not_needed: '无需兜底', failed: '未能完成', no_writable_fields: '无可调字段',
   continued: '此前阶段已完成，本次保留',
+  unchanged: '实际效果未变化，跳过前后改善评价',
+  empty: '模型未返回有效意见，视觉复核未完成',
 }
 const ATTEMPT_TEXT = {
   failed: '尝试结束，未应用：模型未能完成',
@@ -69,13 +71,12 @@ export function sameAutoConditions(captured, current) {
 }
 
 export function sameAutoMetadata(captured, current) {
-  const contextKey = (context) => JSON.stringify({ goal_mode: context?.goal_mode || 'natural',
-    locked_fields: [...(context?.locked_fields || [])].sort() })
+  const frozenContext = contextSignature(captured?.context)
   return !!captured && captured.workspace_id === current.workspace_id
     && captured.source_digest === current.source_digest
     && captured.main_sample_id === current.main_sample_id
     && parameterSignature(captured.params) === parameterSignature(current.params)
-    && contextKey(captured.context) === contextKey(current.context)
+    && frozenContext !== null && frozenContext === contextSignature(current.context)
 }
 
 export function bindAutoRequest(summary, current) {
@@ -117,14 +118,13 @@ export function jobProgressSteps(job) {
 
 export function matchingAutoResult(request, completed) {
   const result = completed?.result
-  const contextKey = (context) => JSON.stringify({ goal_mode: context?.goal_mode || 'natural',
-    locked_fields: [...(context?.locked_fields || [])].sort() })
+  const frozenContext = contextSignature(request.context)
   return completed?.id === request.request_id && !!result?.before_params
     && result.workspace_id === (request.workspace_id || null)
     && result.source_digest === (request.source_digest || null)
     && result.main_sample_id === (request.main_sample_id || null)
     && parameterSignature(result.before_params) === parameterSignature(request.params)
-    && contextKey(result.context) === contextKey(request.context)
+    && frozenContext !== null && contextSignature(result.context) === frozenContext
 }
 
 export async function pollAutoJob(id, {

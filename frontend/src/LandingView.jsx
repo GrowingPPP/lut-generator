@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ThemePicker from './components/ThemePicker.jsx'
-import { applyLUTToImageData, defaultParams, generateLUT } from './lib/lutEngine.js'
+import './Landing.css'
 
 // 首屏展示的样张与用它演示的影调。参数刻意选成产品 UI 里也能手调出来的值,
 // 且全部落在 App.jsx PARAM_GROUPS 的 min/max 区间内 —— 落地页演示的效果
@@ -9,7 +9,6 @@ const HERO_PHOTO = '/landing/hero.jpg'
 const PREVIEW_PHOTO = '/landing/preview.jpg'
 
 const HERO_LOOK = {
-  ...defaultParams(),
   temp: 350,
   tint: 60,
   contrast: 0.18,
@@ -28,7 +27,6 @@ const HERO_LOOK = {
 // 「实时预览」区块演示的另一档影调。与 HERO_LOOK 明显不同(更冷、对比更强),
 // 否则同一个页面里出现两次同款调色,会显得像同一个效果贴了两遍。
 const PREVIEW_LOOK = {
-  ...defaultParams(),
   temp: -280,
   tint: -40,
   contrast: 0.32,
@@ -95,6 +93,8 @@ function useGradedSample(src, look) {
     let canvas
     ;(async () => {
       try {
+        const { applyLUTToImageData, generateLUT } = await import('./lib/lutEngine.js')
+        if (!alive) return
         const img = new Image()
         img.src = src
         await img.decode()

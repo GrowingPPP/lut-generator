@@ -116,7 +116,7 @@ def test_restore_atomic_input_and_lock_conflict(headers):
     body.update(unlock_conflicts=True,allow_input_change=True)
     restored = client.post(route,headers=headers,json=body).json()
     assert restored["params"] == version["params"]
-    assert restored["context"] == {"goal_mode":"style_only","locked_fields":["gain"]}
+    assert restored["context"] == {"goal_mode":"style_only","locked_fields":["gain"],"subject_mode":"unknown"}
     assert client.get(f"/api/workspaces/{wid}/versions/{version['id']}",headers=headers).json()["context"]["locked_fields"] == ["temp"]
 
 

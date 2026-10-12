@@ -65,7 +65,7 @@ def downsample(img: np.ndarray, max_side: int = MAX_ANALYZE_SIDE) -> np.ndarray:
 
 
 def _ycbcr_mask(rgb255: np.ndarray) -> np.ndarray:
-    """RGB(0..255) → 肤色布尔掩码。"""
+    """RGB(0..255) → 疑似肤色颜色掩码,不提供人物证据。"""
     ycc = rgb255 @ _YCC.T + np.array([0.0, 128.0, 128.0], np.float32)
     y, cb, cr = ycc[:, 0], ycc[:, 1], ycc[:, 2]
     r, g, b = rgb255[:, 0], rgb255[:, 1], rgb255[:, 2]
@@ -180,7 +180,7 @@ def analyze(img: np.ndarray, skin_mask: Optional[np.ndarray] = None) -> PhotoSta
 
 
 def skin_mask_of(img: np.ndarray) -> np.ndarray:
-    """取图像的降采样肤色掩码(扁平 bool 数组),供后续各轮固定使用。
+    """取降采样疑似肤色颜色掩码(扁平 bool 数组),供后续各轮固定使用。
 
     与 analyze 内部走同一条降采样与阈值路径,保证形状与判定一致。
     """
@@ -209,8 +209,8 @@ def to_prompt_dict(stats: PhotoStats) -> Dict[str, float]:
     out["rgb_mean_b"] = round(stats.rgb_mean[2], 3)
     out["shadow_cast_b_minus_r"] = round(stats.shadow_cast[2] - stats.shadow_cast[0], 3)
     if stats.skin_ratio > 0.02 and stats.skin_mean_rgb is not None:
-        out["skin_ratio"] = round(stats.skin_ratio, 3)
-        out["skin_r"] = round(stats.skin_mean_rgb[0], 3)
-        out["skin_g"] = round(stats.skin_mean_rgb[1], 3)
-        out["skin_b"] = round(stats.skin_mean_rgb[2], 3)
+        out["suspected_skin_ratio"] = round(stats.skin_ratio, 3)
+        out["suspected_skin_r"] = round(stats.skin_mean_rgb[0], 3)
+        out["suspected_skin_g"] = round(stats.skin_mean_rgb[1], 3)
+        out["suspected_skin_b"] = round(stats.skin_mean_rgb[2], 3)
     return out

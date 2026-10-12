@@ -437,7 +437,7 @@ def apply_asset_with_image(lut_id: int,request: Request,body: str=Form(...,max_l
         mask = S.skin_mask_of(baseline_image)
         baseline = S.analyze(baseline_image,skin_mask=mask)
         before = S.analyze(R.render_lut(R.lut_from_params(current),image),skin_mask=mask)
-        allowed,reasons = check_hard_rules(before,out["params"],baseline,Q.limits_for(before),current,image,mask)
+        allowed,reasons = check_hard_rules(before,out["params"],baseline,Q.limits_for(before),current,image,mask,parsed.context)
         if not allowed:
             raise HTTPException(409,{"code":"image_risk","message":"图像风险检查未通过,候选未应用","reasons":reasons})
         out["validation_status"] = "measured"
@@ -662,8 +662,9 @@ class AutoGradeOut(BaseModel):
     style_applied_params: Optional[dict] = None  # 真正生效的部分
     style_rejections: List[str] = Field(default_factory=list)
     review: Optional[str] = None
-    # 视觉复核未执行的原因:disabled(用户关闭)/ failed(调用失败)/ no_client(未配置模型)
+    # 视觉复核未完成原因包括未变化、无有效内容、关闭及调用失败。
     review_skip_reason: Optional[str] = None
+    subject_protection: dict = Field(default_factory=dict)
     degraded: bool = False
     usage: dict = Field(default_factory=dict)
     workspace_id: Optional[str] = None
@@ -861,6 +862,7 @@ def _compute_auto_grade(img, parsed, ctx, style, use_vision, max_rounds,
         style_rejections=result.style_rejections,
         review=result.review,
         review_skip_reason=result.review_skip_reason,
+        subject_protection=result.subject_protection,
         degraded=result.degraded,
         usage=result.usage,workspace_id=workspace_id,source_digest=source_digest,
         main_sample_id=main_sample_id,context=ctx,

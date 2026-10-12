@@ -221,8 +221,9 @@ def test_prompt_dict_is_compact_and_rounded():
 def test_prompt_dict_includes_skin_only_when_present():
     with_skin = S.to_prompt_dict(S.analyze(make_fixture("skin_tone")))
     no_skin = S.to_prompt_dict(S.analyze(make_fixture("highlight_clip")))
-    assert "skin_ratio" in with_skin
-    assert "skin_ratio" not in no_skin
+    assert "suspected_skin_ratio" in with_skin
+    assert "suspected_skin_ratio" not in no_skin
+    assert "skin_ratio" not in with_skin
 
 
 def test_sampled_px_reflects_downsample():
