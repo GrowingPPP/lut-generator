@@ -431,7 +431,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
             </AssetCover>
             <div className="card-body">
               <div className="library-card-title">
-                <h3>{lut.name}</h3>
+                <h3 title={lut.name}>{lut.name}</h3>
                 <span>{kindLabel(lut)}</span>
               </div>
               {lut.group && <p className="library-group">{lut.group}</p>}
@@ -445,25 +445,27 @@ export default function LibraryView({ onPreview, onDeleted }) {
                   ))}
                 </div>
               )}
-              <small className="library-updated">
-                更新于 {dateLabel(lut.updated_at)}
-              </small>
-              <div className="card-actions">
-                <button className="btn-primary" disabled={deleting} onClick={() => preview(lut)}>
-                  {lut.kind === 'portable_style'
-                    ? '预览并追加风格'
-                    : '预览并载入完整效果'}
-                </button>
-                <button className="btn" disabled={deleting} onClick={() => setDetail(lut)}>
-                  详情与导出
-                </button>
-                <button className="btn" disabled={deleting || busyIds.includes(lut.id)} onClick={() => openEdit(lut)}>
-                  编辑信息
-                </button>
-                <button className="btn library-delete-entry" aria-label={`删除「${lut.name}」`}
-                  disabled={deleting || busyIds.includes(lut.id)} onClick={() => openDelete(lut)}>
-                  删除
-                </button>
+              <div className="library-card-footer">
+                <small className="library-updated">
+                  更新于 {dateLabel(lut.updated_at)}
+                </small>
+                <div className="card-actions">
+                  <button className="btn-primary" disabled={deleting} onClick={() => preview(lut)}>
+                    {lut.kind === 'portable_style'
+                      ? '预览并追加风格'
+                      : '预览并载入完整效果'}
+                  </button>
+                  <button className="btn" disabled={deleting} onClick={() => setDetail(lut)}>
+                    详情与导出
+                  </button>
+                  <button className="btn" disabled={deleting || busyIds.includes(lut.id)} onClick={() => openEdit(lut)}>
+                    编辑信息
+                  </button>
+                  <button className="btn library-delete-entry" aria-label={`删除「${lut.name}」`}
+                    disabled={deleting || busyIds.includes(lut.id)} onClick={() => openDelete(lut)}>
+                    删除
+                  </button>
+                </div>
               </div>
             </div>
           </article>

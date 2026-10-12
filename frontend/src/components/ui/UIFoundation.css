@@ -2,7 +2,7 @@ button, input, textarea { font-family: inherit; }
 
 .btn, .btn-primary, .btn-danger {
   gap: 7px;
-  min-height: 36px;
+  min-height: 40px;
   line-height: 1.4;
   transition: background .14s, border-color .14s, box-shadow .14s;
 }

@@ -1,13 +1,13 @@
-.ui-action-menu { z-index: 1800; min-width: max(220px, var(--radix-dropdown-menu-trigger-width)); max-width: calc(100vw - 16px); max-height: min(460px, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; overscroll-behavior: contain; padding: 5px; border: 1px solid var(--linestrong); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 28px var(--shadow), 0 2px 5px var(--shadow); font: inherit; font-size: 13px; line-height: 1.5; animation: ui-menu-appear .12s ease-out; }
+.ui-action-menu { z-index: 1800; min-width: max(220px, var(--radix-dropdown-menu-trigger-width)); max-width: calc(100vw - 16px); max-height: min(460px, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; overscroll-behavior: contain; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 8px 28px var(--shadow), 0 2px 5px var(--shadow); font: inherit; font-size: 13px; line-height: 1.5; animation: ui-menu-appear .12s ease-out; }
 .ui-action-menu-item { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 38px; padding: 8px 12px; border-radius: 6px; outline: none; color: var(--text); cursor: pointer; user-select: none; overflow-wrap: anywhere; }
 .ui-action-menu-item[data-highlighted] { background: var(--hover); box-shadow: inset 0 0 0 1px var(--linestrong); }
 .ui-action-menu-item[data-disabled] { color: var(--faint); cursor: not-allowed; }
 .ui-action-menu-item[data-destructive='true'] { color: var(--danger); }
 .ui-action-menu-item[data-destructive='true'][data-highlighted] { background: var(--danger-soft); box-shadow: inset 0 0 0 1px var(--danger-line); }
-.ui-action-menu-description { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.ui-action-menu-description { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .ui-action-menu-item[data-disabled] .ui-action-menu-description { color: var(--faint); }
-.ui-action-menu-label { padding: 6px 12px 4px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.ui-action-menu-label { padding: 6px 12px 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .ui-action-menu-separator { height: 1px; margin: 5px 7px; background: var(--line); }
 @keyframes ui-menu-appear { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
-@media (max-width: 600px) { .ui-action-menu-item { min-height: 42px; } }
+@media (max-width: 600px) { .ui-action-menu-item { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .ui-action-menu { animation: none; } }

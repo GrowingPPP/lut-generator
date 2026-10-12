@@ -1,4 +1,4 @@
-.ui-tooltip { z-index: 1900; max-width: min(280px, calc(100vw - 24px)); padding: 7px 10px; border: 1px solid var(--linestrong); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: 0 4px 16px var(--shadow); font: inherit; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; animation: ui-tooltip-appear .1s ease-out; }
+.ui-tooltip { z-index: 1900; max-width: min(280px, calc(100vw - 24px)); padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: 0 4px 16px var(--shadow); font: inherit; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; animation: ui-tooltip-appear .1s ease-out; }
 .ui-tooltip-arrow { fill: var(--panel); }
 @keyframes ui-tooltip-appear { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ui-tooltip { animation: none; } }

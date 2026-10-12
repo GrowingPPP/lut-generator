@@ -4,7 +4,7 @@ import './HelpPopover.css'
 
 export default function HelpPopover({
   trigger, title, children, open, defaultOpen = false, onOpenChange,
-  side = 'right', align = 'start', describedBy, className = '',
+  side = 'bottom', align = 'start', describedBy, className = '',
 }) {
   const [localOpen, setLocalOpen] = useState(defaultOpen)
   const current = open === undefined ? localOpen : open

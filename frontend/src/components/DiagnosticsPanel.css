@@ -27,19 +27,19 @@
 .diagnostics-local-tag {
   flex-shrink: 0;
   padding: 3px 8px;
-  border: 1px solid var(--accent-line);
-  border-radius: 5px;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--panel2);
+  font-size: 12px;
   line-height: 1.7;
 }
 
 .diagnostics-empty {
-  margin: 0 0 18px;
-  padding: 12px 14px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--panel);
   color: var(--muted);
 }
@@ -53,21 +53,21 @@
 .diagnostics-measure-note {
   margin-bottom: 12px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .diagnostics-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .diagnostics-metric {
-  padding: 12px 14px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--panel);
   font-variant-numeric: tabular-nums;
 }
@@ -86,8 +86,8 @@
 
 .diagnostics-metric strong {
   display: block;
-  color: var(--accent-strong);
-  font-size: 25px;
+  color: var(--text);
+  font-size: 24px;
   font-weight: 600;
   line-height: 1.4;
 }
@@ -99,7 +99,7 @@
 
 .diagnostics-metric > span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diagnostics-plot-legend,
@@ -107,13 +107,13 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 15px;
+  gap: 8px 16px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diagnostics-plot-legend {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .diagnostics-plot-legend span,
@@ -141,16 +141,16 @@
 .diagnostics-shapes {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .diagnostics-histogram,
 .diagnostics-shape {
   min-width: 0;
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--panel);
 }
 
@@ -215,8 +215,8 @@
 }
 
 .diagnostics-risk-details {
-  margin-top: 15px;
-  padding: 11px 0;
+  margin-top: 16px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -283,13 +283,13 @@
 }
 
 .diagnostics-footnote {
-  margin: 12px 0 20px;
+  margin: 12px 0 16px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diagnostics-shapes {
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .diagnostics-shape figcaption {
@@ -307,14 +307,14 @@
 
 .diagnostics-shape figcaption span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .diagnostics-shape p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diagnostics-shape-line {
@@ -348,7 +348,7 @@
 
   .diagnostics-histogram,
   .diagnostics-metric {
-    padding: 9px 10px;
+    padding: 12px;
   }
 }
 

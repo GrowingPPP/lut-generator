@@ -6,7 +6,7 @@
 .dialog-request-description { margin: 14px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
 .dialog-request form { display: grid; gap: 14px; margin-top: 18px; min-width: 0; }
 .dialog-prompt-label { display: grid; gap: 8px; color: var(--text); font-size: 14px; }
-.dialog-prompt-label input { width: 100%; min-width: 0; font: inherit; color: var(--text); background: var(--field); padding: 10px 12px; border: 1px solid var(--linestrong); border-radius: 8px; }
+.dialog-prompt-label input { width: 100%; min-width: 0; font: inherit; color: var(--text); background: var(--field); padding: 10px 12px; border: 1px solid var(--control-line); border-radius: 8px; }
 .dialog-prompt-label input:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 .dialog-prompt-label input[aria-invalid='true'] { border-color: var(--danger); }
 .dialog-request .modal-actions { margin-top: 4px; }

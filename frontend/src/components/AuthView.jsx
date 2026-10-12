@@ -34,8 +34,9 @@ export default function AuthView({ onAuthed }) {
       <div className="auth-card">
         <div className="brand auth-brand"><span className="logo">C</span>CHROMA</div>
         <h1>{mode === 'login' ? '登录' : '注册'}</h1>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名" />
-        <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <p className="auth-description">保存调色作品，继续你的色彩创作。</p>
+        <input aria-label="用户名" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名" />
+        <input aria-label="密码" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="密码" onKeyDown={(e) => e.key === 'Enter' && submit()} />
         {error && <div className="error">{error}</div>}
         <button className="btn-primary" onClick={submit} disabled={busy}>
           {busy ? '处理中…' : mode === 'login' ? '登录' : '注册'}

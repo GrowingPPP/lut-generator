@@ -49,58 +49,40 @@ const PREVIEW_LOOK = {
 // 再大只是徒增 CPU 与内存(getImageData 会产出 w*h*4 的 Uint8ClampedArray)。
 const GRADE_WIDTH = 1280
 
-const PAIN_POINTS = [
-  {
-    mark: '▸',
-    title: '预设不合口味',
-    body: '网上的预设包千篇一律，套用在自己的素材上总是差那么一点点意思，且难以针对性调整。',
-  },
-  {
-    mark: '◐',
-    title: '手搓曲线门槛高',
-    body: '面对复杂的色彩空间、节点和 RGB 曲线，没有系统学习过调色很难精准实现脑海中的画面。',
-  },
-  {
-    mark: '⚠',
-    title: '机内 LUT 格式限制',
-    body: 'Lumix 机内烧录需要严苛的 33-point .cube 格式，且必须带有特定表头声明，普通 LUT 常常无法载入。',
-  },
-]
-
 const STEPS = [
   {
     no: '01',
-    title: '一句话描述影调',
-    body: '像和调色师沟通一样，输入自然语言指令。例如「日系清透，高光带点青色，暗部微灰」。',
+    title: '放入自己的照片',
+    body: '上传样张并确认拍摄时的输入风格，让后续预览和调整有可靠的起点。',
   },
   {
     no: '02',
-    title: '模型多轮确认参数',
-    body: 'CHROMA 会精准理解你的意图，生成具体调色参数。你可以继续通过对话微调，直到完全满意。',
+    title: '描述并调整影调',
+    body: '用语言表达想法，让 AI 提议参数；也可以从参考图出发，或直接手动调色。',
   },
   {
     no: '03',
-    title: '导出松下标准 .cube',
-    body: '一键下载，直接获得包含松下标准表头的 .cube 文件，插入 SD 卡即可在 Lumix 机身内调用。',
+    title: '查看细节，保存作品',
+    body: '放大对比，微调到满意，再保存可复用的 LUT，或导出调整后的照片。',
   },
 ]
 
 const FAQ = [
   {
     q: '输出的 .cube 文件支持哪些软件？',
-    a: '只要支持导入 33-point .cube LUT 文件的软件都可以使用，包括且不限于 DaVinci Resolve、Premiere Pro、Final Cut Pro、Photoshop 以及 Lightroom 等。',
+    a: '后期版为 33 点 .cube LUT，供支持该格式的色彩处理工具导入。请按所用软件的说明选择输入色彩空间，并与制作 LUT 时的输入基准一致。',
   },
   {
     q: '我的松下相机支持 Real-Time LUT 吗？',
-    a: '机内烧录（Real-Time LUT）目前支持 S5M2 / S5M2X / G9M2；S5、GH6 等机型仅支持机内监视。下载「机内版」.cube 后存入 SD 卡对应目录即可载入。',
+    a: '是否支持机内应用、可用的 Photo Style 和导入方式由机型与固件决定。生成页的「输入与相机使用引导」提供导入参考；使用前请核对对应相机的官方说明书。',
   },
   {
-    q: '需要注册账号才能使用吗？',
-    a: '生成与管理需要一个免费账号 —— 登录后即可描述影调生成 LUT，并保存你自己的 LUT 库与调色历史。',
+    q: '需要登录才能使用吗？',
+    a: '生成与管理需要登录。登录后可以创建工作区、保存自己的 LUT、管理版本，并继续之前的调色。',
   },
   {
-    q: '生成一个 LUT 需要耗时多久？',
-    a: '你发出指令后，模型会在数秒内完成参数计算，并在浏览器内实时渲染预览效果，确认后即可导出。',
+    q: '不理解调色参数，也可以开始吗？',
+    a: '可以从一句风格描述或 AI 自动修图开始。参数旁的使用说明会解释调整含义与增减效果；熟悉后再尝试主曲线和 RGB 通道曲线。',
   },
 ]
 
@@ -215,7 +197,7 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
       />
 
       <span className="landing-ba-tag landing-ba-tag-before">{beforeLabel}</span>
-      <span className="landing-ba-tag landing-ba-tag-after">{afterLabel}</span>
+      <span className="landing-ba-tag landing-ba-tag-after">{gradedSrc ? afterLabel : '效果未就绪'}</span>
     </div>
   )
 }
@@ -229,257 +211,220 @@ export default function LandingView({ onEnter }) {
   const gradedPreview = useGradedSample(PREVIEW_PHOTO, PREVIEW_LOOK)
 
   return (
-    <div className="landing">
-      <nav className="landing-nav">
-        <div className="brand">
-          <span className="logo">C</span>
-          CHROMA
+    <div className="landing" id="top">
+      <nav className="landing-nav" aria-label="首页导航">
+        <div className="landing-nav-inner">
+          <div className="brand">
+            <span className="logo">C</span>
+            CHROMA
+          </div>
+          <div className="landing-nav-links">
+            <a href="#features">功能</a>
+            <a href="#how-it-works">创作流程</a>
+            <a href="#lumix">相机与软件</a>
+            <a href="#faq">常见问题</a>
+          </div>
+          <div className="landing-nav-actions">
+            <ThemePicker />
+            <button className="btn btn-primary" onClick={onEnter}>开始生成</button>
+          </div>
         </div>
-        <div className="landing-nav-links">
-          <a href="#features">功能</a>
-          <a href="#how-it-works">工作原理</a>
-          <a href="#lumix">机内烧录</a>
-          <a href="#faq">常见问题</a>
-        </div>
-        <ThemePicker />
-        <button className="btn btn-primary" onClick={onEnter}>开始生成</button>
       </nav>
 
       <main className="landing-main">
-        {/* Hero */}
-        <section className="landing-hero">
+        <section className="landing-hero" aria-labelledby="landing-title">
           <div className="landing-hero-copy">
-            <h1>
-              用你的语言，<br />
-              生成你的 <span className="landing-accent">LUT</span>。
+            <p className="landing-eyebrow">让影调成为你的表达</p>
+            <h1 id="landing-title">
+              把你的灵感，<br />
+              调成一款 <span className="landing-accent">LUT</span>。
             </h1>
             <p className="landing-lede">
-              告别繁琐的曲线和节点。只需用自然语言描述你想要的影调（如「日系清透」），CHROMA
-              即可直接生成适用于松下 Lumix 相机直出与后期的标准 .cube 文件。
+              从一张照片开始，用语言描述想要的色彩，边看细节边微调。
+              把喜欢的效果保存成可复用的 LUT，或直接导出调整后的照片。
             </p>
             <div className="landing-hero-actions">
               <button className="btn btn-primary landing-btn-lg" onClick={onEnter}>
-                开始生成我的 LUT
+                开始制作我的 LUT
               </button>
-              <a className="landing-textlink" href="#how-it-works">了解工作原理</a>
+              <a className="landing-textlink" href="#features">看看可以做什么</a>
             </div>
+            <p className="landing-hero-meta">AI 创作 · 手动调色 · Lumix 与后期 .cube</p>
           </div>
-
-          <BeforeAfter
-            src={HERO_PHOTO}
-            gradedSrc={gradedHero}
-            beforeLabel="原图"
-            afterLabel="电影青橙 LUT"
-          />
+          <figure className="landing-hero-visual">
+            <BeforeAfter
+              src={HERO_PHOTO}
+              gradedSrc={gradedHero}
+              beforeLabel="原图"
+              afterLabel="青橙风格 · LUT 后"
+            />
+            <figcaption>拖动分界线，查看同一张照片的调色变化。</figcaption>
+          </figure>
         </section>
 
-        {/* Pain points */}
-        <section className="landing-section landing-section-tight">
-          <div className="landing-head">
-            <h2>从灵感到实用的巨大落差</h2>
-            <p className="landing-sub">想要一个特定的影调，但把它真正装进相机里并不容易。</p>
-          </div>
-          <div className="landing-grid-3">
-            {PAIN_POINTS.map((p) => (
-              <article className="landing-card" key={p.title}>
-                <span className="landing-mark">{p.mark}</span>
-                <h3>{p.title}</h3>
-                <p>{p.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        {/* How it works */}
-        <section id="how-it-works" className="landing-band">
+        <section id="how-it-works" className="landing-band" aria-labelledby="landing-process-title">
           <div className="landing-wrap">
-            <h2 className="landing-h2-center">三步生成，直接可用</h2>
+            <div className="landing-head">
+              <p className="landing-eyebrow">创作流程</p>
+              <h2 id="landing-process-title">从照片到影调，循着画面慢慢调整</h2>
+            </div>
             <div className="landing-grid-3 landing-grid-steps">
               {STEPS.map((s) => (
-                <div className="landing-step" key={s.no}>
+                <article className="landing-step" key={s.no}>
                   <span className="landing-step-no">{s.no}</span>
                   <h3>{s.title}</h3>
                   <p>{s.body}</p>
-                </div>
+                </article>
               ))}
             </div>
           </div>
         </section>
 
-        {/* Features */}
-        <section id="features" className="landing-wrap landing-section">
-          <div className="landing-feature">
-            <div className="landing-feature-mock">
-              <p className="landing-bubble landing-bubble-user">我想要一个复古胶片感，稍微偏暖，暗部有点褪色。</p>
-              <p className="landing-bubble landing-bubble-bot">
-                已为你生成「复古胶片」参数。已应用：冷暖偏移 +350，对比度 +0.18，饱和度 -0.05，暗部轻微提亮。
-                <br /><br />
-                你可以继续微调，或直接保存 .cube。
-              </p>
-            </div>
-            <div className="landing-feature-copy">
-              <span className="landing-mark">▸</span>
-              <h3>会话式生成</h3>
-              <p>
-                无需逐项设置 30 个调色参数。通过简单的对话描述（例如「日系清透」），模型会理解你的意图并设定参数，
-                你只需微调确认，即可直接导出标准 .cube 文件。
-              </p>
-            </div>
+        <section id="features" className="landing-section" aria-labelledby="landing-features-title">
+          <div className="landing-head">
+            <p className="landing-eyebrow">创作工具</p>
+            <h2 id="landing-features-title">灵感有起点，调整有空间</h2>
+            <p className="landing-sub">让 AI 帮你起步，也把每一处细节留在自己手中。</p>
           </div>
-
-          <div className="landing-feature">
-            <div className="landing-feature-copy">
-              <span className="landing-mark">◐</span>
-              <h3>实时预览</h3>
-              <p>
-                采用 WebGL2 3D LUT GPU 叠加技术。上传你的样片，在浏览器中即可实现无延迟的精准色彩渲染。
-                支持灵活的滑动对比与独立展示两种模式，在烧录前就确认最终效果。
-              </p>
-            </div>
-            <div className="landing-feature-mock landing-feature-photo">
-              <BeforeAfter
-                src={PREVIEW_PHOTO}
-                gradedSrc={gradedPreview}
-                beforeLabel="Before"
-                afterLabel="After"
-              />
-            </div>
-          </div>
-
-          <div className="landing-feature">
-            <div className="landing-feature-mock">
-              <div className="landing-report">
-                <div className="landing-report-head">
-                  <strong>AI 诊断报告</strong>
-                  <span className="landing-badge">分析完成</span>
-                </div>
-                <ul className="landing-report-list">
-                  <li>» 原片曝光正常，高光区域无溢出</li>
-                  <li>» 识别环境：室外自然光，色温偏冷</li>
-                  <li>» 已应用指令：<em>「再清透一点」</em></li>
-                </ul>
-                <div className="landing-report-foot">
-                  <span className="landing-quiet">↺ 一键撤销</span>
-                  <span className="landing-chip">查看完整修改说明</span>
+          <div className="landing-features">
+            <article className="landing-feature">
+              <div className="landing-feature-copy">
+                <p className="landing-feature-kicker">AI 创作与自动修图</p>
+                <h3>说出想法，看见具体的调整</h3>
+                <p>
+                  用「偏暖的复古胶片感」表达想法，再通过对话修改。
+                  也可以让 AI 先分析样张、提议调整参数，查看修改说明后继续微调或撤销。
+                </p>
+              </div>
+              <div className="landing-feature-mock">
+                <span className="landing-demo-label">对话示例</span>
+                <p className="landing-bubble landing-bubble-user">我想要偏暖的复古胶片感，暗部轻轻提亮。</p>
+                <div className="landing-bubble landing-bubble-bot">
+                  <strong>把想法变成可调整的参数</strong>
+                  <p>尝试增加冷暖偏移、降低饱和度，并提亮暗部。确认后可以在样张上查看变化。</p>
+                  <span>查看说明 · 继续微调 · 随时撤销</span>
                 </div>
               </div>
-            </div>
-            <div className="landing-feature-copy">
-              <span className="landing-mark">✦</span>
-              <h3>AI 自动修图</h3>
-              <p>
-                一键上传照片，AI 自动分析画面结构并产出专属修图 LUT。支持在分析基础上叠加「日系清透一点」等
-                自然语言指令。全透明展示诊断依据与详细修改记录，随时支持一键撤销。
-              </p>
-            </div>
-          </div>
+            </article>
 
-          <div className="landing-feature">
-            <div className="landing-feature-copy">
-              <span className="landing-mark">▾</span>
-              <h3>精细调色参数面板</h3>
-              <p>
-                开放 30 个可调参数，按组折叠：单张校正（冷暖/曝光）、风格强度、
-                影调（对比度/高光/阴影/S 曲线）、全局与局部色彩、分离色调及分通道调整，
-                满足后期深度定制。
-              </p>
-            </div>
-            <div className="landing-feature-mock">
-              <div className="landing-params">
-                <div className="landing-params-group">
-                  <div className="landing-params-head">
-                    <strong>基础 (Base)</strong>
-                    <span className="landing-quiet">▾</span>
-                  </div>
-                  <div className="landing-params-row">
-                    <div className="landing-params-label">
-                      <span>冷暖偏移</span>
-                      <em>+350</em>
+            <article className="landing-feature">
+              <div className="landing-feature-copy">
+                <p className="landing-feature-kicker">实时预览与细节查看</p>
+                <h3>一边看画面，一边调色</h3>
+                <p>
+                  滑动对比或并排查看原图与调整结果。放大后可以继续调整参数和曲线，
+                  检查高光、肤色与暗部细节，多张样张帮助判断风格是否合适。
+                </p>
+              </div>
+              <div className="landing-feature-mock landing-feature-photo">
+                <BeforeAfter
+                  src={PREVIEW_PHOTO}
+                  gradedSrc={gradedPreview}
+                  beforeLabel="原图"
+                  afterLabel="LUT 后"
+                />
+              </div>
+            </article>
+
+            <article className="landing-feature">
+              <div className="landing-feature-copy">
+                <p className="landing-feature-kicker">参数与四通道曲线</p>
+                <h3>从简单微调，到自己的色彩细节</h3>
+                <p>
+                  曝光、影调、全局与局部色彩按组展开，参数说明帮助理解增减的效果。
+                  主曲线和 R、G、B 曲线独立展示；直接输入数值、保护参数和撤销记录让精调更从容。
+                </p>
+              </div>
+              <div className="landing-feature-mock">
+                <span className="landing-demo-label">调色面板示意</span>
+                <div className="landing-params">
+                  <div className="landing-params-group">
+                    <div className="landing-params-head"><strong>单张校正</strong><span className="landing-quiet">参数说明 ?</span></div>
+                    <div className="landing-params-row">
+                      <div className="landing-params-label"><span>冷暖偏移</span><em>+350</em></div>
+                      <div className="landing-params-track"><i style={{ width: '56%' }} /></div>
                     </div>
-                    <div className="landing-params-track"><i style={{ width: '56%' }} /></div>
-                  </div>
-                  <div className="landing-params-row">
-                    <div className="landing-params-label">
-                      <span>曝光 (Exposure)</span>
-                      <em>0.0</em>
+                    <div className="landing-params-row">
+                      <div className="landing-params-label"><span>曝光</span><em>0.00 EV</em></div>
+                      <div className="landing-params-track"><i style={{ width: '50%' }} /></div>
                     </div>
-                    <div className="landing-params-track"><i className="landing-params-track-alt" style={{ width: '50%' }} /></div>
                   </div>
-                </div>
-                <div className="landing-params-group landing-params-collapsed">
-                  <div className="landing-params-head">
-                    <span className="landing-quiet">影调 (Tone)</span>
-                    <span className="landing-quiet">▸</span>
+                  <div className="landing-curve-channels" aria-label="主曲线和 RGB 通道曲线示意">
+                    {['主曲线', 'R', 'G', 'B'].map((channel) => (
+                      <div className="landing-curve-channel" key={channel}>
+                        <span>{channel}</span>
+                        <svg viewBox="0 0 64 64" aria-hidden="true">
+                          <path className="landing-curve-grid" d="M0 16H64M0 32H64M0 48H64M16 0V64M32 0V64M48 0V64" />
+                          <path className="landing-curve-line" d="M2 62C20 58 22 22 62 2" />
+                        </svg>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
-            </div>
+            </article>
+
+            <article className="landing-feature">
+              <div className="landing-feature-copy">
+                <p className="landing-feature-kicker">参考、试套与导出</p>
+                <h3>用喜欢的作品启发下一次创作</h3>
+                <p>
+                  从参考图的色彩出发，或导入已有 .cube 在样张上试套。
+                  保存作品与版本，导出供相机或后期使用的 LUT，也能把当前效果导出为照片。
+                </p>
+              </div>
+              <div className="landing-feature-mock landing-workflow-mock">
+                <span className="landing-demo-label">工作区能力</span>
+                <div className="landing-workflow-item"><span>01</span><div><strong>参考图风格匹配</strong><p>从参考色彩开始，继续调整自己的样张</p></div></div>
+                <div className="landing-workflow-item"><span>02</span><div><strong>外部 .cube 导入与试套</strong><p>在真实照片上比较已有 LUT 的效果</p></div></div>
+                <div className="landing-workflow-item"><span>03</span><div><strong>保存 LUT 与导出照片</strong><p>保留创作版本，让喜欢的效果再次使用</p></div></div>
+              </div>
+            </article>
           </div>
         </section>
 
-        {/* Lumix in-camera */}
-        <section id="lumix" className="landing-band">
-          <div className="landing-wrap landing-wrap-narrow">
-            <div className="landing-lumix">
-              <span className="landing-lumix-mark">◐</span>
-              <h2>专为松下机内烧录设计</h2>
+        <section id="lumix" className="landing-band" aria-labelledby="landing-lumix-title">
+          <div className="landing-wrap landing-lumix">
+            <div className="landing-lumix-copy">
+              <p className="landing-eyebrow">相机与后期</p>
+              <h2 id="landing-lumix-title">同一款影调，找到合适的使用方式</h2>
               <p className="landing-sub">
-                彻底打通后期与前期的壁垒。生成的 LUT 专门针对松下机身（如 S5M2 / G9M2 等）的
-                Real-Time LUT 功能进行了适配，支持 V-Log 显示映射与风格调整。使用时需匹配相机 Photo Style。
+                为 Lumix 制作机内版，或导出后期使用的标准 .cube。
+                制作与使用时保持输入基准一致，并按相机型号、固件和软件说明核对设置。
               </p>
-              <div className="landing-downloads">
-                <div className="landing-download">
-                  <span className="landing-mark-sm">▼</span>
-                  <strong>下载机内版</strong>
-                  <span className="landing-quiet">带 Panasonic 标签，需匹配基准 Photo Style</span>
-                </div>
-                <div className="landing-download">
-                  <span className="landing-mark-sm">▸</span>
-                  <strong>下载后期版</strong>
-                  <span className="landing-quiet">标准 .cube 格式，使用时需匹配输入信号</span>
-                </div>
-              </div>
+              <a className="landing-textlink" href="#faq">了解输入与兼容性</a>
+            </div>
+            <div className="landing-downloads">
+              <div className="landing-download"><strong>机内版 LUT</strong><p>包含 Panasonic 标记；按相机支持的格式导入，并匹配基础 Photo Style。</p></div>
+              <div className="landing-download"><strong>后期版 LUT</strong><p>标准 33 点 .cube；在软件中匹配输入信号，避免重复的色彩转换。</p></div>
             </div>
           </div>
         </section>
 
-        {/* FAQ */}
-        <section id="faq" className="landing-wrap landing-faq">
-          <h2 className="landing-h2-center">常见问题</h2>
+        <section id="faq" className="landing-faq" aria-labelledby="landing-faq-title">
+          <div className="landing-head"><h2 id="landing-faq-title">开始前，你可能想知道</h2></div>
           {FAQ.map((item) => (
             <details className="landing-item" key={item.q}>
-              <summary>
-                {item.q}
-                <span className="landing-quiet landing-faq-mark">＋</span>
-              </summary>
+              <summary>{item.q}<span className="landing-quiet landing-faq-mark" aria-hidden="true">＋</span></summary>
               <p>{item.a}</p>
             </details>
           ))}
         </section>
 
-        {/* Closing CTA */}
-        <section id="generate" className="landing-cta">
-          <h2>准备好制作你的专属影调了吗？</h2>
-          <p className="landing-sub">无需繁琐后期，仅用语言即可塑造直出风格。</p>
-          <button className="btn btn-primary landing-btn-lg" onClick={onEnter}>
-            开始生成我的第一款 LUT
-          </button>
+        <section id="generate" className="landing-cta" aria-labelledby="landing-cta-title">
+          <div className="landing-cta-inner">
+            <div><h2 id="landing-cta-title">从一张照片，开始你的下一款影调</h2><p className="landing-sub">把想法交给画面，把细节留给自己。</p></div>
+            <button className="btn btn-primary landing-btn-lg" onClick={onEnter}>开始生成我的第一款 LUT</button>
+          </div>
         </section>
       </main>
 
       <footer className="landing-footer">
         <div className="landing-footer-inner">
-          <div>
-            <div className="landing-footer-brand">CHROMA</div>
-            <p className="landing-quiet">A Panasonic Lumix LUT Generator.</p>
-          </div>
-          <div className="landing-footer-links">
-            <a href="#top">回到顶部</a>
-            <a href="#faq">常见问题</a>
-            <a href="#features">功能</a>
-          </div>
+          <div><div className="landing-footer-brand">CHROMA</div><p className="landing-quiet">用照片与语言，创造自己的影调。</p></div>
+          <div className="landing-footer-links"><a href="#top">回到顶部</a><a href="#faq">常见问题</a><a href="#features">功能</a></div>
         </div>
-        <p className="landing-copyright">© CHROMA · 松下 LUT 生成器</p>
+        <p className="landing-copyright">© CHROMA · Lumix LUT 创作工作台</p>
       </footer>
     </div>
   )

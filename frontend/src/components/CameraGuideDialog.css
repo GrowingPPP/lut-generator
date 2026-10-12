@@ -1,13 +1,19 @@
 .camera-guide {
   color: var(--text);
+  border-color: var(--line);
 }
 .camera-guide p,
 .camera-guide li {
   line-height: 1.7;
+  font-size: 14px;
 }
+.camera-guide p { margin: 10px 0; }
+.camera-guide ol, .camera-guide ul { padding-left: 22px; margin: 12px 0; }
+.camera-guide li + li { margin-top: 8px; }
 .camera-guide h3 {
-  margin: 22px 0 8px;
-  font-size: 15px;
+  margin: 24px 0 8px;
+  font-size: 16px;
+  line-height: 1.5;
 }
 .camera-guide a {
   color: var(--accent-strong);
@@ -15,24 +21,27 @@
 }
 .camera-guide summary {
   cursor: pointer;
-  padding: 10px 0;
+  padding: 12px 0;
+  font-size: 14px;
+  line-height: 1.5;
 }
+.camera-guide details { margin-top: 20px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .camera-guide select {
   margin-left: 12px;
   color: var(--text);
   background: var(--field);
-  border: 1px solid var(--linestrong);
+  border: 1px solid var(--control-line, var(--linestrong));
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 .camera-contract {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 16px;
   background: var(--panel2);
-  border: 1px solid var(--linestrong);
   border-radius: 10px;
   padding: 16px;
+  margin: 20px 0;
 }
 .camera-contract dt {
   color: var(--muted);
@@ -42,8 +51,10 @@
   margin: 5px 0 0;
   font-weight: 600;
   overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.5;
 }
-.camera-sources {
+.camera-guide .camera-sources {
   font-size: 12px;
   color: var(--muted);
 }
@@ -72,14 +83,17 @@
   margin: 16px 0;
   display: grid;
   gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--linestrong);
-  border-radius: 8px;
+  padding: 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--panel2);
 }
 .asset-save-metadata label {
   display: grid;
   gap: 6px;
   color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
 }
 .asset-save-metadata input,
 .asset-save-metadata textarea,
@@ -89,8 +103,9 @@
   padding: 8px 10px;
   background: var(--field);
   color: var(--text);
-  border: 1px solid var(--linestrong);
-  border-radius: 6px;
+  border: 1px solid var(--control-line, var(--linestrong));
+  border-radius: 8px;
+  min-height: 40px;
 }
 .asset-save-metadata .favorite-option {
   display: flex;
@@ -104,4 +119,5 @@
   .camera-contract {
     grid-template-columns: 1fr;
   }
+  .camera-guide > label { flex-wrap: wrap; }
 }
