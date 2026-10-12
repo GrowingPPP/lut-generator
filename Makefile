@@ -74,7 +74,7 @@ test-parity: ## 前后端引擎数学一致性校验(含 .cube 序列化)
 	@cd $(FRONTEND) && node scripts/check_parity.mjs
 	@cd $(FRONTEND) && node scripts/check_cube_parity.mjs
 
-test-frontend: ## 前端纯函数测试(Node 内置 test runner,零依赖)
+test-frontend: ## 前端测试(Node 内置 runner,含组件/事务及 Python 对拍)
 	@cd $(FRONTEND) && npm test
 
 check: test test-frontend test-parity ## 跑全部校验(后端 + 前端 + 一致性)

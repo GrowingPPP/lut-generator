@@ -60,12 +60,16 @@
 │   ├── src/lib/           # LUT 引擎、WebGL 预览、调色项目事务、风格配方与本机草稿存储
 │   ├── src/components/    # 调色项目工具条、样张、版本、保存候选、比较与自动修图报告
 │   ├── src/hooks/         # useWorkspace(草稿与历史)、usePreview(WebGL 预览生命周期)
-│   ├── src/App.jsx        # 生成页编排
+│   ├── src/App.jsx        # 首页、鉴权与用户隔离
+│   ├── src/StudioView.jsx # 工作台导航、主题与交互 Provider
+│   ├── src/GenerateView.jsx # 调色项目与照片、参数、任务工具编排
 │   ├── src/App.css        # 通用布局与控件样式
 │   ├── src/themes.css     # 深色、中性灰、浅色语义配色
 │   ├── scripts/           # 一致性与前端单测脚本
 │   └── prototype/         # UI 原型(HTML,含可交互的自动修图原型)
-├── docs/                  # 设计文档与遗留问题清单
+├── AGENTS.md              # 全仓库开发规则；前后端目录有各自补充规则
+├── CONTRIBUTING.md        # 环境准备、验证选择、测试安全与提交方式
+├── docs/                  # 设计、开发上下文与遗留问题清单
 ├── Makefile               # 启动/停止/测试脚本
 └── .env                   # LLM key / JWT 密钥 / MySQL 连接(不入库)
 ```
@@ -259,9 +263,9 @@ key 优先级:`CHROMA_LLM_API_KEY`(环境变量或项目根 `.env`)> `OPENAI_API
 
 ```bash
 make test           # 后端测试(pytest)
-make test-frontend  # 前端展示层纯函数测试(Node 内置 runner,零依赖)
+make test-frontend  # 前端测试(Node 内置 runner,含组件/事务及 Python 对拍)
 make test-parity    # 前后端一致性校验(引擎数学 + .cube 序列化)
-make check          # 上面三个一起跑(提交前应全绿)
+make check          # 上面三个一起跑(根据改动范围选用，不含生产构建)
 make build          # 构建前端产物到 frontend/dist
 make admin          # 创建/重置本地账号
 ```
@@ -279,12 +283,13 @@ make admin          # 创建/重置本地账号
 >
 > 另外 `db.clear_users()` / `clear_all()` / `clear_sessions()` 在开发库上会**直接
 > 拒绝执行**(抛 `RuntimeError`)—— 因为临时脚本、REPL 这些路径不经过 pytest,
-> 光靠 conftest 挡不住。确实需要重置本地环境时显式放行:
-> `CHROMA_ALLOW_CLEAR_DEV_DB=1 <你的命令>`。
+> 光靠 conftest 挡不住。开发库重置必须作为单独、明确授权的数据操作处理；
+> 常规开发、测试与验收不能打开放行开关绕过保护，也不能用全库清空代替
+> 按测试账号清理临时数据。测试安全细则见[贡献指南](CONTRIBUTING.md#数据库测试安全)。
 
 后端测试覆盖:LUT 引擎数学正确性、`.cube` 序列化、API CRUD、认证与限流、生成结果留档、会话流程与参数契约、tool calling 提取(含预算耗尽/入参非法等异常路径)、影调分区与分离色调、自动修图(测量/判定/渲染/编排/硬校验/API),以及**架构约束**的自动检查(分层依赖、参数集三方一致)。LLM 路径全部用桩,不打真实 API。
 
-前端测试：`npm test` 覆盖展示、调色项目事务、草稿存储、风格配方与接线辅助纯函数。
+前端测试：`npm test` 使用 Node 内置 runner，覆盖展示、调色项目事务、草稿存储、风格配方与接线辅助逻辑；部分用例依赖 React/esbuild 或根目录 `.venv` 的 Python。按受影响范围选择验证，详见[贡献指南](CONTRIBUTING.md#验证选择)。
 
 配方跨运行时回归可单独运行，跳过数据库测试配置：
 
@@ -316,6 +321,11 @@ PYTHONPATH=backend .venv/bin/python -m pytest --noconftest -p no:cacheprovider b
 
 | 文档 | 内容 |
 |---|---|
+| [AGENTS.md](AGENTS.md) | AI 开发入口、模块职责、产品与数据约束、验证及安全规则 |
+| [backend/AGENTS.md](backend/AGENTS.md) | 后端分层、参数契约、事务与作业、数据库测试规则 |
+| [frontend/AGENTS.md](frontend/AGENTS.md) | 前端组件、主题、调色事务、色彩与按需加载规则 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 人工与 AI 辅助开发的环境准备、检查命令、测试安全及评审方式 |
+| [docs/development/ai-guide.md](docs/development/ai-guide.md) | 当前产品对象、实现定位、常见排查路径与任务交接模板 |
 | [docs/auto-retouch.md](docs/auto-retouch.md) | AI 自动修图总览与范围边界 |
 | [docs/specs/architecture.md](docs/specs/architecture.md) | 分层职责、关键取舍、成本预算、风险 |
 | [docs/lut-design-remediation.md](docs/lut-design-remediation.md) | LUT 参数设计问题、修订任务、验收与设备校准限制 |
