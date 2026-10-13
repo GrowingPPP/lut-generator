@@ -12,6 +12,7 @@ export default function VersionPanel({
   onDelete,
   onRestore,
   comparison,
+  comparing = Boolean(comparison),
   onCompare,
   onCloseCompare,
   draft,
@@ -90,12 +91,13 @@ export default function VersionPanel({
         <button className="btn btn-ghost btn-sm" onClick={() => onCompare('b', choices[0])}>
           更新 B 为当前草稿
         </button>
-        {comparison && (
+        {comparing && (
           <button className="btn btn-soft btn-sm" onClick={onCloseCompare}>
-            返回当前编辑
+            返回原图 / 当前效果
           </button>
         )}
       </div>
+      <p className="tool-note">A / B 比较固定版本快照。切回原图 / 当前效果后可继续调色，已选的 A / B 会保留。</p>
       {(expanded || open) && (
         <div className="version-list" id={listId}>
           {versions.map((v) => (

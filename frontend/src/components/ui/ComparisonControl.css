@@ -1,0 +1,9 @@
+.comparison-control { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.comparison-control > label { flex: 0 1 auto; color: var(--text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comparison-control > .range-field { flex: 1; min-width: 0; }
+.comparison-control.is-overlay { position: absolute; inset: 0; z-index: 3; }
+.comparison-control.is-overlay > .range-field { height: 100%; margin: 0; cursor: ew-resize; }
+.comparison-control.is-overlay .range-track { visibility: hidden; }
+.comparison-control.is-overlay .range-thumb { width: 44px; height: 44px; opacity: 0; cursor: ew-resize; }
+.comparison-control.is-overlay:focus-within { outline: 2px solid var(--photo-text); outline-offset: -3px; border-radius: inherit; }
+.comparison-control.is-overlay .range-thumb:focus-visible { opacity: 1; background: var(--photo-overlay); border: 2px solid var(--photo-text); }

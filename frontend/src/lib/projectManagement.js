@@ -38,7 +38,10 @@ export function duplicateWorkspaceState(state, { id = workspaceId(), sessionId =
     revision: 0, created_at: stamp, updated_at: stamp, associated_version: null,
     applied_auto_job_ids: [], report: null, validation: null })
   // Comparison versions belong to the source project and are not copied.
-  if (workspace.view_state) workspace.view_state.comparison = null
+  if (workspace.view_state) {
+    workspace.view_state.comparison = null
+    workspace.view_state.comparison_mode = 'current'
+  }
   return { workspace, past: [], future: [], pending: null }
 }
 

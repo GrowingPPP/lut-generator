@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { ModalSurface } from './ui/Dialog.jsx'
-import RangeField from './ui/RangeField.jsx'
+import ComparisonControl from './ui/ComparisonControl.jsx'
 import Tooltip from './ui/Tooltip.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
 import { generateLUT } from '../lib/lutEngine.js'
@@ -113,7 +113,7 @@ function gpuPhotoLimit() {
 }
 
 export default function PhotoViewer({ sample, media, params, compatible, comparison, onClose, initialMode = 'slider', initialSplit = 0.5,
-  adjustmentPanel, canUndo = false, canRedo = false, onUndo, onRedo, onEditDraft, onFinishAdjustment }) {
+  adjustmentPanel, canUndo = false, canRedo = false, onUndo, onRedo, onEditDraft, onFinishAdjustment, returnFocusRef }) {
   const id = useId()
   const modalRef = useRef(null)
   const synthetic = useRef(media?.canvas)
@@ -319,11 +319,13 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const percent = Math.round(view.scale * 1000) / 10
   const modes = [['slider', '滑动对比', 'split'], ['side-by-side', '并排', 'compare'], ['original', hasComparison && !fallback ? '仅 A' : '仅原图', 'image'], ['effect', hasComparison ? '仅 B' : '仅效果', 'adjust']]
 
-  return <ModalSurface onClose={close} contentRef={modalRef} overlayClassName="photo-viewer-backdrop">
+  return <ModalSurface onClose={close} contentRef={modalRef} returnFocusRef={returnFocusRef} overlayClassName="photo-viewer-backdrop">
     <section className={`photo-viewer${panelOpen && adjustmentPanel ? ' has-adjustments' : ''}`} aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`} onKeyDown={key}>
       <header className="photo-viewer-header">
         <div className="photo-viewer-title"><h2 id={`${id}-title`}>放大查看</h2><span title={sample?.name}>{sample?.name || '调色示意图'}</span></div>
         <div className="photo-viewer-header-actions">
+          {hasComparison && onEditDraft && <button type="button" className="photo-viewer-button btn-soft photo-viewer-return-current"
+            onClick={() => { finishAdjustment(); onEditDraft() }}><ActionIcon name="image" />返回原图 / 当前效果</button>}
           {adjustmentPanel && <button type="button" className={`photo-viewer-button ${panelOpen ? 'btn-soft' : 'btn-ghost'}`} aria-pressed={panelOpen} aria-expanded={panelOpen} aria-controls={`${id}-adjustments`} onClick={() => { if (panelOpen) finishAdjustment(); setPanelOpen(value => !value) }}><ActionIcon name="adjust" />调色面板{panelOpen ? ' · 收起' : ''}</button>}
           <button type="button" className="photo-viewer-button btn-ghost photo-viewer-close" onClick={close}><ActionIcon name="close" />关闭</button>
         </div>
@@ -370,7 +372,7 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
         {visibleMode === 'slider' && <div className="photo-viewer-divider" style={{ left: `${split * 100}%` }} aria-hidden="true" />}
       </div>
       <footer className="photo-viewer-footer">
-        {compatible && visibleMode === 'slider' && <div className="photo-viewer-split"><label htmlFor={`${id}-split`}>{aLabel} / {bLabel}</label><RangeField id={`${id}-split`} min="0" max="100" value={Math.round(split * 100)} onChange={event => setSplit(Number(event.target.value) / 100)} aria-label="照片对比分界" aria-valuetext={`左侧 ${Math.round(split * 100)}%，右侧 ${Math.round((1 - split) * 100)}%`} /></div>}
+        {compatible && visibleMode === 'slider' && <ComparisonControl value={split} onChange={setSplit} before={aLabel} after={bLabel} />}
         <p id={`${id}-help`}>滚轮缩放 · 拖动平移 · + / − 缩放 · 0 适应 · 1 {file ? '原像素' : '预览像素'} · 方向键平移 · Esc 关闭</p>
       </footer>
       </div>

@@ -15,6 +15,8 @@ function browser({ saved = null, dark = false, storageFailure, mediaFailure, leg
   const events = new Map()
   const mediaListeners = new Set()
   const writes = []
+  const frames = new Map()
+  let frameId = 0
   const storage = {
     getItem(key) {
       assert.equal(key, THEME_STORAGE_KEY)
@@ -35,9 +37,14 @@ function browser({ saved = null, dark = false, storageFailure, mediaFailure, leg
     media.addEventListener = (type, listener) => { assert.equal(type, 'change'); mediaListeners.add(listener) }
     media.removeEventListener = (type, listener) => { assert.equal(type, 'change'); mediaListeners.delete(listener) }
   }
-  const document = { documentElement: { setAttribute: (name, value) => attributes.set(name, value) } }
+  const document = { documentElement: {
+    setAttribute: (name, value) => attributes.set(name, value),
+    removeAttribute: name => attributes.delete(name),
+  } }
   const window = {
     document,
+    requestAnimationFrame(callback) { frames.set(++frameId, callback); return frameId },
+    cancelAnimationFrame(id) { frames.delete(id) },
     matchMedia(query) {
       assert.equal(query, '(prefers-color-scheme: dark)')
       if (mediaFailure) throw new Error('Media unavailable')
@@ -56,7 +63,12 @@ function browser({ saved = null, dark = false, storageFailure, mediaFailure, leg
     },
   })
   return {
-    window, document, attributes, writes, events, mediaListeners, storage,
+    window, document, attributes, writes, events, mediaListeners, storage, frames,
+    paint() {
+      const pending = [...frames.values()]
+      frames.clear()
+      pending.forEach(callback => callback())
+    },
     changeSystem(matches) {
       media.matches = matches
       for (const listener of mediaListeners) listener({ matches })
@@ -73,6 +85,30 @@ function initialized(options) {
   controller.initialize()
   return { ...environment, controller }
 }
+
+test('theme changes keep foreground and background atomic through the next paint', () => {
+  const { controller, attributes, paint } = initialized({ saved: 'light' })
+  assert.equal(attributes.has('data-theme-switching'), false)
+  controller.setPreference('gray')
+  assert.equal(attributes.get('data-theme'), 'gray')
+  assert.equal(attributes.has('data-theme-switching'), true)
+  paint()
+  assert.equal(attributes.has('data-theme-switching'), true)
+  paint()
+  assert.equal(attributes.has('data-theme-switching'), false)
+})
+
+test('rapid theme changes cancel the old transition release and disposal clears it', () => {
+  const { controller, attributes, paint, frames } = initialized({ saved: 'light' })
+  controller.setPreference('gray'); paint()
+  controller.setPreference('dark')
+  assert.equal(frames.size, 1)
+  paint()
+  assert.equal(attributes.has('data-theme-switching'), true)
+  controller.dispose()
+  assert.equal(frames.size, 0)
+  assert.equal(attributes.has('data-theme-switching'), false)
+})
 
 test('theme choices expose all four Chinese names with strict preference validation', () => {
   assert.deepEqual(THEME_OPTIONS.map(({ value, label }) => [value, label]), [

@@ -14,7 +14,7 @@ import {
 export default function ParameterControls({
   params, lockedFields = [], disabled = false, groupOpen, onGroupOpen,
   gesture = {}, onUpdateParam, onUpdateChannel, onToggleLock, onReset, onSetLocks,
-  showFooter = true, contextKey,
+  showFooter = true, contextKey, presentation = 'groups',
 }) {
   const [localOpen, setLocalOpen] = useState(defaultGroupOpen)
   const [confirming, setConfirming] = useState(false)
@@ -32,6 +32,9 @@ export default function ParameterControls({
   const open = groupOpen ?? localOpen
   const setOpen = onGroupOpen ?? setLocalOpen
   const locked = (key) => lockedFields.includes(key)
+  const basic = presentation === 'basic'
+  const basicKeys = ['exposure', 'temp', 'contrast', 'saturation']
+  const groups = basic ? [{ id: 'essentials', label: '基础调整', sliders: basicKeys.map(key => PARAM_GROUPS.flatMap(group => group.sliders).find(slider => slider.key === key)) }] : PARAM_GROUPS
   const parameterKeys = Object.keys(params)
   const protectedCount = parameterKeys.filter(locked).length
   const blocked = disabled || confirming
@@ -63,13 +66,13 @@ export default function ParameterControls({
     }
   }
   const lockButton = (key) => (
-    <ProtectionButton label={parameterLabel(key)} locked={locked(key)} disabled={blocked}
+    <ProtectionButton label={parameterLabel(key)} locked={locked(key)} disabled={blocked} compact={!basic || !locked(key)}
       onClick={() => onToggleLock([key])} />
   )
 
   return <>
     {showFooter && <div className="parameter-management">
-      <div className="parameter-management-copy">
+      <div className="parameter-management-copy" title="保护同时限制手动和 AI 修改">
         <span className="parameter-management-status">已保护 {protectedCount} / {parameterKeys.length} 项</span>
         <span className="parameter-management-summary">保护同时限制手动和 AI 修改</span>
       </div>
@@ -83,15 +86,13 @@ export default function ParameterControls({
           { id: 'reset-unprotected', label: '复位未保护调色项…', description: '含自由曲线和外部 LUT', separator: true, destructive: true, onSelect: requestReset },
         ]} />
     </div>}
-    <BeginnerGuide />
-    <p className="parameter-help-intro">不确定参数的作用？点击名称旁的「？」查看说明与尝试建议。</p>
-    {PARAM_GROUPS.map((group) => {
+    {groups.map((group) => {
       const fields = group.id === 'rgb'
         ? RGB_GROUPS.map((rgb) => rgb.key)
         : group.sliders.map((slider) => slider.key)
       const protectedCount = fields.filter(locked).length
-      return <section key={group.id} className="param-group">
-        <div className="param-group-header">
+      return <section key={group.id} className={`param-group ${basic ? "param-group-essential" : ""}`}>
+        <div className="param-group-header" hidden={basic}>
           <button
             type="button"
             className="param-group-head"
@@ -114,8 +115,8 @@ export default function ParameterControls({
             </button>
           </Tooltip>
         </div>
-        {open[group.id] && <div className="controls">
-          <p className="parameter-group-description">{PARAMETER_GROUP_HELP[group.id].summary} <strong>{PARAMETER_GROUP_HELP[group.id].startWith}</strong></p>
+        {(basic || open[group.id]) && <div className="controls">
+          {!basic && <p className="parameter-group-description">{PARAMETER_GROUP_HELP[group.id].summary} <strong>{PARAMETER_GROUP_HELP[group.id].startWith}</strong></p>}
           {group.id === 'rgb'
             ? RGB_GROUPS.map((rgb) => <div key={rgb.key} className="rgb-group">
               <div className="rgb-group-title">
@@ -161,5 +162,6 @@ export default function ParameterControls({
         </div>}
       </section>
     })}
+    <div className="parameter-guide"><BeginnerGuide compact /></div>
   </>
 }

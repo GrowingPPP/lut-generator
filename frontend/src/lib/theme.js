@@ -21,11 +21,27 @@ export function createThemeController({ window: host = globalThis.window, docume
   let initialized = false
   let storage = null
   let media = null
+  let appliedTheme = null
+  let switchFrame = null
   const listeners = new Set()
 
   function apply() {
-    doc?.documentElement?.setAttribute('data-theme', resolveTheme(preference, systemDark))
-    doc?.documentElement?.setAttribute('data-theme-preference', preference)
+    const root = doc?.documentElement
+    const next = resolveTheme(preference, systemDark)
+    if (appliedTheme !== null && next !== appliedTheme && host?.requestAnimationFrame) {
+      if (switchFrame !== null) host.cancelAnimationFrame?.(switchFrame)
+      root?.setAttribute('data-theme-switching', '')
+      // Keep transitions disabled through one paint of the new foreground/background pair.
+      switchFrame = host.requestAnimationFrame(() => {
+        switchFrame = host.requestAnimationFrame(() => {
+          root?.removeAttribute?.('data-theme-switching')
+          switchFrame = null
+        })
+      })
+    }
+    root?.setAttribute('data-theme', next)
+    root?.setAttribute('data-theme-preference', preference)
+    appliedTheme = next
   }
 
   function update(value) {
@@ -84,6 +100,10 @@ export function createThemeController({ window: host = globalThis.window, docume
       return () => listeners.delete(listener)
     },
     dispose() {
+      if (switchFrame !== null) host?.cancelAnimationFrame?.(switchFrame)
+      doc?.documentElement?.removeAttribute?.('data-theme-switching')
+      switchFrame = null
+      appliedTheme = null
       host?.removeEventListener?.('storage', onStorage)
       if (media?.removeEventListener) media.removeEventListener('change', onSystemChange)
       else media?.removeListener?.(onSystemChange)

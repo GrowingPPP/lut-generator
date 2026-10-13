@@ -26,7 +26,7 @@ function panelTitle(panel) {
 }
 
 function Surface({ children, onClose, open = true, busy = false, initialFocusRef,
-  contentRef, overlayClassName = 'modal-backdrop', destructive = false }) {
+  contentRef, returnFocusRef, overlayClassName = 'modal-backdrop', destructive = false }) {
   const panel = Children.only(children)
   const Primitive = destructive ? AlertDialog : Dialog
   const localRef = useRef(null)
@@ -61,7 +61,7 @@ function Surface({ children, onClose, open = true, busy = false, initialFocusRef
     if (closeRef.current.busy || hasChildLayer()) event.preventDefault()
   }
   const autofocus = event => {
-    if (!previousOpen.current) returnFocus.current = document.activeElement
+    if (!previousOpen.current) returnFocus.current = returnFocusRef?.current || document.activeElement
     previousOpen.current = true
     const target = initialFocusRef?.current
     if (target && !target.matches?.(':disabled')) {

@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
-import ParameterControls from './ParameterControls.jsx'
+import ParameterPanel from './ParameterPanel.jsx'
 import CurveEditor from './CurveEditor.jsx'
 import ParameterHelp from './ParameterHelp.jsx'
 import RangeField, { NumberField } from './ui/RangeField.jsx'
@@ -12,7 +12,8 @@ const SAVE_STATES = {
 }
 const EXTERNAL_FIELDS = ['external_lut_id', 'external_lut_strength', 'external_lut_mode']
 
-const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled, gesture, onUpdateParam, onUpdateChannel, onToggleLock, resourceError }, ref) {
+const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled, gesture, onUpdateParam, onUpdateChannel, onToggleLock, resourceError,
+  allParameters, onPresentationChange, groupOpen, onGroupOpen }, ref) {
   const { workspace, saveStatus, error, conflict } = editor
   const { params, locked_fields: locked } = workspace
   const [tab, setTab] = useState('parameters')
@@ -40,10 +41,11 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
       <TabsTrigger value="curves">自由曲线</TabsTrigger>
     </TabsList>
     <TabsContent value="parameters" forceMount asChild>
-    <fieldset className="params param-groups" disabled={disabled}>
-      <ParameterControls params={params} lockedFields={locked} disabled={disabled} gesture={gesture} contextKey={workspace.id}
+    <div>
+    <ParameterPanel allParameters={allParameters} onPresentationChange={value => { finishPendingEdit(); onPresentationChange?.(value) }}
+      groupOpen={groupOpen} onGroupOpen={onGroupOpen} params={params} lockedFields={locked} disabled={disabled} gesture={gesture} contextKey={workspace.id}
         onUpdateParam={onUpdateParam} onUpdateChannel={onUpdateChannel} onToggleLock={onToggleLock}
-        onSetLocks={editor.setLocks} onReset={reset} />
+        onSetLocks={editor.setLocks} onReset={reset}>
       {params.external_lut_id && <section className="param-group photo-adjustment-external">
         <div className="param-group-header parameter-effect-heading"><strong className="param-group-label">外部 LUT</strong>
           <ProtectionButton label="外部 LUT" locked={externalFullyLocked} mixed={externalLocked && !externalFullyLocked}
@@ -62,7 +64,8 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
         <div className="photo-adjustment-external-help"><ParameterHelp parameter="external_lut_strength" /></div>
         {params.external_lut_mode === 'input' && <p className="tool-note">输入转换 LUT 强度固定为 100%。</p>}
       </section>}
-    </fieldset>
+    </ParameterPanel>
+    </div>
     </TabsContent>
     <TabsContent value="curves" forceMount asChild>
     <div className="photo-adjustment-curves">
@@ -71,7 +74,7 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
         <ProtectionButton label="自由曲线" locked={locked.includes('curve_points')} compact={false} disabled={disabled}
           onClick={() => { finishPendingEdit(); onToggleLock(['curve_points']) }} />
       </div>
-      <CurveEditor ref={curveRef} params={params} disabled={disabled || tab !== 'curves'} locked={locked}
+      <CurveEditor ref={curveRef} showHeading={false} params={params} disabled={disabled || tab !== 'curves'} locked={locked}
         onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })} onPreview={editor.update}
         onCommit={patch => editor.commit(patch, { source: 'curve', purpose: 'style' })} onCancel={editor.cancel} />
     </div>

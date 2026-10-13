@@ -8,6 +8,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { defaultParams, normalizeParams } from './lib/lutEngine.js'
 import usePreview from './hooks/usePreview.js'
 import useWorkspace from './hooks/useWorkspace.js'
+import useCreationFlow from './hooks/useCreationFlow.js'
+import useAutoRetouchController from './hooks/useAutoRetouchController.js'
+import { CREATION_STEPS, creationToolTab } from './lib/creationFlow.js'
+import CreationNavigation from './components/CreationNavigation.jsx'
+import CreationPhotoSetup from './components/CreationPhotoSetup.jsx'
+import CreationDelivery from './components/CreationDelivery.jsx'
 import { ModalSurface, useDialogs } from './components/ui/Dialog.jsx'
 import ActionMenu from './components/ui/ActionMenu.jsx'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from './components/ui/Tabs.jsx'
@@ -28,10 +34,9 @@ import ProjectManager, { projectName } from './components/ProjectManager.jsx'
 import InputConfirmationDialog from './components/InputConfirmationDialog.jsx'
 import SampleGallery from './components/SampleGallery.jsx'
 import SubjectProtectionPanel from './components/SubjectProtectionPanel.jsx'
-import { effectiveSubjectProtection, normalizeSubjectDetection, subjectSelection, SUBJECT_ANALYSIS_VERSION } from './lib/subjectAnalysis.js'
+import { effectiveSubjectProtection, normalizeSubjectDetection, subjectSelection, subjectStatusText, SUBJECT_ANALYSIS_VERSION } from './lib/subjectAnalysis.js'
 import SampleInputPreview from './components/SampleInputPreview.jsx'
 import VersionPanel from './components/VersionPanel.jsx'
-import StyleSaveDialog from './components/StyleSaveDialog.jsx'
 import CameraGuideDialog from './components/CameraGuideDialog.jsx'
 import DiagnosticsPanel from './components/DiagnosticsPanel.jsx'
 import ComparisonPreview, { RenderedImage } from './components/ComparisonPreview.jsx'
@@ -43,7 +48,9 @@ import {
 import { paramsToCube } from './lib/lutEngine.js'
 import { sameAutoMetadata } from './lib/autoJobs.js'
 import { preloadExternalLut } from './lib/importedLuts.js'
-import ParameterControls from './components/ParameterControls.jsx'
+import ParameterPanel from './components/ParameterPanel.jsx'
+import ToolPanel from './components/ToolPanel.jsx'
+import ComparisonControl from './components/ui/ComparisonControl.jsx'
 import ParameterHelp from './components/ParameterHelp.jsx'
 import SelectField from './components/SelectField.jsx'
 import { defaultGroupOpen, parameterLabel } from './lib/parameterControls.js'
@@ -53,6 +60,7 @@ import AutoRetouchBar from './components/AutoRetouchBar.jsx'
 import AutoRetouchReport from './components/AutoRetouchReport.jsx'
 import { DeferredFeature, lazyFeature } from './components/FeatureLoader.jsx'
 import './GenerationWorkspace.css'
+import './CreationFlow.css'
 
 const CurveEditor = lazyFeature(() => import('./components/CurveEditor.jsx'), '自由曲线', CurveEditorUrl)
 const ImportedLutPanel = lazyFeature(() => import('./components/ImportedLutPanel.jsx'), '外部 LUT', ImportedLutPanelUrl)
@@ -120,7 +128,7 @@ const DISPLAY_MODES = [
   { value: 'split', label: '独立展示' },
 ]
 const EMPTY_PROJECT_VIEW = { display_mode: 'slider', split: 0.5, selected_sample_id: null,
-  comparison: null, tool_tab: 'ai', ai_intent: 'optimize', curves_open: false }
+  comparison: null, comparison_mode: 'current', tool_tab: 'ai', ai_intent: 'optimize', curves_open: false, creation_step: 'photos' }
 
 export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const dialogs = useDialogs()
@@ -141,13 +149,20 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const [advancedLoading, setAdvancedLoading] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [referenceBusy, setReferenceBusy] = useState(false)
+  const [deliveryBusy, setDeliveryBusy] = useState(false)
+  const [allParameters, setAllParameters] = useState(false)
   const [status, setStatus] = useState('')
   const [groupOpen, setGroupOpen] = useState(defaultGroupOpen)
   const [sessions, setSessions] = useState([])
   const [remoteWorkspaces, setRemoteWorkspaces] = useState([])
   const [versions, setVersions] = useState([])
   const [comparison, setComparison] = useState(null)
-  const [saveDialog, setSaveDialog] = useState(false)
+  const [comparisonMode, setComparisonMode] = useState('current')
+  const showCurrentComparison = useCallback(() => setComparisonMode('current'), [])
+  const clearComparison = useCallback(() => {
+    setComparison(null)
+    setComparisonMode('current')
+  }, [])
   const [cameraGuide, setCameraGuide] = useState(null)
   const [inputConfirmation, setInputConfirmation] = useState(false)
   const [toolTab, setToolTab] = useState('ai')
@@ -176,7 +191,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const curveEntryRef = useRef(null)
   const mainCurveRef = useRef(null)
   const photoAdjustmentsRef = useRef(null)
-  const draggingRef = useRef(false)
+  const photoViewerEntryRef = useRef(null)
+  const sampleGalleryRef = useRef(null)
+  const creationTitleRef = useRef(null)
   const fileInputRef = useRef(null)
   const fileSelectionRef = useRef(null)
   const openRequestRef = useRef(0)
@@ -193,6 +210,15 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   mediaRef.current = media
   const currentRef = useRef(workspace)
   currentRef.current = workspace
+  const saveBusyIdentity = useRef(null)
+  const setDeliverySaving = useCallback(value => {
+    const identity = `${user}:${workspace.id}`
+    if (!subjectMountedRef.current || currentRef.current.id !== workspace.id || currentRef.current.user_id !== String(user)) return
+    if (value) saveBusyIdentity.current = identity
+    else if (saveBusyIdentity.current !== identity) return
+    setDeliveryBusy(value)
+  }, [user, workspace.id])
+  useEffect(() => { saveBusyIdentity.current = null; setDeliveryBusy(false) }, [user, workspace.id])
   const finishMainAdjustment = useCallback(() => {
     mainCurveRef.current?.finishPendingEdit()
     editor.commit()
@@ -200,13 +226,35 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const undoAdjustment = useCallback(() => { finishMainAdjustment(); editor.undo() }, [finishMainAdjustment, editor.undo])
   const redoAdjustment = useCallback(() => { finishMainAdjustment(); editor.redo() }, [finishMainAdjustment, editor.redo])
   const toolbarEditor = { ...editor, undo: undoAdjustment, redo: redoAdjustment }
+  const flow = useCreationFlow({ workspace, ready, beforeNavigate: finishMainAdjustment })
+  const effectiveToolTab = creationToolTab(flow.step, toolTab)
+  const visibleComparison = flow.step === 'adjust' && comparisonMode === 'versions' ? comparison || {} : null
+  const goToStep = next => {
+    if (!flow.navigate(next)) return
+    if (next === 'style') setToolTab('ai')
+    if (next === 'adjust' && toolTab === 'ai') setToolTab('manual')
+    requestAnimationFrame(() => {
+      creationTitleRef.current?.focus({ preventScroll: true })
+      creationTitleRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' })
+    })
+  }
+  const openTool = next => {
+    goToStep(next === 'ai' ? 'style' : 'adjust')
+    if (next === 'manual') showCurrentComparison()
+    setToolTab(next)
+  }
+  const showPhotoDetails = () => {
+    goToStep('photos')
+    setDetailsRequest(value => value + 1)
+    requestAnimationFrame(() => sampleGalleryRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' }))
+  }
   useEffect(() => {
     if (deletedAssetId == null) return
     deletedAssetIds.current.add(deletedAssetId)
     setSavedAsset(current => current?.id === deletedAssetId ? null : current)
     setPendingAsset(current => current?.lut.id === deletedAssetId ? null : current)
   }, [deletedAssetId])
-  const baseBusy = sending || grading || validating || sampleLoading || detectingSampleId !== null || remoteBusy || resourceLoading || !ready
+  const baseBusy = sending || grading || validating || sampleLoading || detectingSampleId !== null || remoteBusy || deliveryBusy || resourceLoading || !ready
   const busy = baseBusy || advancedLoading
   const projects = useMemo(() => {
     const combined = new Map(localProjects.map(project => [project.id, { ...project, localOnly: true }]))
@@ -302,14 +350,17 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       DISPLAY_MODES.some((mode) => mode.value === view.display_mode) ? view.display_mode : 'slider',
     )
     const restoredSplit = Number.isFinite(view.split)
-      ? Math.max(0.02, Math.min(0.98, view.split))
+      ? Math.max(0, Math.min(1, view.split))
       : 0.5
     setSplitState(restoredSplit)
     setSplit(restoredSplit)
     setComparison(view.comparison || null)
+    setComparisonMode(['current', 'versions'].includes(view.comparison_mode)
+      ? view.comparison_mode : view.comparison ? 'versions' : 'current')
     setToolTab(TOOL_TABS.some(([key]) => key === view.tool_tab) ? view.tool_tab : 'ai')
     setAiIntent(AI_INTENTS.some(([key]) => key === view.ai_intent) ? view.ai_intent : 'optimize')
     setCurvesOpen(Boolean(view.curves_open))
+    setAllParameters(Boolean(view.all_parameters))
     setPhotoViewer(false)
     setSavedAsset(null)
     setBaselineFields([])
@@ -391,11 +442,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       viewWorkspaceRef.current = workspace.id
       return
     }
-    const view = { display_mode: displayMode, split, selected_sample_id: selectedId, comparison,
-      tool_tab: toolTab, ai_intent: aiIntent, curves_open: curvesOpen }
+    const view = { ...workspace.view_state, display_mode: displayMode, split, selected_sample_id: selectedId, comparison, comparison_mode: comparisonMode,
+      tool_tab: toolTab, ai_intent: aiIntent, curves_open: curvesOpen, creation_step: flow.step, all_parameters: allParameters }
     if (JSON.stringify(view) !== JSON.stringify(workspace.view_state))
       editor.setMeta({ view_state: view })
-  }, [ready, workspace.id, displayMode, split, selectedId, comparison, toolTab, aiIntent, curvesOpen, editor.setMeta])
+  }, [ready, workspace.id, displayMode, split, selectedId, comparison, comparisonMode, toolTab, aiIntent, curvesOpen, flow.step, allParameters, editor.setMeta])
 
   useEffect(() => {
     if (!previewLut || busy || consumedPreviewRef.current === previewLut) return
@@ -410,7 +461,6 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         !(e.ctrlKey || e.metaKey) ||
         e.key.toLowerCase() !== 'z' ||
         busy ||
-        saveDialog ||
         inputConfirmation ||
         pendingAsset ||
         workspaceHistory || projectManager ||
@@ -431,7 +481,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undoAdjustment, redoAdjustment, editor.canUndo, editor.canRedo, busy, saveDialog, inputConfirmation, pendingAsset, workspaceHistory, projectManager, photoExport, photoViewer])
+  }, [undoAdjustment, redoAdjustment, editor.canUndo, editor.canRedo, busy, inputConfirmation, pendingAsset, workspaceHistory, projectManager, photoExport, photoViewer])
 
   const captureRequest = () => {
     const ws = currentRef.current
@@ -1034,7 +1084,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       })
       const lastId = [...decodedMedia.keys()].at(-1)
       setSelectedId(lastId)
-      setComparison(null)
+      clearComparison()
       const selected = nextSamples.find(sample => sample.id === lastId)
       const message = rebindingId ? `已重新绑定 ${selected.name}，原文件已恢复`
         : `已载入 ${decodedMedia.size} 张样张`
@@ -1073,8 +1123,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       if (currentRef.current.id !== ws.id) return
       await editor.setMeta({ samples: ws.samples.map((item) => item.id === id ? confirmed : item),
         validation: ws.validation ? { ...ws.validation, stale: true } : null })
-      if (currentRef.current.id === ws.id)
+      if (currentRef.current.id === ws.id) {
+        setSampleBinding(null)
         setStatus(`已确认 ${sample.name} 的 ${contract.base_photo_style} 照片输入`)
+      }
     } catch (failure) { setStatus(failure.message) }
     finally { setSampleLoading(false) }
   }
@@ -1259,13 +1311,17 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   }
 
   const saveAsset = async (data) => {
-    await ensureRemote()
-    const source = versionSource(workspace)
+    const origin = currentRef.current
+    const previousAsset = savedAsset
+    const stillCurrent = () => subjectMountedRef.current && currentRef.current.id === origin.id && currentRef.current.user_id === origin.user_id
+    await ensureRemote(origin)
+    if (!stillCurrent()) throw new Error('调色项目已切换，请在当前项目重新保存')
+    const source = versionSource(origin)
     const metadata = {
       kind: data.kind,
       recipe: data.recipe || null,
-      input_contract: inputContract(params),
-      workspace_id: workspace.id,
+      input_contract: inputContract(origin.params),
+      workspace_id: origin.id,
       source,
       tags: data.tags,
       group: data.group,
@@ -1273,15 +1329,16 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       cover_id: data.cover_id,
     }
     const asset =
-      data.replace && savedAsset && !deletedAssetIds.current.has(savedAsset.id)
-        ? await updateLut(savedAsset.id, {
+      data.replace && previousAsset && !deletedAssetIds.current.has(previousAsset.id)
+        ? await updateLut(previousAsset.id, {
             name: data.name,
-            revision_id: savedAsset.revision_id,
+            revision_id: previousAsset.revision_id,
             description: data.description,
             params: data.params,
             ...metadata,
           })
         : await createLut(data.name, data.description, data.params, metadata)
+    if (!stillCurrent()) return
     setSavedAsset(deletedAssetIds.current.has(asset.id) ? null : asset)
     setStatus(`已保存「${data.name}」，当前草稿保持原效果`)
   }
@@ -1350,9 +1407,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     if (!requestMatches(request)) { setStatus('草稿已变化，请重新选择恢复版本'); return }
     const restored = editor.restoreVersion(version, { unlockFields, confirmInput: inputChanged })
     if (!restored) return
+    showCurrentComparison()
     setStatus(`已恢复「${version.name}」到当前草稿，可撤销`)
   }
-  const compare = (side, item) =>
+  const compare = (side, item) => {
+    finishMainAdjustment()
     setComparison((prev) => ({
       ...(prev || {}),
       [side]: {
@@ -1362,19 +1421,15 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         params: structuredClone(item.params),
       },
     }))
+    setComparisonMode('versions')
+  }
   const comparisonSampleMatches =
     !!selectedSample?.input_confirmed &&
     !!selectedMedia &&
     (!comparison?.a || sampleMatches(selectedSample, comparison.a.params)) &&
     (!comparison?.b || sampleMatches(selectedSample, comparison.b.params))
 
-  const updateSplit = (clientX) => {
-    const rect = gradedRef.current?.getBoundingClientRect()
-    if (!rect?.width) return
-    const x = Math.max(0.02, Math.min(0.98, (clientX - rect.left) / rect.width))
-    setSplit(x)
-    setSplitState(x)
-  }
+  const updateSplit = value => { setSplit(value); setSplitState(value) }
   const downloadCube = (mode) => {
     try {
       const name = workspace.name.trim() || '未命名 LUT'
@@ -1389,17 +1444,36 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     }
   }
   const backup = () => saveTextFile(editor.backup(), `CHROMA_${workspace.id}.json`)
+  const autoController = useAutoRetouchController({
+    onPrepare: prepareAutoSubjects, file: primaryMedia?.file, params, context,
+    workspaceId: workspace.id, sourceDigest: primarySample?.source_digest, mainSampleId: primaryId,
+    hasRealPhoto: !!primaryMedia?.file && primaryCompatible, disabled: busy,
+    running: grading, setRunning: setGrading, setStatus, userId: user, workspaceReady: ready,
+    onBeforeRun: async () => {
+      setSelectedId(primaryId)
+      clearComparison()
+      const request = captureRequest()
+      try {
+        if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
+        await ensureRemote()
+        return request
+      } catch (error) { setStatus(error.message); return false }
+    },
+    getAppliedJob: id => (currentRef.current.applied_auto_job_ids || []).includes(id),
+    onResult: (result, request, meta) => applyAutoResult(result, meta, request),
+    onRestoreResult: (result, meta) => applyAutoResult(result, meta),
+  })
   const reportHistorical = reportIsHistorical(gradeResult, { params, primaryId, sourceDigest: primarySample?.source_digest, context })
-  const curvesVisible = toolTab === 'manual' && curvesOpen
+  const curvesVisible = flow.step === 'adjust' && effectiveToolTab === 'manual' && curvesOpen
   const curvesChanged = Object.values(params.curve_points).some(points => points.some(([x, y]) => Math.abs(x - y) > 1e-9))
   const viewerMedia = selectedMedia || (!samples.length ? { canvas: makeTestImage() } : null)
   const viewerUnavailable = !viewerMedia?.canvas ? '请先上传或重新绑定照片'
-    : comparison && (!comparison.a || !comparison.b) ? '请选择版本 A 和 B 后再放大比较'
-      : comparison && !compatibleVersionInputs(comparison.a.params, comparison.b.params) ? '两版输入基准不同，无法放大比较'
+    : visibleComparison && (!visibleComparison.a || !visibleComparison.b) ? '请选择版本 A 和 B 后再放大比较'
+      : visibleComparison && !compatibleVersionInputs(visibleComparison.a.params, visibleComparison.b.params) ? '两版输入基准不同，无法放大比较'
         : ''
   const activeAiIntent = grading ? 'optimize' : sending ? 'text' : referenceBusy ? 'reference' : null
   const openCurves = () => {
-    setToolTab('manual')
+    openTool('manual')
     setCurvesOpen(true)
     requestAnimationFrame(() => {
       const region = curveWorkbenchRef.current
@@ -1414,14 +1488,15 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     setCurvesOpen(false)
     requestAnimationFrame(() => curveEntryRef.current?.focus())
   }
+  const bindingNotice = sampleBinding?.workspaceId === workspace.id &&
+    (!sampleBinding.sampleId || sampleBinding.sampleId === selectedSample?.id) ? sampleBinding : null
 
   return (
-    <div className="gen-workbench">
+    <div className="gen-workbench creation-flow" data-creation-step={flow.step}>
       <header className="workbench-header">
-        <button className="btn btn-ghost workspace-history-toggle" aria-label="打开对话历史" onClick={() => setWorkspaceHistory(true)}>对话历史</button>
-        <label className="workspace-select">
-          调色项目
+        <div className="workspace-project">
           <SelectField
+            className="workspace-select"
             value={workspace.id}
             aria-label="调色项目"
             onChange={(e) => openWorkspace(e.target.value)}
@@ -1438,36 +1513,40 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
                 </option>
               ))}
           </SelectField>
-        </label>
-        <ActionMenu label="项目管理" disabled={busy} trigger={<button type="button" className="btn btn-ghost project-management-trigger">项目管理 <span aria-hidden="true">⌄</span></button>} items={[
+          <ActionMenu label="项目管理" disabled={busy} trigger={<button type="button" className="btn btn-ghost btn-icon project-management-trigger" aria-label="项目管理" title="项目管理：重命名、复制或删除"><ActionIcon name="more" /></button>} items={[
           { id: 'name', type: 'label', label: projectName(workspace) },
+          { id: 'new', label: '新建调色项目', description: '保存当前草稿，再开始新的创作', onSelect: newWorkspace },
           { id: 'rename', label: '重命名项目', onSelect: () => renameProject() },
           { id: 'duplicate', label: '复制当前项目', description: '保留当前效果与样张，独立继续创作', onSelect: duplicateProject },
           { id: 'all', label: '管理全部项目', separator: true, onSelect: manageProjects },
           { id: 'delete', label: '删除当前项目', description: '保留已保存 LUT 和原照片', separator: true, destructive: true, onSelect: () => removeProject() },
         ]} />
-        <WorkspaceToolbar mode="header" editor={toolbarEditor} busy={busy} onNew={newWorkspace} onBackup={backup}
-          onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
-        <div className="delivery-actions">
-          <button className="btn btn-ghost" onClick={() => setToolTab('versions')}>版本</button>
-          <button className="btn-primary" disabled={busy} onClick={() => setSaveDialog(true)}>保存至我的 LUT</button>
-          <ActionMenu label="导出选项" trigger={<button type="button" className="btn btn-soft">导出 <span aria-hidden="true">⌄</span></button>} items={[
-            { id: 'lut-label', type: 'label', label: 'LUT · 当前完整效果' },
-            { id: 'camera', label: '机内 LUT · .cube', description: resourceError ? '请先重新载入外部 LUT 资源' : busy ? '当前操作完成后可导出' : '用于相机导入', disabled: busy || !!resourceError, onSelect: () => downloadCube('camera') },
-            { id: 'software', label: '后期 LUT · .cube', description: resourceError ? '请先重新载入外部 LUT 资源' : busy ? '当前操作完成后可导出' : '用于后期软件调色', disabled: busy || !!resourceError, onSelect: () => downloadCube('software') },
-            { id: 'photo-divider', type: 'separator' },
-            { id: 'photo-label', type: 'label', label: '调整后照片' },
-            { id: 'photo', label: '导出照片 · JPEG / PNG', description: resourceError ? '请先重新载入外部 LUT 资源' : busy ? '当前操作完成后可导出' : !compatible || !selectedMedia?.file ? '需要绑定原文件并确认照片输入' : '使用当前调整效果导出', disabled: busy || !compatible || !selectedMedia?.file || !!resourceError, onSelect: () => setPhotoExport(true) },
-            { id: 'guide-divider', type: 'separator' },
-            { id: 'guide', label: '相机导入说明', description: busy ? '当前操作完成后可查看' : '查看输入基准与相机导入步骤', disabled: busy, onSelect: () => setCameraGuide({ sample: selectedSample }) },
-          ]} />
         </div>
+        <button className="btn btn-ghost workspace-history-toggle" aria-label="打开对话历史" onClick={() => setWorkspaceHistory(true)}><ActionIcon name="history" /><span>对话历史</span></button>
+        <WorkspaceToolbar showNew={false} mode="header" editor={toolbarEditor} busy={busy} onNew={newWorkspace} onBackup={backup}
+          onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
       </header>
-      {status && <div className="workbench-notice" role="status"><span>{status}</span>{activeAiIntent && !(toolTab === 'ai' && aiIntent === activeAiIntent) && <button className="btn" onClick={() => { setToolTab('ai'); setAiIntent(activeAiIntent) }}>{grading ? '查看作业与取消' : '查看当前操作'}</button>}</div>}
-      <div className="workbench-body">
-        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片调色项目" tabIndex={0}>
+      <WorkspaceToolbar mode="recovery" editor={toolbarEditor} busy={busy} onBackup={backup} />
+      <CreationNavigation step={flow.step} onNavigate={goToStep} titleRef={creationTitleRef} disabled={!ready || sampleLoading || deliveryBusy} />
+      {status && (bindingNotice?.phase === 'success' || status !== bindingNotice?.message) && <div className="workbench-notice" role="status"><span>{status}</span><button type="button" className="btn btn-ghost btn-icon" aria-label="关闭操作提示" onClick={() => setStatus('')}><ActionIcon name="close" /></button>{activeAiIntent && !(flow.step === 'style' && aiIntent === activeAiIntent) && <button className="btn" onClick={() => { openTool('ai'); setAiIntent(activeAiIntent) }}>{grading ? '查看进度与取消' : '查看当前操作'}</button>}</div>}
+      <div className="workbench-body creation-body">
+        <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片预览与检查">
+        <section className="creation-preview-panel" aria-label="照片预览">
+        <div className="creation-preview-header">
         <div className="preview-toolbar">
-          <label className="mode-select">
+        {flow.step === 'adjust' && <div className="preview-comparison-controls">
+          <div className="preview-comparison-switch" role="group" aria-label="比较对象">
+            <button type="button" className={`btn btn-sm ${visibleComparison ? 'btn-ghost' : 'btn-soft'}`}
+              aria-pressed={!visibleComparison} onClick={showCurrentComparison}>原图 / 当前效果</button>
+            <button type="button" className={`btn btn-sm ${visibleComparison ? 'btn-soft' : 'btn-ghost'}`}
+              aria-pressed={!!visibleComparison} onClick={() => {
+                finishMainAdjustment(); setComparisonMode('versions'); setToolTab('versions')
+              }}>版本 A / B</button>
+          </div>
+          {visibleComparison && <span className="preview-comparison-note">正在比较固定快照，当前草稿保持原样</span>}
+        </div>}
+
+          <label className="mode-select" hidden={!!visibleComparison}>
             展示形式
             <SelectField aria-label="展示形式" value={displayMode} onChange={(e) => setDisplayMode(e.target.value)}>
               {DISPLAY_MODES.map((m) => (
@@ -1482,18 +1561,18 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           </span>
           <Tooltip content={viewerUnavailable || '放大照片查看细节，可打开调色面板边看边调整'}><button type="button" className="btn photo-viewer-launch" aria-label="放大查看照片"
             disabled={!!viewerUnavailable}
-            onClick={() => setPhotoViewer(true)}>放大查看</button></Tooltip>
-          <button type="button" className="btn btn-ghost curve-quick-toggle" ref={curveEntryRef}
+            ref={photoViewerEntryRef} onClick={() => setPhotoViewer(true)}>放大查看</button></Tooltip>
+          <button type="button" className="btn btn-ghost curve-quick-toggle" ref={curveEntryRef} hidden={flow.step !== 'adjust'}
             aria-expanded={curvesVisible} aria-controls="curve-workbench"
             onClick={() => curvesVisible ? closeCurves() : openCurves()}>
             自由曲线{curvesVisible ? ' · 收起' : curvesChanged ? ' · 已调整' : ''}
           </button>
           <button
-            className={samples.length ? 'btn btn-ghost upload-sm' : 'btn-primary upload-sm'}
+            className="btn btn-ghost upload-sm" hidden={flow.step === 'save'}
             disabled={busy || samples.length >= 5}
             onClick={() => openSamplePicker()}
           >
-            <ActionIcon name="upload" />上传样张
+            <ActionIcon name="upload" />{samples.length ? '添加照片' : '选择照片'}
           </button>
           <input
             ref={fileInputRef}
@@ -1504,58 +1583,49 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             onChange={addSamples}
             onCancel={() => { fileSelectionRef.current = null }}
           />
-        </div>
+        <details className="preview-input-details"><summary>{params.base_photo_style} · 输入说明</summary>
         <p className="input-context">
           {params.base_photo_style === 'VLOG'
             ? '输入需为未经显示转换的 V-Log/V-Gamut 帧；普通 JPEG 不代表 V-Log 信号。'
             : `当前 LUT 需要 ${params.base_photo_style} Photo Style 的相机直出信号。`}
         </p>
-        {sampleBinding?.workspaceId === workspace.id && (!sampleBinding.sampleId || sampleBinding.sampleId === selectedSample?.id) && (
-          <p className="sample-binding-status" data-phase={sampleBinding.phase}
-            role={sampleBinding.phase === 'error' ? 'alert' : 'status'}>{sampleBinding.message}</p>
+        </details>
+        </div>
+        {bindingNotice && bindingNotice.phase !== 'success' && (
+          <p className="sample-binding-status" data-phase={bindingNotice.phase}
+            role={bindingNotice.phase === 'error' ? 'alert' : 'status'}>{bindingNotice.message}</p>
         )}
+        </div>
         <div className="photo-stage" style={{ '--photo-ratio': selectedMedia?.canvas ? selectedMedia.canvas.width / selectedMedia.canvas.height : 800 / 560 }}>
-        {comparison && (
+        {!samples.length && flow.step === 'photos' && <div className="creation-photo-empty"><ActionIcon name="image" /><h2>放入你的第一张照片</h2><p>在右侧选择照片，或先用合成示意图手动创作 LUT。</p></div>}
+        {visibleComparison && (
           <ComparisonPreview
             image={selectedMedia?.canvas}
-            a={comparison.a}
-            b={comparison.b}
+            a={visibleComparison.a}
+            b={visibleComparison.b}
             compatible={comparisonSampleMatches}
           />
         )}
-        <div hidden={!!comparison}>
+        <div hidden={!!visibleComparison || (!samples.length && flow.step === 'photos')}>
           {samples.length > 0 && (!selectedMedia || !compatible) && (
             selectedMedia ? <SampleInputPreview key={`${workspace.id}:${selectedSample.id}:${selectedSample.input_contract?.base_photo_style}`}
               sample={selectedSample} media={selectedMedia} params={params} busy={busy}
               onConfirm={contract => confirmSample(selectedSample.id, contract)}
               onRebind={() => openSamplePicker(selectedSample.id)}
-              onDetails={() => setDetailsRequest(value => value + 1)} onInput={() => setToolTab('manual')} /> :
+              onDetails={showPhotoDetails} onInput={() => openTool('manual')} /> :
             <div className="preview-empty">
               样张文件仅保留于上次页面内存，请重新绑定照片。
               <div className="preview-empty-actions">
                 <button className="btn-primary" disabled={busy} onClick={() => openSamplePicker(selectedSample.id)}>重新绑定照片</button>
-                <button className="btn btn-ghost" onClick={() => setToolTab('manual')}>检查 LUT 输入</button>
+                <button className="btn btn-ghost" onClick={() => openTool('manual')}>检查 LUT 输入</button>
               </div>
             </div>
           )}
           <div hidden={samples.length > 0 && (!selectedMedia || !compatible)}>
             {displayMode === 'slider' ? (
-              <div
-                className="slider-wrap"
-                onPointerDown={(e) => {
-                  draggingRef.current = true
-                  e.currentTarget.setPointerCapture(e.pointerId)
-                  updateSplit(e.clientX)
-                }}
-                onPointerMove={(e) => draggingRef.current && updateSplit(e.clientX)}
-                onPointerUp={() => {
-                  draggingRef.current = false
-                }}
-                onPointerCancel={() => {
-                  draggingRef.current = false
-                }}
-              >
-                <canvas ref={gradedRef} className="pane-canvas" />
+              <div className="slider-wrap">
+                <canvas ref={gradedRef} className="pane-canvas" role="img" aria-label="原图与当前 LUT 效果比较" />
+                <ComparisonControl overlay value={split} onChange={updateSplit} />
                 <div className="slider-handle" style={{ left: `${split * 100}%` }} />
                 <span className="tag tag-orig">原图</span>
                 <span className="tag tag-lut">LUT</span>
@@ -1564,28 +1634,29 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
               <div className="previews">
                 <div className="pane">
                   <div className="pane-label">原图</div>
-                  <canvas ref={originalRef} className="pane-canvas" />
+                  <canvas ref={originalRef} className="pane-canvas" role="img" aria-label="原图" />
                 </div>
                 <div className="pane">
                   <div className="pane-label">LUT 叠加</div>
-                  <canvas ref={gradedRef} className="pane-canvas" />
+                  <canvas ref={gradedRef} className="pane-canvas" role="img" aria-label="当前 LUT 效果" />
                 </div>
               </div>
             )}
           </div>
         </div>
         </div>
+        </section>
         <div className="curve-workbench" id="curve-workbench" ref={curveWorkbenchRef} role="region" aria-label="自由曲线 · 四通道" tabIndex={-1} hidden={!curvesVisible}>
           <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><div className="curve-heading-actions"><ProtectionButton label="自由曲线" locked={locked('curve_points')} compact={false} disabled={busy} onClick={() => toggleLock(['curve_points'])} /><button className="btn btn-ghost" onClick={closeCurves}>收起曲线</button></div></div>
           <div className="curve-workbench-body">
-            <DeferredFeature active={curvesVisible}><CurveEditor ref={mainCurveRef} key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
+            <DeferredFeature active={curvesVisible}><CurveEditor ref={mainCurveRef} showHeading={false} key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
               onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
               onPreview={editor.update}
               onCommit={(patch) => editor.commit(patch, { source: 'curve', purpose: 'style' })}
               onCancel={editor.cancel} /></DeferredFeature>
           </div>
         </div>
-        <SampleGallery
+        <div ref={sampleGalleryRef} className="creation-samples" hidden={!['photos', 'adjust'].includes(flow.step)}><SampleGallery
           detailsRequest={detailsRequest}
           samples={samples}
           media={media}
@@ -1608,70 +1679,42 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           retainPreviews={retainPreviews}
           onRetain={retain}
           onGuide={(sample) => setCameraGuide({ sample: sample || selectedSample })}
-        />
-          <DiagnosticsPanel compact image={selectedMedia?.canvas} params={params} compatible={compatible} sampleName={selectedSample?.name} />
+        /></div>
+          <div hidden={flow.step !== 'adjust'}><DiagnosticsPanel compact image={selectedMedia?.canvas} params={params} compatible={compatible} sampleName={selectedSample?.name} /></div>
           {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
         </section>
-        <TabsRoot asChild value={toolTab} onValueChange={setToolTab}>
-        <aside className="task-panel" aria-label="调色工具">
-          <TabsList className="task-tabs" aria-label="调色任务">
-            {TOOL_TABS.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</TabsTrigger>)}
+        <TabsRoot asChild value={effectiveToolTab} onValueChange={next => {
+          finishMainAdjustment()
+          if (next === 'manual') showCurrentComparison()
+          setToolTab(next)
+        }}>
+        <ToolPanel className="task-panel" aria-label="当前步骤工具" step={flow.step} minimized={curvesVisible} onExpand={closeCurves}>
+          <div hidden={flow.step !== 'photos'}><CreationPhotoSetup sample={selectedSample} media={selectedMedia}
+            primarySample={primarySample} params={params} busy={busy} sampleCount={samples.length}
+            onUpload={() => openSamplePicker()} onRebind={() => openSamplePicker(selectedSample?.id)}
+            onConfirm={contract => confirmSample(selectedSample.id, contract)} onDetails={showPhotoDetails}
+            onGuide={() => setCameraGuide({ sample: selectedSample })} onAdjust={() => openTool('manual')} /></div>
+          <div hidden={flow.step !== 'save'}><DeferredFeature active={flow.step === 'save'}><CreationDelivery key={workspace.id}
+            workspace={workspace} image={selectedMedia?.canvas} compatible={compatible} media={selectedMedia} sample={selectedSample}
+            savedAsset={savedAsset} disabled={busy} resourceError={resourceError} onSave={saveAsset} onBusyChange={setDeliverySaving}
+            onBind={() => { goToStep('photos'); if (selectedSample && !selectedMedia?.file) openSamplePicker(selectedSample.id) }}
+            onDownload={downloadCube} onPhotoExport={() => setPhotoExport(true)} onGuide={() => setCameraGuide({ sample: selectedSample })} /></DeferredFeature></div>
+          <TabsList className="task-tabs" aria-label="比较与调整工具" hidden={flow.step !== 'adjust'}>
+            {TOOL_TABS.filter(([key]) => key !== 'ai').map(([key, label]) => <TabsTrigger key={key} value={key}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</TabsTrigger>)}
           </TabsList>
-          <div className="manual-tool-shortcuts feature-protection-heading" hidden={toolTab !== 'manual'}>
+          <div className="manual-tool-shortcuts feature-protection-heading" hidden={effectiveToolTab !== 'manual'}>
             <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => curvesOpen ? closeCurves() : openCurves()}>
               <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>
             </button>
             <ProtectionButton label="自由曲线" locked={locked('curve_points')} compact={false} disabled={busy} onClick={() => toggleLock(['curve_points'])} />
           </div>
-          <TabsContent value="ai" forceMount asChild><section className="tool-view">
-            <h2 className="tool-heading">形成你想要的效果</h2>
+          <section className="tool-view" hidden={effectiveToolTab !== 'ai'} inert={effectiveToolTab !== 'ai' ? '' : undefined} aria-labelledby="creation-ai-title">
+            <h2 id="creation-ai-title" className="tool-heading">选择创作方式</h2>
             <div className="ai-intents" role="group" aria-label="创作方式">{AI_INTENTS.map(([key, label]) => <button key={key} aria-pressed={aiIntent === key} onClick={() => setAiIntent(key)}>{label}</button>)}</div>
-            <WorkspaceToolbar mode="context" editor={toolbarEditor} busy={busy} onBackup={backup} />
-            <div className="ai-context"><span>AI 主样张</span><strong>{primarySample?.name || '尚未选择'}</strong>
-              {primaryId !== selectedSample?.id && primarySample && <p>当前正在查看 {selectedSample?.name}。照片优化与参考匹配使用主样张，开始时会切回该照片。</p>}
-            </div>
-            {primarySample && <div className="ai-subject-protection"><SubjectProtectionPanel sample={primarySample}
-              previewUrl={primaryMedia?.thumbnail} busy={busy} detecting={detectingSampleId === primaryId}
-              onDetect={primaryCompatible && primaryMedia?.file ? () => detectSubjectsManually(primaryId) : undefined}
-              onSelectionChange={selection => setSampleSubject(primaryId, selection)}
-              onRegionsChange={regions => changeSubjectMetadata(primaryId, { subject_regions: regions,
-                ...(regions === null ? { subject_region_mask_mode: 'skin_candidates' } : {}) })}
-              onMaskModeChange={mode => changeSubjectMetadata(primaryId, { subject_region_mask_mode: mode })} /></div>}
+            <WorkspaceToolbar mode="goal" editor={toolbarEditor} busy={busy} onBackup={backup} />
             <div className="ai-method" hidden={aiIntent !== 'optimize'}>
-              <h3 className="tool-subheading">根据照片分析并应用调整</h3>
-        <AutoRetouchBar
-          onPrepare={prepareAutoSubjects}
-          file={primaryMedia?.file}
-          params={params}
-          context={context}
-          workspaceId={workspace.id}
-          sourceDigest={primarySample?.source_digest}
-          mainSampleId={primaryId}
-          sampleName={primarySample?.name}
-          hasRealPhoto={!!primaryMedia?.file && primaryCompatible}
-          disabled={busy}
-          running={grading}
-          setRunning={setGrading}
-          setStatus={setStatus}
-          onBeforeRun={async () => {
-            setSelectedId(primaryId)
-            setComparison(null)
-            const request = captureRequest()
-            try {
-              if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
-              await ensureRemote()
-              return request
-            } catch (e) {
-              setStatus(e.message)
-              return false
-            }
-          }}
-          userId={user}
-          workspaceReady={ready}
-          getAppliedJob={(id) => (currentRef.current.applied_auto_job_ids || []).includes(id)}
-          onResult={(result, request, meta) => applyAutoResult(result, meta, request)}
-          onRestoreResult={(result, meta) => applyAutoResult(result, meta)}
-        />
+        <AutoRetouchBar controller={autoController} context={context} running={grading} disabled={busy}
+          hasRealPhoto={!!primaryMedia?.file && primaryCompatible} sampleName={primarySample?.name} showSample={false} />
         {!primaryCompatible && samples.length > 0 && (
           <p className="workspace-note">
             AI 主样张需要确认输入并与当前基准一致；查看其他缩略图不会更换主样张。
@@ -1694,12 +1737,12 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             </div></details>
             </div>
             <div className="ai-method" hidden={aiIntent !== 'reference'}>
-      <DeferredFeature active={toolTab === 'ai' && aiIntent === 'reference'}><ReferenceMatchDialog key={`reference:${workspace.id}`} inline visible={toolTab === 'ai' && aiIntent === 'reference'} disabled={busy} file={primaryMedia?.file} image={primaryMedia?.canvas}
+      <DeferredFeature active={flow.step === 'style' && aiIntent === 'reference'}><ReferenceMatchDialog key={`reference:${workspace.id}`} inline visible={flow.step === 'style' && aiIntent === 'reference'} disabled={busy} file={primaryMedia?.file} image={primaryMedia?.canvas}
         params={params} context={context} workspaceId={workspace.id} sourceDigest={primarySample?.source_digest}
         mainSampleId={primaryId} compatible={primaryCompatible} onClose={() => setAiIntent('optimize')}
         onBusyChange={value => { setRemoteBusy(value); setReferenceBusy(value) }} onStatus={setStatus} onPrepare={async () => {
           setSelectedId(primaryId)
-          setComparison(null)
+          clearComparison()
           const request = captureRequest()
           if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
           await ensureRemote()
@@ -1709,9 +1752,22 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           const next = editor.commit(result.params, { source: 'reference', purpose: 'style' })
           if (!next) return false
           if (!(await editor.flush())) throw new Error('候选未能保存，请重试草稿保存')
-          setSelectedId(primaryId); setComparison(null); setStatus('参考匹配候选已应用，可一次撤销')
+          setSelectedId(primaryId); clearComparison(); setStatus('参考匹配候选已应用，可一次撤销')
           return true
         }} /></DeferredFeature>
+            </div>
+            <div className="ai-safety-context">
+            <div className="ai-context"><span>AI 主样张</span><strong>{primarySample?.name || '尚未选择'}</strong>
+              {primaryId !== selectedSample?.id && primarySample && <p>当前正在查看 {selectedSample?.name}。照片优化与参考匹配使用主样张，开始时会切回该照片。</p>}
+            </div>
+            {primarySample && <details className="ai-subject-protection creation-subject-details"><summary>人物保护 · {subjectStatusText(primarySample)}</summary><SubjectProtectionPanel sample={primarySample}
+              previewUrl={primaryMedia?.thumbnail} busy={busy} detecting={detectingSampleId === primaryId}
+              onDetect={primaryCompatible && primaryMedia?.file ? () => detectSubjectsManually(primaryId) : undefined}
+              onSelectionChange={selection => setSampleSubject(primaryId, selection)}
+              onRegionsChange={regions => changeSubjectMetadata(primaryId, { subject_regions: regions,
+                ...(regions === null ? { subject_region_mask_mode: 'skin_candidates' } : {}) })}
+              onMaskModeChange={mode => changeSubjectMetadata(primaryId, { subject_region_mask_mode: mode })} /></details>}
+            <WorkspaceToolbar mode="details" editor={toolbarEditor} busy={busy} onBackup={backup} />
             </div>
             <div className="ai-result">
         {gradeResult && (
@@ -1728,12 +1784,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           />
         )}
             </div>
-          </section></TabsContent>
+          </section>
           <TabsContent value="manual" forceMount asChild><section className="tool-view">
-        <fieldset className="params param-groups" disabled={busy} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
-          <h3 className="tool-heading">微调当前效果</h3>
-          <p className="tool-note">基础调整优先；已调整或受保护的高级项会在标题中提示。</p>
-          <ParameterControls
+          <ParameterPanel
+            allParameters={allParameters}
+            onPresentationChange={value => { finishMainAdjustment(); setAllParameters(value) }}
             params={params}
             contextKey={workspace.id}
             lockedFields={workspace.locked_fields}
@@ -1749,13 +1804,13 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
               editor.reset(fields)
               if (group) setStatus(`已复位未保护项，保留 ${fields.filter(locked).length} 项`)
             }}
-          />
+          >
           <details className="professional-settings">
             <summary className="feature-protection-heading"><span>外部 LUT · {params.external_lut_id ? `${Math.round(params.external_lut_strength * 100)}% 已叠加` : '未叠加'}</span><ProtectionButton label="外部 LUT" compact={false}
               locked={['external_lut_id', 'external_lut_strength', 'external_lut_mode'].every(locked)}
               mixed={['external_lut_id', 'external_lut_strength', 'external_lut_mode'].some(locked) && !['external_lut_id', 'external_lut_strength', 'external_lut_mode'].every(locked)} disabled={busy}
               onClick={event => { event.preventDefault(); event.stopPropagation(); toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode']) }} /></summary>
-          <DeferredFeature active={toolTab === 'manual'}><ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
+          <DeferredFeature active={flow.step === 'adjust' && effectiveToolTab === 'manual'}><ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
             locked={workspace.locked_fields} onError={(error) => setStatus(error.message)} onReady={() => setResourceError('')}
             onCommit={(patch) => editor.commit(patch, { source: 'external_lut', purpose: 'style' })} /></DeferredFeature>
           </details>
@@ -1820,7 +1875,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             </div>
           )}
           </details>
-        </fieldset>
+        </ParameterPanel>
           </section></TabsContent>
           <TabsContent value="versions" forceMount asChild><section className="tool-view">
             <div className="workspace-name-label project-version-name"><span>当前调色项目<strong>{projectName(workspace)}</strong></span><button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => renameProject()}>重命名</button></div>
@@ -1830,9 +1885,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           busy={busy}
           draft={workspace}
           comparison={comparison}
+          comparing={!!visibleComparison}
           onSave={saveVersion}
           onCompare={compare}
-          onCloseCompare={() => setComparison(null)}
+          onCloseCompare={showCurrentComparison}
           onRestore={restoreVersion}
           onRename={changeVersion}
           onDelete={(id) => changeVersion(id)}
@@ -1875,14 +1931,25 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           </details>
         )}
           </section></TabsContent>
-        </aside>
+        </ToolPanel>
         </TabsRoot>
       </div>
+      <footer className="creation-actions">
+        <button type="button" className="btn btn-ghost" disabled={!ready || sampleLoading || deliveryBusy || flow.step === 'photos'}
+          onClick={() => goToStep(CREATION_STEPS[CREATION_STEPS.findIndex(item => item.id === flow.step) - 1].id)}>
+          返回：{CREATION_STEPS[Math.max(0, CREATION_STEPS.findIndex(item => item.id === flow.step) - 1)].title}
+        </button>
+        <p>{grading ? 'AI 作业仍在继续；可查看其他步骤，相关编辑暂时冻结。' : '随时可返回修改，当前照片、参数与候选会保留。'}</p>
+        {flow.step !== 'save' && <button type="button" className={flow.step === 'adjust' || (flow.step === 'photos' && compatible) ? 'btn-primary' : 'btn btn-soft'}
+          disabled={!ready || sampleLoading || deliveryBusy} onClick={() => goToStep(CREATION_STEPS[CREATION_STEPS.findIndex(item => item.id === flow.step) + 1].id)}>
+          {flow.step === 'style' ? '继续：调效果' : `继续：${CREATION_STEPS[CREATION_STEPS.findIndex(item => item.id === flow.step) + 1].title}`}
+        </button>}
+      </footer>
       {projectManager && <ProjectManager projects={projects} currentId={workspace.id} busy={busy}
         loading={projectLoading} error={projectError} onClose={() => setProjectManager(false)} onOpen={openWorkspace}
         onNew={newWorkspace} onRename={renameProject} onDelete={removeProject} onRetry={refreshProjects} />}
       {workspaceHistory && <WorkbenchDialog title="对话历史" onClose={() => setWorkspaceHistory(false)}>
-        <p className="tool-note">这里管理 AI 对话记录。调色项目的重命名、复制与删除，请使用顶部“项目管理”。</p>
+        <p className="tool-note">这里管理 AI 对话记录。调色项目的重命名、复制与删除，请使用项目名称旁的「⋯」管理菜单。</p>
           <div className="session-list">
             {sessions.map((s) => (
               <div
@@ -1920,12 +1987,13 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       {photoExport && <PhotoExportDialog loadingSurface={ToolLoadingSurface} loadingClose={() => setPhotoExport(false)} sample={selectedSample} media={selectedMedia} params={params}
         compatible={compatible} onClose={() => setPhotoExport(false)} onBusyChange={setRemoteBusy} />}
       {photoViewer && !viewerUnavailable && <PhotoViewer loadingSurface={ToolLoadingSurface} loadingClose={() => setPhotoViewer(false)} key={`${workspace.id}:${selectedSample?.id || 'synthetic'}`}
-        sample={selectedSample} media={viewerMedia} params={params} comparison={comparison}
-        compatible={comparison ? comparisonSampleMatches : !samples.length || compatible}
-        initialMode={displayMode} initialSplit={split} onClose={() => setPhotoViewer(false)}
+        sample={selectedSample} media={viewerMedia} params={params} comparison={visibleComparison}
+        compatible={visibleComparison ? comparisonSampleMatches : !samples.length || compatible}
+        initialMode={displayMode} initialSplit={split} returnFocusRef={photoViewerEntryRef} onClose={() => setPhotoViewer(false)}
         canUndo={!busy && editor.canUndo} canRedo={!busy && editor.canRedo} onUndo={editor.undo} onRedo={editor.redo}
-        onFinishAdjustment={() => photoAdjustmentsRef.current ? photoAdjustmentsRef.current.finishPendingEdit() : editor.commit()} onEditDraft={() => setComparison(null)}
+        onFinishAdjustment={() => photoAdjustmentsRef.current ? photoAdjustmentsRef.current.finishPendingEdit() : editor.commit()} onEditDraft={showCurrentComparison}
         adjustmentPanel={<PhotoAdjustments ref={photoAdjustmentsRef} editor={editor} disabled={busy} gesture={gesture}
+          allParameters={allParameters} onPresentationChange={setAllParameters} groupOpen={groupOpen} onGroupOpen={setGroupOpen}
           onUpdateParam={updateParam} onUpdateChannel={updateChannel} onToggleLock={toggleLock} resourceError={resourceError} />} />}
       {inputConfirmation && (
         <InputConfirmationDialog
@@ -1944,16 +2012,6 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           sample={cameraGuide.sample}
           onClose={() => setCameraGuide(null)}
           onDownload={() => downloadCube('camera')}
-        />
-      )}
-      {saveDialog && (
-        <StyleSaveDialog
-          workspace={workspace}
-          image={selectedMedia?.canvas}
-          compatible={compatible}
-          onClose={() => setSaveDialog(false)}
-          onSave={saveAsset}
-          savedAsset={savedAsset}
         />
       )}
       {pendingAsset && (

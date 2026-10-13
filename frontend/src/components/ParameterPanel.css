@@ -1,0 +1,25 @@
+.parameter-panel { min-width: 0; }
+.parameter-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.parameter-panel-heading h2 { margin: 0; font-size: 16px; line-height: 1.5; font-weight: 600; }
+.parameter-panel > .params { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.parameter-panel .parameter-management { margin-bottom: 0; padding: 4px 0 8px; border-top: 0; background: transparent; border-radius: 0; }
+.parameter-panel .parameter-management-summary { display: none; }
+.parameter-panel .parameter-management-status { font-size: 12px; }
+.parameter-panel .param-group-essential { border: 0; background: transparent; }
+.parameter-panel .param-group-essential .controls { padding: 0; gap: 16px; background: transparent; grid-template-columns: minmax(0, 1fr); }
+.parameter-panel .param-group-essential .parameter-control { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.parameter-panel .param-group-essential .parameter-control:last-child { border: 0; padding-bottom: 0; }
+.parameter-panel .slider { font-size: 14px; }
+.parameter-panel .number-field input.number-input { width: 68px; }
+.parameter-panel .parameter-guide { margin: 16px 0; }
+.parameter-panel .beginner-guide { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.parameter-panel .beginner-guide > summary { padding: 8px 0; }
+.parameter-panel .beginner-guide-content { padding: 4px 0 12px; }
+@media (pointer: coarse) {
+  .parameter-panel .parameter-help-button { width: 44px; height: 44px; flex-basis: 44px; }
+  .parameter-panel .protection-button { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 740px) {
+  .parameter-panel .slider > .range-field { min-height: 44px; }
+  .parameter-panel .number-field input.number-input { min-height: 44px; font-size: 16px; }
+}

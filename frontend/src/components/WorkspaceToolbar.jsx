@@ -15,7 +15,7 @@ const SAVE_STATES = {
   conflict: '另一标签页已更新草稿',
 }
 
-export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHistory, mode = 'full', sample, onSubjectChange }) {
+export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHistory, mode = 'full', showNew = true, sample, onSubjectChange }) {
   const {
     workspace,
     setGoal,
@@ -30,8 +30,10 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
     fork,
     flush,
   } = editor
-  const showHeader = mode !== 'context'
-  const showContext = mode !== 'header'
+  const showHeader = mode === 'full' || mode === 'header'
+  const showContext = mode === 'full' || mode === 'context' || mode === 'goal'
+  const showDetails = mode === 'full' || mode === 'context' || mode === 'details'
+  const showRecovery = mode === 'full' || mode === 'recovery'
   const showSubject = showContext && sample && typeof onSubjectChange === 'function'
   const purposeControl = (
     <label className="purpose-select">
@@ -48,9 +50,10 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
       </SelectField>
     </label>
   )
+  if (mode === 'recovery' && !error && !conflict) return null
   return (
     <section className={`workspace-toolbar workspace-toolbar-${mode}`}>
-      <div className="workspace-toolbar-row">
+      {(showHeader || showContext) && <div className="workspace-toolbar-row">
         {showContext && <label>
           创作目标
           <SelectField
@@ -60,7 +63,7 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
             disabled={busy}
           >
             {GOALS.map(([v, l]) => (
-              <option key={v} value={v}>
+              <option key={v} value={v} description={GOALS.find(item => item[0] === v)?.[2]}>
                 {l}
               </option>
             ))}
@@ -77,18 +80,18 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
           {SAVE_STATES[saveStatus] || saveStatus}
         </span>}
         {showHeader && <div className="workspace-history">
-          <Tooltip content="撤销上一项调整 · ⌘ / Ctrl + Z"><button className="btn btn-ghost btn-sm" onClick={() => { undo(); onHistory?.('undo') }} disabled={!canUndo || busy}>
-            <ActionIcon name="undo" />撤销
+          <Tooltip content="撤销上一项调整 · ⌘ / Ctrl + Z"><button className="btn btn-ghost btn-sm" aria-label="撤销上一项调整" onClick={() => { undo(); onHistory?.('undo') }} disabled={!canUndo || busy}>
+            <ActionIcon name="undo" /><span>撤销</span>
           </button></Tooltip>
-          <Tooltip content="重做上一项调整 · ⌘ / Ctrl + Shift + Z"><button className="btn btn-ghost btn-sm" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
-            <ActionIcon name="redo" />重做
+          <Tooltip content="重做上一项调整 · ⌘ / Ctrl + Shift + Z"><button className="btn btn-ghost btn-sm" aria-label="重做上一项调整" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
+            <ActionIcon name="redo" /><span>重做</span>
           </button></Tooltip>
-          <Tooltip content="保存当前项目，使用默认参数开始新的创作"><button className="btn btn-ghost btn-sm" onClick={onNew} disabled={busy}>
+          {showNew && <Tooltip content="保存当前项目，使用默认参数开始新的创作"><button className="btn btn-ghost btn-sm" onClick={onNew} disabled={busy}>
             新建调色项目
-          </button></Tooltip>
+          </button></Tooltip>}
         </div>}
-      </div>
-      {showContext && <p className="workspace-note">
+      </div>}
+      {showDetails && mode !== 'details' && <p className="workspace-note">
         {GOALS.find(([v]) => v === workspace.goal_mode)?.[2]} · 已保护{' '}
         {workspace.locked_fields.length} 项参数
       </p>}
@@ -99,14 +102,15 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
         <summary>人物颜色保护说明</summary>
         <p className="workspace-note">疑似肤色只依据颜色范围，当前没有人物检测或分割。未确认或无人物时，不启用人物颜色保护。</p>
       </details>}
-      {showContext && (mode === 'context' ? (
+      {showDetails && (mode !== 'full' ? (
         <details className="workspace-advanced">
-          <summary>高级设置 · 调整贡献归类</summary>
+          <summary>目标说明与高级设置</summary>
+          <p className="workspace-note">{GOALS.find(([v]) => v === workspace.goal_mode)?.[2]} · 已保护 {workspace.locked_fields.length} 项参数</p>
           <p className="workspace-note">记录单张校正和风格贡献，用于后续保存可复用风格。</p>
           {purposeControl}
         </details>
       ) : purposeControl)}
-      {showHeader && (error || conflict) && (
+      {showRecovery && (error || conflict) && (
         <div className="draft-error" role="alert">
           {error?.message || '检测到其他标签页的更新，已暂停覆盖。'}
           <div className="workspace-toolbar-row">

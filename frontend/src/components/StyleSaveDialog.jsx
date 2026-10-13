@@ -1,5 +1,5 @@
 import CheckboxField from './ui/CheckboxField.jsx'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { defaultParams } from '../lib/lutEngine.js'
 import {
@@ -21,8 +21,11 @@ export default function StyleSaveDialog({
   onClose,
   onSave,
   savedAsset,
+  inline = false,
+  disabled = false,
+  onBusyChange,
 }) {
-  const [kind, setKind] = useState('full_snapshot')
+  const [kind, setKind] = useState(() => inline && recipeCanSave(workspace).allowed ? 'portable_style' : 'full_snapshot')
   const [name, setName] = useState(workspace.name || '')
   const [description, setDescription] = useState(savedAsset?.description || '')
   const [tags, setTags] = useState((savedAsset?.tags || []).join(', '))
@@ -34,6 +37,7 @@ export default function StyleSaveDialog({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [replace, setReplace] = useState(false)
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange])
   const eligibility = recipeCanSave(workspace)
   const originalOperations = workspace.recipe_projection?.operations || {}
   const candidate = useMemo(() => {
@@ -55,7 +59,8 @@ export default function StyleSaveDialog({
   }, [kind, workspace, operations, excluded])
   const changes = candidate.params ? diffParams(workspace.params, candidate.params) : []
   const submit = async () => {
-    if (!candidate.params || (kind === 'portable_style' && !eligibility.allowed)) return
+    if (disabled || saving || !candidate.params || (kind === 'portable_style' && !eligibility.allowed)) return
+    onBusyChange?.(true)
     setSaving(true)
     setError('')
     try {
@@ -73,36 +78,67 @@ export default function StyleSaveDialog({
         favorite,
         cover_id: cover,
       })
-      onClose()
+      if (!inline) onClose()
     } catch (e) {
       setError(e.message)
     } finally {
       setSaving(false)
+      onBusyChange?.(false)
     }
   }
-  return (
-    <ModalSurface onClose={onClose} busy={saving}>
+  const content = (
       <section
-        className="workspace-modal"
-        role="dialog"
-        aria-modal="true"
+        className={inline ? "workspace-modal creation-save-form" : "workspace-modal"}
+        role={inline ? undefined : "dialog"}
+        aria-modal={inline ? undefined : "true"}
         aria-labelledby="save-title"
       >
         <div className="section-heading">
-          <h2 id="save-title">保存调色资产</h2>
-          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
+          <h2 id="save-title">保存到我的 LUT</h2>
+          {!inline && <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
             <ActionIcon name="close" />关闭
-          </button>
+          </button>}
         </div>
         <label>
-          资产名称
+          作品名称
           <input
-            aria-label="资产名称"
+            aria-label="作品名称"
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={100}
+            disabled={saving || disabled}
           />
         </label>
+        <div className="asset-kind-options">
+          <label>
+            <input
+              type="radio"
+              name="asset-kind"
+              value="full_snapshot"
+              disabled={saving || disabled}
+              checked={kind === 'full_snapshot'}
+              onChange={() => setKind('full_snapshot')}
+            />
+            当前完整效果
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="asset-kind"
+              value="portable_style"
+              disabled={saving || disabled}
+              checked={kind === 'portable_style'}
+              onChange={() => setKind('portable_style')}
+            />
+            可复用风格
+          </label>
+        </div>
+        <p className="workspace-note">
+          {kind === 'full_snapshot'
+            ? '保存当前全部参数，包含单张校正。载入时替换完整参数。'
+            : '保存实际生效的风格贡献；可在兼容输入上追加到另一调色项目的当前效果。展开「查看保存内容与当前效果」可比较两者。'}
+        </p>
+        <details className="creation-save-metadata"><summary>描述、标签与作品管理</summary>
         <div className="asset-save-metadata">
           <label>
             描述 / 适用场景
@@ -161,33 +197,7 @@ export default function StyleSaveDialog({
             收藏此资产
           </label>
         </div>
-        <div className="asset-kind-options">
-          <label>
-            <input
-              type="radio"
-              name="asset-kind"
-              value="full_snapshot"
-              checked={kind === 'full_snapshot'}
-              onChange={() => setKind('full_snapshot')}
-            />
-            单张完整效果
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="asset-kind"
-              value="portable_style"
-              checked={kind === 'portable_style'}
-              onChange={() => setKind('portable_style')}
-            />
-            可复用风格
-          </label>
-        </div>
-        <p className="workspace-note">
-          {kind === 'full_snapshot'
-            ? '保存当前全部参数，包含单张校正。载入时替换完整参数。'
-            : '保存实际生效的风格贡献；追加到另一调色项目的当前效果。下方预览使用同一输入基准的中性参数。'}
-        </p>
+        </details>
         {kind === 'portable_style' && (
           <>
             {!eligibility.allowed && <p className="error">{eligibility.reasons.join('；')}</p>}
@@ -196,7 +206,7 @@ export default function StyleSaveDialog({
                 风格形成后又发生过单张校正；可复用风格保留此前的风格贡献，下方与当前完整效果分别预览。
               </p>
             )}
-            <div className="recipe-operations">
+            <details className="creation-recipe-details"><summary>高级：查看与编辑风格贡献</summary><div className="recipe-operations">
               {Object.entries(operations || originalOperations).map(([key, op]) => (
                 <div className="recipe-operation" key={key}>
                   <label>
@@ -245,9 +255,11 @@ export default function StyleSaveDialog({
             <p className="text-muted">
               排除效果项会一并移除不再使用的作用范围。输入不匹配、锁冲突或超出范围时阻止应用。
             </p>
+            </details>
           </>
         )}
         {candidate.error && <p className="error">{candidate.error}</p>}
+        <details className="creation-save-preview"><summary>查看保存内容与当前效果</summary>
         {candidate.params &&
           image &&
           compatible &&
@@ -268,10 +280,12 @@ export default function StyleSaveDialog({
             相对当前完整效果的差异：{changes.map((c) => c.text).join('；')}
           </p>
         )}
+        </details>
         {savedAsset && (
           <label className="preview-cache-option">
             <CheckboxField
               checked={replace}
+              disabled={saving || disabled}
               onChange={(e) => setReplace(e.target.checked)}
             />
             <span className="asset-update-text">更新「{savedAsset.name}」，保留旧修订</span>
@@ -283,20 +297,18 @@ export default function StyleSaveDialog({
           </p>
         )}
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
-            取消
-          </button>
+{!inline && <button className="btn btn-ghost" onClick={onClose} disabled={saving}>取消</button>}
           <button
             className="btn-primary"
             onClick={submit}
             disabled={
-              saving || !!candidate.error || (kind === 'portable_style' && !eligibility.allowed)
+              disabled || saving || !!candidate.error || (kind === 'portable_style' && !eligibility.allowed)
             }
           >
             {saving ? '正在保存…' : '保存到我的 LUT'}
           </button>
         </div>
       </section>
-    </ModalSurface>
   )
+  return inline ? content : <ModalSurface onClose={onClose} busy={saving}>{content}</ModalSurface>
 }

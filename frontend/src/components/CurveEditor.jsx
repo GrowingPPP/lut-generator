@@ -103,8 +103,8 @@ function CurveChannel({ channel, points, blocked, dragging, onBegin, onMove, onF
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPointDraft(draft => ({ ...draft, [axis]: percent(points[pointIndex][axis === 'x' ? 0 : 1]) })); setPointError('') }
           }} />
       </label>)}
+      {pointError && <p className="curve-editor-help curve-coordinate-error" role="status">{pointError}</p>}
     </div>
-    {pointError && <p className="curve-editor-help" role="status">{pointError}</p>}
     <div className="curve-editor-actions">
       <span>控制点 {pointIndex + 1} / {points.length}</span>
       <button type="button" disabled={editingBlocked || pointIndex === 0 || pointIndex === points.length - 1} onClick={() => {
@@ -117,7 +117,7 @@ function CurveChannel({ channel, points, blocked, dragging, onBegin, onMove, onF
   </section>
 }
 
-const CurveEditor = forwardRef(function CurveEditor({ params, disabled = false, locked = false, onBegin, onPreview, onCommit, onCancel }, ref) {
+const CurveEditor = forwardRef(function CurveEditor({ params, disabled = false, locked = false, showHeading = true, onBegin, onPreview, onCommit, onCancel }, ref) {
   const [curves, setCurves] = useState(() => copy(params.curve_points || identityCurves()))
   const [activeChannel, setActiveChannel] = useState(null)
   const curvesRef = useRef(curves)
@@ -178,9 +178,8 @@ const CurveEditor = forwardRef(function CurveEditor({ params, disabled = false, 
     curvesRef.current = next; setCurves(next); onCommit?.({ curve_points: copy(next) })
   }
   return <section className="curve-editor" aria-label="自由曲线编辑" data-chroma-escape-gesture={activeChannel !== null ? 'true' : undefined}>
-    <div className="curve-editor-heading"><h3>自由曲线</h3><span>四通道独立调整</span></div>
-    <p className="curve-editor-help">双击增加控制点；拖动或用方向键调整。每通道最多16点，输出不能下降。</p>
-    <ParameterHelp parameter="curve_points" />
+    {showHeading && <div className="curve-editor-heading"><h3>自由曲线</h3><span>四通道独立调整</span></div>}
+    <div className="curve-editor-instructions"><p className="curve-editor-help">双击增加控制点；拖动或用方向键调整。每通道最多16点。</p><ParameterHelp parameter="curve_points" /></div>
     <div className="curve-editor-panels">
       {CURVE_CHANNELS.map(channel => <CurveChannel key={channel} channel={channel} points={curves[channel]}
         blocked={blocked} dragging={activeChannel !== null} onBegin={begin} onMove={move} onFinish={end} onChange={changeChannel} />)}

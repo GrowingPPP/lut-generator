@@ -1,4 +1,7 @@
 /* 界面主题与照片、图表的固定中性色域分开定义。 */
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after { transition: none !important; }
 :root {
   color-scheme: dark;
   --ink: #0e0f11;

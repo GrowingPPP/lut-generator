@@ -103,7 +103,7 @@ const SelectField = forwardRef(function SelectField({
           if (typeof forwardedRef === 'function') forwardedRef(node)
           else if (forwardedRef) forwardedRef.current = node
         }}>
-        <Select.Value className="select-value">{selected?.label || '\u00a0'}</Select.Value>
+        <span className="select-value"><Select.Value>{selected?.label || '\u00a0'}</Select.Value></span>
         <Select.Icon className="select-chevron" aria-hidden="true">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

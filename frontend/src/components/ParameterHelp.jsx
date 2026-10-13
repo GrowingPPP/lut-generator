@@ -42,9 +42,9 @@ export default function ParameterHelp({ parameter }) {
   return <ParameterPopover parameter={parameter} />
 }
 
-export function BeginnerGuide() {
+export function BeginnerGuide({ compact = false }) {
   return <details className="beginner-guide">
-    <summary><span><strong>新手创作指南</strong><small>从看懂照片到形成自己的风格</small></span><span className="beginner-guide-arrow" aria-hidden="true">▾</span></summary>
+    <summary><span><strong>新手创作指南</strong>{!compact && <small>从看懂照片到形成自己的风格</small>}</span><span className="beginner-guide-arrow" aria-hidden="true">▾</span></summary>
     <div className="beginner-guide-content">
       <p>每次只改一项，小幅调整，再看原图对比。没有唯一正确的效果，先决定你想让照片表达什么。</p>
       <ol>{BEGINNER_GUIDE.map(item => <li key={item.title}><strong>{item.title}</strong><p>{item.body}</p></li>)}</ol>

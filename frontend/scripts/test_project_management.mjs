@@ -24,7 +24,7 @@ function completeProject() {
     subject_selection: 'auto', subject_analysis: { subject_mode: 'non_portrait', regions: [], confidence: .96 } }],
     primary_sample_id: 'sample-one', retain_previews: true,
     view_state: { selected_sample_id: 'sample-one', display_mode: 'slider', split: .7,
-      curves_open: true, comparison: { a: { id: 'original-version' } } },
+      curves_open: true, comparison_mode: 'versions', comparison: { a: { id: 'original-version' } } },
     report: { id: 'report' }, validation: { status: 'passed' }, associated_version: 'original-version',
     applied_auto_job_ids: [crypto.randomUUID()] })
   return state
@@ -48,6 +48,7 @@ test('copy is an independent latest editing snapshot with preserved samples and 
   for (const field of ['display_mode', 'split', 'selected_sample_id', 'curves_open'])
     assert.deepEqual(copy.workspace.view_state[field], source.workspace.view_state[field])
   assert.equal(copy.workspace.view_state.comparison, null)
+  assert.equal(copy.workspace.view_state.comparison_mode, 'current')
   for (const field of ['associated_version', 'report', 'validation']) assert.equal(copy.workspace[field], null)
   assert.deepEqual(copy.workspace.applied_auto_job_ids, [])
   assert.deepEqual(copy.past, []); assert.deepEqual(copy.future, []); assert.equal(copy.pending, null)

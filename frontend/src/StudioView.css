@@ -1,0 +1,49 @@
+.studio-shell .topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 32px;
+  height: var(--app-header-height, 60px);
+  padding: 0 max(24px, calc((100% - 1440px) / 2));
+}
+.studio-brand {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+.studio-shell .nav { min-width: 0; gap: 8px; }
+.studio-shell .nav button { min-height: 40px; padding: 8px 16px; white-space: nowrap; }
+.studio-shell .nav .nav-home { margin: 0; border: 0; border-radius: 8px; }
+.studio-shell .nav button.active { color: var(--accent-strong); font-weight: 600; }
+.studio-shell .topbar-user { min-width: 0; gap: 12px; }
+.studio-username { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-page { min-width: 0; flex: 1; }
+@media (max-width: 900px) {
+  .studio-shell .topbar { gap: 16px; padding-right: 20px; padding-left: 20px; }
+  .studio-shell .topbar-user .studio-username { display: none; }
+}
+@media (max-width: 760px) {
+  .studio-shell .topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: none;
+    gap: 8px;
+    height: 60px;
+    padding: 6px 12px;
+  }
+  .studio-shell { --app-header-height: 60px; }
+  .studio-shell .topbar > .studio-brand { grid-area: auto; font-size: 0; gap: 0; }
+  .studio-shell .logo { width: 28px; height: 28px; font-size: 16px; }
+  .studio-shell .nav { grid-area: auto; justify-content: center; gap: 2px; }
+  .studio-shell .nav button { flex: 0 1 auto; padding: 8px 6px; font-size: 12px; }
+  .studio-shell .topbar-user { grid-area: auto; justify-content: flex-end; gap: 4px; }
+  .studio-shell .theme-picker > span:first-child { display: none; }
+  .studio-shell .theme-picker .select-trigger { min-width: 0; width: 76px; padding: 6px; font-size: 12px; }
+  .studio-shell .topbar-user > .btn { padding: 8px 4px; font-size: 12px; }
+}
+@media (max-width: 360px) {
+  .studio-shell .studio-brand { font-size: 0; gap: 0; }
+}

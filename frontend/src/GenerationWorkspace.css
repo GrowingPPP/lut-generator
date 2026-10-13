@@ -63,33 +63,22 @@
   border-bottom: 1px solid var(--workbench-line);
 }
 
-.gen-workbench .project-management-trigger { flex: 0 0 auto; }
+.gen-workbench .workbench-header :is(.btn, .btn-primary, .select-trigger) { min-height: 40px; }
+.gen-workbench .workbench-header .workspace-history-toggle { flex: 0 0 auto; }
+.gen-workbench .workspace-project { display: flex; align-items: center; flex: 0 1 280px; gap: 4px; min-width: 190px; }
+.gen-workbench .project-management-trigger { flex: 0 0 40px; width: 40px; padding: 8px; }
 .gen-workbench .project-version-name { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .gen-workbench .project-version-name span { display: grid; gap: 6px; min-width: 0; }
 .gen-workbench .project-version-name strong { color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
 .gen-workbench .project-version-name .btn { flex-shrink: 0; }
 
 .gen-workbench .workbench-header .workspace-select {
-  display: grid;
-  flex: 0 1 245px;
-  gap: 5px;
-  min-width: 160px;
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  color: var(--workbench-muted);
-  font-size: 12px;
 }
 
-.gen-workbench .workspace-select select {
-  width: 100%;
-  min-height: 36px;
-  padding: 6px 10px;
-  border-color: var(--workbench-line);
-  border-radius: 7px;
-  background: var(--workbench-surface);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-}
+.gen-workbench .workspace-project > .select-field > button.select-trigger[data-chroma-select-trigger] { font-size: 14px; font-weight: 600; }
 
 .gen-workbench .workbench-header .workspace-toolbar {
   flex: 1 1 auto;
@@ -101,12 +90,17 @@
 }
 
 .gen-workbench .workbench-header .workspace-toolbar-row {
+  align-items: center;
+  flex-wrap: nowrap;
   justify-content: flex-start;
-  gap: 8px 16px;
+  gap: 8px 12px;
 }
 
 .gen-workbench .workbench-header .workspace-history {
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--workbench-line);
 }
 
 .gen-workbench .draft-status {
@@ -125,6 +119,9 @@
   gap: 7px;
   margin-left: auto;
 }
+
+.gen-workbench .workspace-toolbar-recovery { flex: 0 0 auto; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.gen-workbench .workspace-toolbar-recovery .draft-error { margin: 0; overflow-wrap: anywhere; }
 
 .gen-workbench .workbench-body {
   display: grid;
@@ -940,7 +937,7 @@
 }
 
 .gen-workbench .ai-method .auto-go {
-  min-height: 41px;
+  min-height: 44px;
   width: 100%;
   font-size: 14px;
 }
@@ -1568,8 +1565,12 @@
     gap: 10px 14px;
   }
 
-  .gen-workbench .workbench-header .workspace-select {
-    flex-basis: 225px;
+  .gen-workbench .workbench-header .workspace-project {
+    flex-basis: 240px;
+  }
+
+  .gen-workbench .workbench-header .workspace-toolbar-row {
+    flex-wrap: wrap;
   }
 
   .gen-workbench .delivery-actions {
@@ -1602,6 +1603,10 @@
 
   .gen-workbench .workbench-header .workspace-toolbar {
     flex-basis: 360px;
+  }
+
+  .gen-workbench .workbench-header .workspace-toolbar-row {
+    flex-wrap: wrap;
   }
 
   .gen-workbench .delivery-actions {
@@ -1693,33 +1698,34 @@
   }
 
   .gen-workbench .workbench-header {
-    align-items: stretch;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
     padding-bottom: 12px;
   }
 
-  .gen-workbench .workbench-header .workspace-history-toggle {
-    align-self: flex-end;
-  }
-
-  .gen-workbench .workbench-header .workspace-select {
-    flex: 1 1 calc(100% - 80px);
+  .gen-workbench .workbench-header .workspace-project {
     min-width: 0;
   }
 
   .gen-workbench .workbench-header .workspace-toolbar {
-    flex: 1 1 100%;
+    grid-column: 1 / -1;
     min-width: 0;
   }
 
   .gen-workbench .workbench-header .workspace-toolbar-row {
-    justify-content: space-between;
-    gap: 8px;
+    gap: 4px;
   }
 
   .gen-workbench .workbench-header .workspace-history {
-    flex-wrap: wrap;
+    flex: 1 1 100%;
+    justify-content: space-between;
+    padding-left: 0;
+    border-left: 0;
   }
+
+  .gen-workbench .workbench-header .draft-status { order: 1; flex: 1 1 100%; width: auto; }
 
   .gen-workbench .delivery-actions {
     position: fixed;
