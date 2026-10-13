@@ -10,7 +10,7 @@ const GenerateView = lazyFeature(() => import('./GenerateView.jsx'), '调色项�
 const LibraryView = lazyFeature(() => import('./components/LibraryView.jsx'), '我的 LUT', LibraryViewUrl)
 
 export default function StudioView({ view, onViewChange, user, previewLut, deletedAssetId,
-  onPreview, onDeleted, onLogout }) {
+  onPreview, onDeleted, onLogout, route, onLocationChange }) {
   return <TooltipProvider><DialogProvider>
     <div className="app studio-shell">
       <header className="topbar">
@@ -27,10 +27,10 @@ export default function StudioView({ view, onViewChange, user, previewLut, delet
       <main className="studio-page">
         <div hidden={view !== 'generate'}>
           <DeferredFeature active={view === 'generate'}>
-            <GenerateView user={user} previewLut={previewLut} deletedAssetId={deletedAssetId} />
+            <GenerateView user={user} previewLut={previewLut} deletedAssetId={deletedAssetId} route={route} onLocationChange={onLocationChange} />
           </DeferredFeature>
         </div>
-        {view === 'library' && <LibraryView onPreview={onPreview} onDeleted={onDeleted} onCreate={() => onViewChange('generate')} />}
+        {view === 'library' && <LibraryView user={user} onPreview={onPreview} onDeleted={onDeleted} onCreate={() => onViewChange('generate')} />}
       </main>
     </div>
   </DialogProvider></TooltipProvider>

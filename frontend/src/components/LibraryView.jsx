@@ -5,6 +5,8 @@ import ActionMenu from './ui/ActionMenu.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
+import PhotoCoverEditor from './PhotoCoverEditor.jsx'
+import useAssetCovers from '../hooks/useAssetCovers.js'
 
 import {
   deleteLut,
@@ -57,17 +59,18 @@ const draftOf = (asset) => ({
   cover_id: asset.cover_id,
 })
 
-function AssetCover({ asset, thumb, children }) {
+function AssetCover({ asset, thumb, photoUrl, children }) {
   return (
     <div
       className={`card-thumb library-cover library-cover-${asset.cover_id}`}
       style={
-        asset.cover_id === 'engine' && thumb
-          ? { backgroundImage: `url(${thumb})` }
+        photoUrl || (asset.cover_id === 'engine' && thumb)
+          ? { backgroundImage: `url(${photoUrl || thumb})` }
           : undefined
       }
     >
-      {asset.cover_id === 'engine' && !thumb && (
+      <span className="library-cover-type">{photoUrl ? '照片封面 · 本机' : asset.cover_id === 'engine' ? '效果示意' : '图形封面'}</span>
+      {!photoUrl && asset.cover_id === 'engine' && !thumb && (
         <span className="library-cover-unavailable">封面暂不可用</span>
       )}
       {children}
@@ -108,9 +111,12 @@ function LibraryModal({
   )
 }
 
-export default function LibraryView({ onPreview, onDeleted, onCreate }) {
+export default function LibraryView({ user, onPreview, onDeleted, onCreate }) {
   const { confirm } = useDialogs()
   const [luts, setLuts] = useState([])
+  const covers = useAssetCovers(user, luts)
+  const [coverDraft, setCoverDraft] = useState(null)
+  const [coverBusy, setCoverBusy] = useState(false)
   const [summary, setSummary] = useState({ total: 0, groups: [] })
   const [filters, setFilters] = useState({ ...DEFAULT_LIBRARY_FILTERS })
   const [search, setSearch] = useState('')
@@ -207,6 +213,8 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
     setFilters({ ...DEFAULT_LIBRARY_FILTERS })
   }
   const openEdit = (lut) => {
+    setCoverDraft(null)
+    setCoverBusy(false)
     setEditing(lut)
     setDraft(draftOf(lut))
     setEditError('')
@@ -216,18 +224,24 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
     setDraft((current) => ({ ...current, [name]: value }))
   const saveEdit = async (e) => {
     e.preventDefault()
+    if (saving || coverBusy) return
     setEditError('')
     try {
       const patch = metadataPatch(editing, draft)
-      if (!Object.keys(patch).length) {
+      if (!Object.keys(patch).length && coverDraft === null) {
         setEditing(null)
         return
       }
       setSaving(true)
-      await updateLutMetadata(editing.id, {
-        ...patch,
-        ...(editing.revision_id ? { revision_id: editing.revision_id } : {}),
-      })
+      if (Object.keys(patch).length) {
+        const updated = await updateLutMetadata(editing.id, {
+          ...patch,
+          ...(editing.revision_id ? { revision_id: editing.revision_id } : {}),
+        })
+        // If local cover storage fails, retry only the still-unsaved portion.
+        setEditing(normalizeAsset({ ...editing, ...patch, ...updated }))
+      }
+      if (coverDraft !== null) await covers.save(editing.id, coverDraft || null)
       setEditing(null)
       await load()
     } catch (e) {
@@ -275,6 +289,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       setDeleteTarget(null)
       setNotice(`「${lut.name}」已从我的 LUT 中删除`)
       onDeleted?.(lut.id)
+      await covers.save(lut.id, null, { retired: true }).catch(() => setNotice(`「${lut.name}」已删除，本机封面清理失败；内置列表不会显示该作品。`))
       const refreshed = await load()
       if (refreshed === false) setNotice(`「${lut.name}」已删除，列表刷新失败，请点击刷新。`)
     } catch (e) {
@@ -411,12 +426,14 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
         <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>刷新</button>
       </div>
       <ErrorNotice error={error} fallback="作品列表未能加载，请重新加载。" onRetry={load} retryLabel="重新加载" disabled={loading} />
+      {covers.error && <Notice notice={createNotice('本机照片封面未能读取，当前显示内置封面。', 'warning')}
+        action={{ label: '重试读取封面', onClick: covers.refresh }} />}
       {notice && <Notice key={notice} notice={createNotice(notice, 'success')} onDismiss={() => setNotice(current => current === notice ? '' : current)} />}
       {loading && luts.length === 0 && <div className="library-loading" role="status"><ActionIcon name="image" /><p>正在取回你的色彩作品…</p></div>}
       <div className="lib-grid" aria-label="已保存的 LUT 作品" aria-busy={loading}>
         {luts.map((lut) => (
           <article key={lut.id} className="lut-card">
-            <AssetCover asset={lut} thumb={thumbs[lut.id]}>
+            <AssetCover asset={lut} thumb={thumbs[lut.id]} photoUrl={covers.urls[lut.id]}>
               <span className="card-badge">{lut.params.base_photo_style || 'STD'} 输入</span>
               <button className={`library-favorite ${lut.favorite ? 'is-favorite' : ''}`}
                 aria-label={`${lut.favorite ? '取消收藏' : '收藏'}「${lut.name}」`} aria-pressed={lut.favorite}
@@ -466,7 +483,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
             <div><p className="library-eyebrow">{kindLabel(detail)}</p><h2>{detail.name}</h2></div>
             <button className="btn btn-ghost btn-icon" aria-label="关闭作品详情" disabled={downloading} onClick={() => setDetail(null)}><ActionIcon name="close" /></button>
           </div>
-          <AssetCover asset={detail} thumb={detail.cover_id === 'engine' && !detail.preview_error ? makeThumb(detail.params) : null} />
+          <AssetCover asset={detail} photoUrl={covers.urls[detail.id]} thumb={detail.cover_id === 'engine' && !detail.preview_error ? makeThumb(detail.params) : null} />
           <div className="library-detail-scene"><h3>适用场景</h3><p>{detail.description || '尚未填写适用场景'}</p></div>
           <dl className="library-detail">
             <div><dt>使用方式</dt><dd>{detail.kind === 'portable_style' ? '追加风格，保留当前单张校正' : '载入保存的完整参数'}</dd></div>
@@ -598,8 +615,8 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
             加入收藏
           </label>
           <fieldset className="library-cover-picker" disabled={saving}>
-            <legend>封面</legend>
-            <p>仅保存内置封面选项，不上传或保存样张。</p>
+            <legend>内置封面</legend>
+            <p>未设置本机照片封面时显示。效果示意来自合成色彩图，图形封面仅用于分类。</p>
             {COVER_OPTIONS.map((cover) => (
               <label
                 key={cover.id}
@@ -616,11 +633,13 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
               </label>
             ))}
           </fieldset>
+          <PhotoCoverEditor key={editing.id} assetId={editing.id} currentUrl={covers.urls[editing.id]}
+            disabled={saving} onChange={setCoverDraft} onBusyChange={setCoverBusy} />
           <p className="workspace-note">
             编辑信息不会改变调色参数，也不会增加调色修订。
           </p>
           <ErrorNotice error={editError} fallback="作品信息未能保存，请检查填写内容后重试。" />
-          <button className="btn-primary" disabled={saving} type="submit">
+          <button className="btn-primary" disabled={saving || coverBusy} type="submit">
             {saving ? '正在保存…' : '保存信息'}
           </button>
         </LibraryModal>

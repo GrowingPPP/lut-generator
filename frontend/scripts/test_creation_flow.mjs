@@ -216,6 +216,18 @@ test('navigation uses the current project and pre-navigation callback after a re
   assert.equal(host.render({ workspace: project('a') }).step, 'photos')
 })
 
+test('external history changes restore a step without editing parameters or reapplying on autosave', () => {
+  let commits = 0
+  const workspace = frozenProject('a')
+  const host = flowHost({ workspace, ready: true, beforeNavigate: () => commits++, externalStep: 'adjust', externalKey: 1 })
+  host.render(); assert.equal(host.render().step, 'adjust')
+  host.render({ externalStep: 'photos', externalKey: 2 })
+  assert.equal(host.render().step, 'photos'); assert.equal(commits, 0)
+  host.render().navigate('save')
+  assert.equal(host.render({ workspace: { ...workspace, params: { contrast: .4 } } }).step, 'save')
+  assert.equal(commits, 1)
+})
+
 test('a failed pending-edit commit does not move to another stage', () => {
   const host = flowHost({ workspace: project('a'), ready: true,
     beforeNavigate: () => { throw new Error('pending edit could not be committed') } })

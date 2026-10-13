@@ -14,6 +14,8 @@
 |---|---|
 | 调色项目 | 可继续编辑的参数、输入、目标、保护和样张上下文；内部仍叫 workspace |
 | 项目草稿 | 本机浏览器保存完整编辑状态与历史；账号元数据不等于跨设备完整草稿同步 |
+| 页面地址 | 仅保存页面、项目 UUID 与四步位置；不能授权访问或同步照片、完整草稿 |
+| 作品照片封面 | 用户主动选择的本机缩小 JPEG，按账号／作品隔离；用于作品辨识，不是调色输入或实时效果证明 |
 | 命名版本 | 项目内保存的阶段快照；固定 A/B 选择不会随当前编辑自动变化 |
 | 完整效果 LUT | 包含当前全部效果与单张校正的资产快照 |
 | 可复用风格 | 保存风格贡献及依赖，追加到兼容输入上；不等同于替换全部参数 |
@@ -30,6 +32,7 @@
 | 任务 | 优先阅读的代码 | 设计与验证依据 |
 |---|---|---|
 | 页面、登录与创作入口 | `frontend/src/App.jsx`、`frontend/src/StudioView.jsx`、`frontend/src/GenerateView.jsx` | [四步创作重构](../specs/guided-creation-redesign.md) |
+| 地址、前进后退与项目恢复 | `frontend/src/lib/appLocation.js`、`frontend/src/hooks/useAppLocation.js`、`frontend/src/hooks/useProjectLocation.js`、`frontend/src/hooks/useCreationFlow.js` | [第三批 UI 设计与验收](../specs/ui-ux-phase3.md)，地址只表达查看请求；账号归属、删除标记、忙碌及异步请求身份仍需核对 |
 | 四步导航与交付 | `frontend/src/hooks/useCreationFlow.js`、`frontend/src/lib/creationFlow.js`、`frontend/src/components/CreationNavigation.jsx`、`frontend/src/components/CreationPhotoSetup.jsx`、`frontend/src/components/CreationDelivery.jsx` | [四步创作重构](../specs/guided-creation-redesign.md)，步骤仅是查看偏好，不维护第二份调色状态 |
 | 工作台、移动与放大调色布局 | `frontend/src/CreationFlow.css`、`frontend/src/StudioView.css`、`frontend/src/components/ToolPanel.jsx`、`frontend/src/components/ParameterPanel.jsx`、`frontend/src/components/ui/ComparisonControl.jsx` | [前端体验审核及第一批验收](../specs/ui-ux-pro-max-audit-2026-10-13.md)，普通与放大共用基础／全部展示偏好；底部面板大小和比较分界不创建调色历史 |
 | 项目管理与本机恢复 | `frontend/src/hooks/useWorkspace.js`、`frontend/src/lib/workspace.js`、`frontend/src/lib/draftStorage.js`、`frontend/src/lib/projectManagement.js`；`backend/api/workspaces.py`、`backend/storage/db.py` | [项目管理](../specs/color-project-management.md) |
@@ -39,8 +42,10 @@
 | 上传、色彩、预览与导出 | `backend/photo/color_management.py`、`backend/photo/render.py`、`backend/photo/export.py`；`frontend/src/lib/photoApi.js`、`frontend/src/lib/photoMetadata.js`、`frontend/src/lib/displayColor.js`、`frontend/src/lib/lutPreview.js`、`frontend/src/hooks/usePreview.js` | [样张兼容](../specs/sample-photo-compatibility.md)、[照片一致性](../specs/ai-retouch-photo-consistency.md) |
 | 曲线与外部 LUT | `backend/lut_engine/curves.py`、`backend/lut_engine/imported.py`、`backend/lut_engine/lut3d.py`；`frontend/src/lib/curveMath.js`、`frontend/src/lib/cubeLut.js`、`frontend/src/lib/importedLuts.js` | [扩展设计](../specs/extended-grading-design.md) |
 | 风格资产与历史修订 | `backend/api/main.py`、`backend/api/asset_metadata.py`、`backend/storage/db.py`；`frontend/src/components/LibraryView.jsx`、`frontend/src/components/StyleSaveDialog.jsx`、`frontend/src/lib/styleRecipe.js` | [风格与版本](../specs/style-workspace-design.md)、[资产删除](../specs/library-deletion.md) |
+| 本机作品封面 | `frontend/src/lib/assetCovers.js`、`frontend/src/hooks/useAssetCovers.js`、`frontend/src/components/PhotoCoverEditor.jsx` | [第三批 UI 设计与验收](../specs/ui-ux-phase3.md)，独立 IndexedDB 限额；取消不保存，已删除作品拒绝迟到保存；照片不发给服务器 |
 | 控件、主题与视觉 | `frontend/src/components/ui/`、`frontend/src/components/SelectField.jsx`、`frontend/src/components/ParameterPanel.jsx`、`frontend/src/components/ParameterHelp.jsx`、`frontend/src/themes.css`、`frontend/src/lib/theme.js` | [手动参数入口与指南](../specs/manual-parameter-discoverability.md)、[Radix 体验](../specs/radix-ui-experience.md)、[主题](../specs/theme-design.md)、[视觉质量](../specs/visual-quality.md) |
 | 通知、表单与落地页 | `frontend/src/lib/notices.js`、`frontend/src/hooks/useOperationNotice.js`、`frontend/src/components/ui/Notice.jsx`、`frontend/src/components/ui/Dialog.jsx`、`frontend/src/LandingView.jsx` | [第二批 UI 设计与验收](../specs/ui-ux-phase2.md)，提示按账号／项目隔离；技术错误只展示安全摘要；通知不改变请求身份或自动重试 |
+| 密码可见性与演示启动 | `frontend/src/components/AuthView.jsx`、`frontend/src/LandingView.jsx`、`frontend/src/hooks/useNearViewport.js` | [第三批 UI 设计与验收](../specs/ui-ux-phase3.md)，切换模式清空并隐藏密码；下方案例接近视口才渲染，使用正式引擎 |
 | 加载与重试 | `frontend/src/components/FeatureLoader.jsx`、`frontend/build/lazyModuleUrls.mjs`、`frontend/scripts/check_build_loading.mjs` | [质量与加载](../specs/ai-quality-and-loading.md) |
 
 表中的代码路径均相对仓库根目录。文件移动或职责变化时同步维护该表；检索实现优先使用 `rg` 与 `rg --files`。

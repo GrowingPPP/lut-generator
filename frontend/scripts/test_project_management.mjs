@@ -242,6 +242,21 @@ test('hook blocks late saves after deletion, retains the replacement and reports
     assert.deepEqual(editor.histories.past, [])
     assert.equal((await editor.listProjects()).length, 2)
 
+    const read = storage.load.bind(storage)
+    let releaseRead, readStarted, stillRequested = true
+    const readGate = new Promise(resolve => { releaseRead = resolve })
+    const readSignal = new Promise(resolve => { readStarted = resolve })
+    storage.load = async (...args) => { readStarted(); await readGate; return read(...args) }
+    const obsoleteNavigation = editor.loadWorkspace({ id: sourceId, isCurrent: () => stillRequested })
+    await readSignal
+    stillRequested = false
+    releaseRead()
+    assert.equal(await obsoleteNavigation, null)
+    storage.load = read
+    editor = render()
+    assert.equal(editor.workspace.id, copyId)
+    assert.equal(editor.ready, true)
+
     let releaseWrite, writeStarted
     const gate = new Promise(resolve => { releaseWrite = resolve })
     const started = new Promise(resolve => { writeStarted = resolve })

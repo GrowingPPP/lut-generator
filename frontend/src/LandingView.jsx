@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ThemePicker from './components/ThemePicker.jsx'
+import useNearViewport from './hooks/useNearViewport.js'
 import './Landing.css'
 
 // 公开样张使用产品引擎渲染；示例参数也可在创作页中调整。
@@ -81,12 +82,15 @@ const FAQ = [
 ]
 
 /** 把样张按 LUT 渲染成 dataURL。产品自己的引擎,不引入任何第三方调色库。 */
-function useGradedSample(src, look) {
-  const [graded, setGraded] = useState(null)
+function useGradedSample(src, look, active, name) {
+  const [graded, setGraded] = useState({ url: null, status: 'idle' })
 
   useEffect(() => {
+    if (!active) return
     let alive = true
     let canvas
+    const started = performance.now()
+    setGraded({ url: null, status: 'loading' })
     ;(async () => {
       try {
         const { applyLUTToImageData, generateLUT } = await import('./lib/lutEngine.js')
@@ -110,24 +114,27 @@ function useGradedSample(src, look) {
         ctx.putImageData(out, 0, 0)
 
         const url = canvas.toDataURL('image/jpeg', 0.85)
-        if (alive) setGraded(url)
-        canvas.width = 0
-        canvas.height = 0
+        if (alive) {
+          setGraded({ url, status: 'ready' })
+          performance.measure?.(`chroma:landing:${name}`, { start: started, end: performance.now() })
+        }
       } catch {
-        // 引擎或解码失败时静默降级:对比区只显示原图,页面其余部分不受影响。
-        if (alive) setGraded(null)
+        // 失败时提示示例不可用，保留创作入口及照片舞台尺寸。
+        if (alive) setGraded({ url: null, status: 'failed' })
+      } finally {
+        if (canvas) { canvas.width = 0; canvas.height = 0 }
       }
     })()
     return () => {
       alive = false
     }
-  }, [src, look])
+  }, [src, look, active, name])
 
   return graded
 }
 
 /** 前后对比:原图铺底,调色图层按 clip-path 揭示,分界线可拖拽。 */
-function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
+function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel, loading = 'eager', status }) {
   const [at, setAt] = useState(50)
   const [imageFailed, setImageFailed] = useState(false)
   const barRef = useRef(null)
@@ -167,11 +174,12 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
   return (
     <div
       className="landing-ba"
+      aria-busy={status === 'loading'}
       ref={barRef}
       style={{ '--ba-at': `${at}%` }}
       onPointerDown={onDown}
     >
-      <img className="landing-ba-img" src={src} alt="原图" draggable="false" onError={() => setImageFailed(true)} />
+      <img className="landing-ba-img" src={src} alt="原图" loading={loading} decoding="async" draggable="false" onError={() => setImageFailed(true)} />
       {gradedSrc && (
         <img
           className="landing-ba-img landing-ba-graded"
@@ -197,8 +205,8 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
       />
 
       <span className="landing-ba-tag landing-ba-tag-before">{beforeLabel}</span>
-      <span className="landing-ba-tag landing-ba-tag-after">{gradedSrc ? afterLabel : '效果未就绪'}</span>
-      {imageFailed && <div className="landing-image-error" role="status"><strong>示例照片暂未加载</strong><span>你仍可以进入创作，使用自己的照片。</span></div>}
+      <span className="landing-ba-tag landing-ba-tag-after">{gradedSrc ? afterLabel : status === 'loading' ? '正在准备效果…' : '效果未就绪'}</span>
+      {(imageFailed || status === 'failed') && <div className="landing-image-error" role="status"><strong>{imageFailed ? '示例照片暂未加载' : '示例效果暂不可用'}</strong><span>你仍可以进入创作，使用自己的照片。</span></div>}
     </div>
   )
 }
@@ -208,8 +216,10 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
  * 所有文案只陈述产品真实能力,不含编造的用户数/评分/性能承诺。
  */
 export default function LandingView({ onEnter }) {
-  const gradedHero = useGradedSample(HERO_PHOTO, HERO_LOOK)
-  const gradedPreview = useGradedSample(PREVIEW_PHOTO, CASE_LOOK)
+  const caseRef = useRef(null)
+  const caseReady = useNearViewport(caseRef)
+  const gradedHero = useGradedSample(HERO_PHOTO, HERO_LOOK, true, 'hero')
+  const gradedPreview = useGradedSample(PREVIEW_PHOTO, CASE_LOOK, caseReady, 'case')
 
   return (
     <div className="landing" id="top">
@@ -255,7 +265,7 @@ export default function LandingView({ onEnter }) {
           <figure className="landing-hero-visual">
             <BeforeAfter
               src={HERO_PHOTO}
-              gradedSrc={gradedHero}
+              gradedSrc={gradedHero.url} status={gradedHero.status}
               beforeLabel="原图"
               afterLabel="青橙风格 · LUT 后"
             />
@@ -287,7 +297,7 @@ export default function LandingView({ onEnter }) {
             <h2 id="landing-features-title">把想要的感觉，调成看得见的色彩</h2>
             <p className="landing-sub">先表达方向，再比较变化。每一项调整都可以理解、微调和撤销。</p>
           </div>
-          <article className="landing-case">
+          <article ref={caseRef} className="landing-case">
             <div className="landing-case-copy">
               <span className="landing-demo-label">公开样张 · 预设创作示例</span>
               <h3>留住林间的暖光</h3>
@@ -300,7 +310,7 @@ export default function LandingView({ onEnter }) {
               <button className="btn btn-soft" onClick={onEnter}>用自己的照片开始</button>
             </div>
             <figure className="landing-case-photo">
-              <BeforeAfter src={PREVIEW_PHOTO} gradedSrc={gradedPreview} beforeLabel="原图" afterLabel="林间暖调 · 示例效果" />
+              <BeforeAfter src={PREVIEW_PHOTO} gradedSrc={gradedPreview.url} status={gradedPreview.status} loading="lazy" beforeLabel="原图" afterLabel="林间暖调 · 示例效果" />
               <figcaption>拖动或使用方向键，比较同一张照片的变化。</figcaption>
             </figure>
           </article>

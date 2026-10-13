@@ -10,6 +10,7 @@ import usePreview from './hooks/usePreview.js'
 import useWorkspace from './hooks/useWorkspace.js'
 import useCreationFlow from './hooks/useCreationFlow.js'
 import useOperationNotice from './hooks/useOperationNotice.js'
+import useProjectLocation from './hooks/useProjectLocation.js'
 import Notice, { ErrorNotice } from './components/ui/Notice.jsx'
 import { createNotice, describeError } from './lib/notices.js'
 import useAutoRetouchController from './hooks/useAutoRetouchController.js'
@@ -133,10 +134,17 @@ const DISPLAY_MODES = [
 const EMPTY_PROJECT_VIEW = { display_mode: 'slider', split: 0.5, selected_sample_id: null,
   comparison: null, comparison_mode: 'current', tool_tab: 'ai', ai_intent: 'optimize', curves_open: false, creation_step: 'photos' }
 
-export default function GenerateView({ previewLut, deletedAssetId, user }) {
+export default function GenerateView({ previewLut, deletedAssetId, user, route, onLocationChange }) {
   const dialogs = useDialogs()
   const editor = useWorkspace({ userId: user, initialParams: defaultParams() })
-  const { workspace, ready } = editor
+  const { workspace, ready: editorReady } = editor
+  const navigation = useProjectLocation({ route, user, editor, onLocationChange,
+    loadProject: (...args) => loadProject(...args), beforeRestore: () => finishMainAdjustment(),
+    isBusy: () => sending || grading || validating || sampleLoading || detectingSampleId !== null
+      || remoteBusy || deliveryBusy || resourceLoading || advancedLoading || projectOperationRef.current,
+    currentStep: () => flow.step })
+  const { pending: routePending, selection: routeSelection, error: routeError } = navigation
+  const ready = editorReady && !routePending
   const params = workspace.params
   const [displayMode, setDisplayMode] = useState('slider')
   const [split, setSplitState] = useState(0.5)
@@ -230,11 +238,14 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const undoAdjustment = useCallback(() => { finishMainAdjustment(); editor.undo() }, [finishMainAdjustment, editor.undo])
   const redoAdjustment = useCallback(() => { finishMainAdjustment(); editor.redo() }, [finishMainAdjustment, editor.redo])
   const toolbarEditor = { ...editor, undo: undoAdjustment, redo: redoAdjustment }
-  const flow = useCreationFlow({ workspace, ready, beforeNavigate: finishMainAdjustment })
+  const flow = useCreationFlow({ workspace, ready, beforeNavigate: finishMainAdjustment,
+    externalStep: routeSelection?.workspaceId === workspace.id ? routeSelection.step : undefined,
+    externalKey: routeSelection?.workspaceId === workspace.id ? routeSelection.serial : undefined })
   const effectiveToolTab = creationToolTab(flow.step, toolTab)
   const visibleComparison = flow.step === 'adjust' && comparisonMode === 'versions' ? comparison || {} : null
   const goToStep = next => {
     if (!flow.navigate(next)) return
+    onLocationChange?.(workspace.id, next)
     if (next === 'style') setToolTab('ai')
     if (next === 'adjust' && toolTab === 'ai') setToolTab('manual')
     requestAnimationFrame(() => {
@@ -603,7 +614,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     }
   }
 
-  const loadProject = async (record) => {
+  const loadProject = async (record, isCurrent = () => true) => {
     const id = record.id
     const request = ++openRequestRef.current
     const local = (await editor.listProjects())?.find(project => project.id === id)
@@ -613,7 +624,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       detached = error.status === 404
       return []
     }) : []
-    if (request !== openRequestRef.current) return
+    if (request !== openRequestRef.current || !isCurrent()) return
     const last = [...msgs].reverse().find((m) => m.role === 'agent' && m.params)
     let loaded = await editor.loadWorkspace({
       id,
@@ -621,7 +632,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       legacy: true,
       sessionId: record?.session_id,
       name: record?.name || '',
+      isCurrent,
     })
+    if (!isCurrent()) return
     if (!loaded) throw new Error('草稿未能载入，请查看本机保存提示')
     if (detached) {
       loaded = editor.setMeta({ session_id: null }) || loaded
@@ -1535,6 +1548,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整', { tone: 'success', channel: 'general' })} />
       </header>
       <WorkspaceToolbar mode="recovery" editor={toolbarEditor} busy={busy} onBackup={backup} />
+      {routePending && <Notice notice={createNotice('正在恢复地址中的调色项目…', 'progress')} />}
+      {routeError && <Notice notice={createNotice(routeError.message, 'warning')}
+        onDismiss={navigation.dismiss}
+        action={routeError.retry ? { label: '重试打开项目', onClick: navigation.retry } : undefined} />}
       <CreationNavigation step={flow.step} onNavigate={goToStep} titleRef={creationTitleRef} disabled={!ready || sampleLoading || deliveryBusy} />
       {showNotice && <Notice key={notice.id} notice={notice} onDismiss={notice.tone === 'progress' ? undefined : dismissNotice}
         className={notice.tone === 'success' ? 'workbench-toast' : 'workbench-feedback'}

@@ -10,6 +10,7 @@ export default function AuthView({ onAuthed, onBack, destination = '创作' }) {
   const [mode, setMode] = useState('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [invalid, setInvalid] = useState({})
@@ -58,16 +59,20 @@ export default function AuthView({ onAuthed, onBack, destination = '创作' }) {
               aria-describedby={error ? 'auth-error' : undefined}
               onChange={event => { setUsername(event.target.value); setInvalid(value => ({ ...value, username: false })) }} placeholder="请输入用户名" required />
             <label htmlFor="auth-password">密码</label>
-            <input ref={passwordRef} id="auth-password" name="password" aria-label="密码" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} aria-invalid={invalid.password || undefined}
-              value={password} disabled={busy} onChange={event => { setPassword(event.target.value); setInvalid(value => ({ ...value, password: false })) }} type="password" placeholder="请输入密码" required
-              aria-describedby={error ? 'auth-error' : undefined} />
+            <div className="auth-password-field">
+              <input ref={passwordRef} id="auth-password" name="password" aria-label="密码" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} aria-invalid={invalid.password || undefined}
+                value={password} disabled={busy} onChange={event => { setPassword(event.target.value); setInvalid(value => ({ ...value, password: false })) }} type={showPassword ? 'text' : 'password'} placeholder="请输入密码" required
+                aria-describedby={error ? 'auth-error' : undefined} />
+              <button type="button" className="btn btn-ghost auth-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} aria-pressed={showPassword}
+                disabled={busy} onClick={() => { setShowPassword(value => !value); passwordRef.current?.focus({ preventScroll: true }) }}>{showPassword ? '隐藏' : '显示'}</button>
+            </div>
             {error && <div id="auth-error"><ErrorNotice error={error} fallback="暂时无法完成登录或注册，请检查账号信息后重试。" /></div>}
             <button type="submit" className="btn btn-primary" disabled={busy}>
               {busy ? (mode === 'login' ? '正在登录…' : '正在注册…') : mode === 'login' ? '登录并继续' : '注册并继续'}
             </button>
           </form>
           <p className="auth-switch">{mode === 'login' ? '还没有账号？' : '已有账号？'}
-            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setPassword(''); setError(''); setInvalid({}) }}>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setPassword(''); setShowPassword(false); setError(''); setInvalid({}) }}>
               {mode === 'login' ? '创建账号' : '去登录'}
             </button>
           </p>

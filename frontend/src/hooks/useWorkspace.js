@@ -131,6 +131,7 @@ export default function useWorkspace({ userId = 'guest', initialParams, sessionI
   }, [commit])
 
   const loadWorkspace = useCallback(async (options = {}) => {
+    if (options.isCurrent && !options.isCurrent()) return null
     clearTimeout(timerRef.current)
     const generation = ++loadGenerationRef.current
     const current = stateRef.current
@@ -151,6 +152,7 @@ export default function useWorkspace({ userId = 'guest', initialParams, sessionI
         ? await storageRef.current.load(owner, requestedId)
         : await storageRef.current.latest(owner, options.sessionId ?? sessionId)
       if (generation !== loadGenerationRef.current) return null
+      if (options.isCurrent && !options.isCurrent()) { setReady(true); return null }
       let next
       if (record) {
         rejectedRecordRef.current = record
@@ -166,6 +168,7 @@ export default function useWorkspace({ userId = 'guest', initialParams, sessionI
       return next.workspace
     } catch (failure) {
       if (generation !== loadGenerationRef.current) return null
+      if (options.isCurrent && !options.isCurrent()) { setReady(true); return null }
       showError(failure)
       // Failed storage does not discard a valid current workspace. An account
       // switch must still hide the previous owner's in-memory draft.

@@ -161,3 +161,11 @@
   .library-empty { padding: 36px 20px; }
 }
 @media (prefers-reduced-motion: reduce) { .library-page .lut-card { transition: none; } }
+.library-cover { position: relative; }
+.library-cover-type { position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); padding: 4px 8px; border-radius: 6px; background: #202427e6; color: #fff; font-size: 12px; line-height: 1.5; }
+.photo-cover-editor { display: grid; gap: 12px; margin-top: 16px; padding: 16px; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-panel); }
+.photo-cover-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.photo-cover-heading > span { color: var(--muted); font-size: 12px; }
+.photo-cover-editor p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.photo-cover-preview { width: 100%; max-height: 180px; object-fit: contain; border-radius: 6px; background: #222; }
+.photo-cover-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -45,6 +45,9 @@
 .auth-page .auth-form input { width: 100%; min-width: 0; min-height: 44px; }
 .auth-page .auth-form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .auth-form > .btn-primary { width: 100%; min-height: 44px; margin-top: 16px; }
+.auth-password-field { position: relative; }
+.auth-page .auth-password-field input { padding-right: 64px; }
+.auth-password-toggle.btn { position: absolute; right: 1px; top: 0; bottom: 0; min-height: 44px; min-width: 56px; padding: 8px; color: var(--accent-strong); }
 .auth-error { margin-top: 8px; padding: 10px 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .auth-switch { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 8px 0 0; font-size: 14px; color: var(--muted); }
 .auth-switch .btn { padding: 6px 8px; color: var(--accent-strong); }

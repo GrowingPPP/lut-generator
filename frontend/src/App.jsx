@@ -1,16 +1,20 @@
 import AuthViewUrl from './components/AuthView.jsx?lazy-url'
 import StudioViewUrl from './StudioView.jsx?lazy-url'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { logout as apiLogout, me } from './lib/api.js'
 import { clearExternalLutCache } from './lib/importedLuts.js'
 import LandingView from './LandingView.jsx'
+import useAppLocation from './hooks/useAppLocation.js'
 import { FeatureStatus, lazyFeature } from './components/FeatureLoader.jsx'
 
 const AuthView = lazyFeature(() => import('./components/AuthView.jsx'), '登录页面', AuthViewUrl)
 const StudioView = lazyFeature(() => import('./StudioView.jsx'), '调色工作台', StudioViewUrl)
 
 export default function App() {
-  const [view, setView] = useState('landing')
+  const { route, navigate } = useAppLocation()
+  const view = route.view
+  const creationLocation = useRef({})
+  const setView = next => navigate(next === 'generate' ? { view: next, ...creationLocation.current } : { view: next })
   const [previewLut, setPreviewLut] = useState(null)
   const [deletedAssetId, setDeletedAssetId] = useState(null)
   const [user, setUser] = useState(null)
@@ -24,6 +28,7 @@ export default function App() {
       setStudioUser(null)
       setPreviewLut(null)
       setDeletedAssetId(null)
+      creationLocation.current = {}
     }
     window.addEventListener('chroma:unauthorized', onUnauthorized)
     return () => window.removeEventListener('chroma:unauthorized', onUnauthorized)
@@ -53,6 +58,7 @@ export default function App() {
     setStudioUser(null)
     setPreviewLut(null)
     setDeletedAssetId(null)
+    creationLocation.current = {}
   }
 
   return <>
@@ -62,7 +68,11 @@ export default function App() {
       destination={view === 'library' ? '我的 LUT' : '创作'} loadingClose={() => setView('landing')} />}
     {user && (view !== 'landing' || studioUser === user) &&
       <div hidden={view === 'landing'}>
-        <StudioView key={user} view={view} onViewChange={setView} user={user}
+        <StudioView key={user} view={view} onViewChange={setView} user={user} route={route}
+          onLocationChange={(projectId, step, options = {}) => {
+            creationLocation.current = { projectId, step }
+            if (view === 'generate') navigate({ view, projectId, step }, options)
+          }}
           previewLut={previewLut} deletedAssetId={deletedAssetId}
           onPreview={openPreview} onDeleted={handleAssetDeleted} onLogout={handleLogout} />
       </div>}
