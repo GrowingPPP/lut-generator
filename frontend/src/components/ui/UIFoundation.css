@@ -2,7 +2,7 @@ button, input, textarea { font-family: inherit; }
 
 .btn, .btn-primary, .btn-danger {
   gap: 7px;
-  min-height: 40px;
+  min-height: var(--control-height);
   line-height: 1.4;
   transition: background .14s, border-color .14s, box-shadow .14s;
 }
@@ -74,4 +74,18 @@ input[type='radio'] { accent-color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
   .btn, .btn-primary, .btn-danger { transition: none; }
+}
+
+/* Common form metrics; numeric grading fields retain their compact width. */
+:is(.auth-form,.library-tools,.library-editor,.workspace-modal) :is(input:not([type='radio'],[type='checkbox'],[type='range'],[type='file'],[type='hidden']),textarea) {
+  min-width: 0; min-height: var(--control-height); color: var(--text); background: var(--field);
+  border: 1px solid var(--control-line); border-radius: var(--radius-control);
+  font: inherit; font-size: 14px; line-height: 1.5; padding: 9px 12px;
+}
+:is(.auth-form,.library-tools,.library-editor,.workspace-modal) :is(input,textarea)[aria-invalid='true'] { border-color: var(--danger); }
+@media (max-width: 740px), (pointer: coarse) {
+  .btn.btn-sm, .btn.btn-icon, .parameter-lock.protection-button { min-height: 44px; }
+  .btn.btn-icon, .parameter-lock.protection-button.is-compact { min-width: 44px; }
+  :is(.auth-form,.library-tools,.library-editor,.workspace-modal) :is(input:not([type='radio'],[type='checkbox'],[type='range'],[type='file'],[type='hidden']),textarea) { font-size: 16px; }
+  .session-item .session-rename { min-height: 44px; }
 }

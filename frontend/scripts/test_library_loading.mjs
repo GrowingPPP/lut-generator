@@ -11,6 +11,13 @@ const bundle = await build({
   bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', jsx: 'automatic',
   loader: { '.css': 'empty' },
   plugins: [{ name: 'library-api-boundary', setup(builder) {
+    // This host runs LibraryView hooks only. Shared notification rendering has
+    // its own tests; expose its action boundary here without running child hooks.
+    builder.onResolve({ filter: /ui\/Notice\.jsx$/ }, () => ({ path: 'notice', namespace: 'library-notice-boundary' }))
+    builder.onLoad({ filter: /.*/, namespace: 'library-notice-boundary' }, () => ({ contents: `
+      export default function Notice() { return null; }
+      export function ErrorNotice() { return null; }
+    ` }))
     builder.onResolve({ filter: /lib\/api\.js$/ }, () => ({ path: 'api', namespace: 'library-api-boundary' }))
     builder.onLoad({ filter: /.*/, namespace: 'library-api-boundary' }, () => ({ contents: `
       export const listLuts = (...args) => __libraryApi.list(...args);
@@ -25,6 +32,10 @@ const bundle = await build({
 
 function findElement(element, predicate) {
   if (!element?.props) return null
+  if (element.type?.name === 'ErrorNotice' && element.props.error) {
+    return findElement(React.createElement('div', { role: 'alert' },
+      element.props.onRetry && React.createElement('button', { onClick: element.props.onRetry }, element.props.retryLabel || '重试')), predicate)
+  }
   if (predicate(element)) return element
   return [element.props.children].flat(Infinity).map(child => findElement(child, predicate)).find(Boolean)
 }

@@ -4,7 +4,7 @@
   align-items: center;
   gap: 32px;
   height: var(--app-header-height, 60px);
-  padding: 0 max(24px, calc((100% - 1440px) / 2));
+  padding: 0 max(var(--page-gutter), calc((100% - var(--page-studio-width)) / 2 + var(--page-gutter)));
 }
 .studio-brand {
   padding: 0;
@@ -46,4 +46,7 @@
 }
 @media (max-width: 360px) {
   .studio-shell .studio-brand { font-size: 0; gap: 0; }
+}
+@media (max-width: 740px), (pointer: coarse) {
+  .studio-shell .nav button, .studio-shell .topbar-user > .btn { min-height: 44px; }
 }

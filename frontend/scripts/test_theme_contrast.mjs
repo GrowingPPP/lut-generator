@@ -5,8 +5,10 @@ import test from 'node:test'
 const css = await readFile(new URL('../src/themes.css', import.meta.url), 'utf8')
 const palettes = {}
 for (const [, name = 'dark', body] of css.matchAll(/:root(?:\[data-theme='([^']+)'\])?\s*\{([^}]+)\}/g)) {
-  palettes[name] = Object.fromEntries([...body.matchAll(/--([\w-]+):\s*(#[\da-f]{6});/g)]
-    .map(([, key, value]) => [key, value]))
+  // Responsive blocks may declare non-color tokens on the same root. Preserve
+  // previously defined colors, following the cascade rather than replacing it.
+  palettes[name] = { ...palettes[name], ...Object.fromEntries([...body.matchAll(/--([\w-]+):\s*(#[\da-f]{6});/g)]
+    .map(([, key, value]) => [key, value])) }
 }
 
 function luminance(hex) {

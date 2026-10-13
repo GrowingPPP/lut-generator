@@ -1,3 +1,5 @@
+import Notice, { ErrorNotice } from './ui/Notice.jsx'
+import { createNotice } from '../lib/notices.js'
 import CheckboxField from './ui/CheckboxField.jsx'
 import ActionMenu from './ui/ActionMenu.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
@@ -176,7 +178,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       return true
     } catch (e) {
       if (requestId.current === id) {
-        setError(`加载失败：${e.message}`)
+        setError(e)
         return false
       }
     } finally {
@@ -229,7 +231,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       setEditing(null)
       await load()
     } catch (e) {
-      setEditError(`保存失败：${e.message}`)
+      setEditError(e)
     } finally {
       setSaving(false)
     }
@@ -240,7 +242,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       await updateLutMetadata(lut.id, { favorite: !lut.favorite })
       await load()
     } catch (e) {
-      setError(`收藏更新失败：${e.message}`)
+      setError(e)
     } finally {
       setBusyIds((ids) => ids.filter((id) => id !== lut.id))
     }
@@ -276,7 +278,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       const refreshed = await load()
       if (refreshed === false) setNotice(`「${lut.name}」已删除，列表刷新失败，请点击刷新。`)
     } catch (e) {
-      setDeleteError(`删除失败：${e.message}`)
+      setDeleteError(e)
     } finally {
       deleteInFlight.current = false
       setDeleting(false)
@@ -297,7 +299,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       const loaded = await listLutRevisions(lut.id)
       if (revisionRequestId.current === id) setRevisions(loaded)
     } catch (e) {
-      if (revisionRequestId.current === id) setRevisionError(`加载修订失败：${e.message}`)
+      if (revisionRequestId.current === id) setRevisionError(e)
     } finally {
       if (revisionRequestId.current === id) setRevisionLoading(false)
     }
@@ -328,7 +330,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
       await downloadAndSave(asset.id, mode, portable)
       setDownloadNotice(`已发起「${asset.name}」${mode === 'camera' ? '相机版' : '后期版'} .cube 下载，请在浏览器下载记录中查看。`)
     }
-    catch (failure) { setDownloadError(`下载失败：${failure.message}`) }
+    catch (failure) { setDownloadError(failure) }
     finally { setDownloading(false) }
   }
 
@@ -408,8 +410,8 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
         {activeFilters && <button className="btn btn-ghost btn-sm" onClick={resetFilters}>清除筛选</button>}
         <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>刷新</button>
       </div>
-      {error && <div className="library-error" role="alert"><p>{error}</p><button className="btn" onClick={load} disabled={loading}>重新加载</button></div>}
-      {notice && <p className="library-notice" role="status">{notice}</p>}
+      <ErrorNotice error={error} fallback="作品列表未能加载，请重新加载。" onRetry={load} retryLabel="重新加载" disabled={loading} />
+      {notice && <Notice key={notice} notice={createNotice(notice, 'success')} onDismiss={() => setNotice(current => current === notice ? '' : current)} />}
       {loading && luts.length === 0 && <div className="library-loading" role="status"><ActionIcon name="image" /><p>正在取回你的色彩作品…</p></div>}
       <div className="lib-grid" aria-label="已保存的 LUT 作品" aria-busy={loading}>
         {luts.map((lut) => (
@@ -479,8 +481,8 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
             ? '库内下载将风格应用于中性参数；叠加校正后的完整效果，请在调色项目中导出。'
             : '库内下载使用已保存的完整参数。'} 试用会先显示候选预览，确认后才改变调色项目。</p>
           {detail.preview_error && <p className="library-preview-warning">外部 LUT 预览暂不可用：{detail.preview_error}</p>}
-          {downloadError && <p className="error" role="alert">{downloadError}</p>}
-          {downloadNotice && <p className="library-notice" role="status">{downloadNotice}</p>}
+          <ErrorNotice error={downloadError} fallback="LUT 下载未完成，请重新选择下载格式。" />
+          {downloadNotice && <Notice notice={createNotice(downloadNotice, 'success')} />}
           {downloading && <p role="status">正在下载到电脑，请稍候…</p>}
           <div className="library-modal-actions library-detail-actions">
             <button className="btn-primary" disabled={downloading} onClick={() => preview(detail)}>{detail.kind === 'portable_style' ? '预览并追加风格' : '预览并载入完整效果'}</button>
@@ -508,7 +510,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
             <p>将永久删除此资产及全部调色修订，无法撤销。</p>
             <p>已载入的调整效果、调色项目草稿、保存版本和已导出的文件会保留。</p>
           </div>
-          {deleteError && <p className="error" role="alert">{deleteError}</p>}
+          <ErrorNotice error={deleteError} fallback="作品未能删除，请检查当前状态后重试。" />
           {deleting && <p className="library-delete-progress" role="status">正在删除，请稍候…</p>}
           <div className="library-modal-actions library-delete-actions">
             <button ref={deleteCancelRef} className="btn btn-ghost" disabled={deleting} onClick={closeDelete}>取消</button>
@@ -617,11 +619,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
           <p className="workspace-note">
             编辑信息不会改变调色参数，也不会增加调色修订。
           </p>
-          {editError && (
-            <div className="error" role="alert">
-              {editError}
-            </div>
-          )}
+          <ErrorNotice error={editError} fallback="作品信息未能保存，请检查填写内容后重试。" />
           <button className="btn-primary" disabled={saving} type="submit">
             {saving ? '正在保存…' : '保存信息'}
           </button>
@@ -642,7 +640,7 @@ export default function LibraryView({ onPreview, onDeleted, onCreate }) {
             查看历史修订不会覆盖资产或当前草稿；载入前会显示候选预览。信息编辑不产生调色修订。
           </p>
           {revisionLoading && <p role="status" className="library-revision-status">正在加载调色修订…</p>}
-          {revisionError && <div className="library-error" role="alert"><p>{revisionError}</p><button className="btn" onClick={() => openRevisions(revisionAsset)}>重试</button></div>}
+          <ErrorNotice error={revisionError} fallback="修订记录未能加载，请重试。" onRetry={() => openRevisions(revisionAsset)} />
           {!revisionLoading && !revisionError && revisions.length === 0 && <p className="library-revision-status">暂无调色修订。</p>}
           {revisions.map((revision) => (
             <div className="version-row" key={revision.revision_id}>

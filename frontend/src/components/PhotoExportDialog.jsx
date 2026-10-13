@@ -3,15 +3,18 @@ import { useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { ModalSurface } from './ui/Dialog.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
+import Notice, { ErrorNotice } from './ui/Notice.jsx'
+import { createNotice } from '../lib/notices.js'
 import { exportPhoto, savePhotoFile } from '../lib/photoApi.js'
 import { sampleIsNormalized } from '../lib/samples.js'
 import './PhotoExportDialog.css'
 
-export default function PhotoExportDialog({ sample, media, params, compatible, onClose, onBusyChange }) {
+export default function PhotoExportDialog({ sample, media, params, compatible, onClose, onBusyChange, returnFocusRef }) {
   const [format, setFormat] = useState('jpeg')
   const [quality, setQuality] = useState(95)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [exported, setExported] = useState('')
   const available = !!media?.file && compatible && sampleIsNormalized(sample)
   const width = sample?.source_width || sample?.photo_metadata?.source_width
   const height = sample?.source_height || sample?.photo_metadata?.source_height
@@ -22,30 +25,33 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
     setSaving(true)
     onBusyChange?.(true)
     setError('')
+    setExported('')
     try {
       const result = await exportPhoto(request)
       savePhotoFile(result.blob, result.name)
+      setExported(`已发起「${result.name}」下载，请在浏览器下载记录中查看。`)
     } catch (e) {
-      setError(e.message)
+      setError(e)
     } finally {
       setSaving(false)
       onBusyChange?.(false)
     }
   }
   return (
-    <ModalSurface onClose={onClose} busy={saving}>
-      <section className="workspace-modal photo-export-modal" role="dialog"
-        aria-modal="true" aria-labelledby="photo-export-title">
+    <ModalSurface onClose={onClose} busy={saving} returnFocusRef={returnFocusRef}>
+      <form className="workspace-modal photo-export-modal" role="dialog"
+        aria-modal="true" aria-labelledby="photo-export-title" aria-describedby="photo-export-description" aria-busy={saving}
+        onSubmit={event => { event.preventDefault(); submit() }}>
         <div className="section-heading">
           <h2 id="photo-export-title">导出调整后照片</h2>
-          <button className="btn btn-ghost" disabled={saving} onClick={onClose}><ActionIcon name="close" />关闭</button>
+          <button type="button" className="btn btn-ghost" disabled={saving} onClick={onClose}><ActionIcon name="close" />关闭</button>
         </div>
         <div className="photo-export-source">
           <strong>{sample?.name || '尚未选择照片'}</strong>
           {width && height && <span>原分辨率 {width} × {height}</span>}
           <span>使用当前全部效果，输出 sRGB</span>
         </div>
-        <p className="workspace-note">
+        <p className="workspace-note" id="photo-export-description">
           导出从原文件计算，保留已校正方向的原始分辨率。V-Log 的显示结果转换为 sRGB；
           文件包含 sRGB 色彩配置，移除原照片的定位和其他拍摄元数据。
         </p>
@@ -65,17 +71,16 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
         <p className="text-muted">
           {format === 'png' ? 'PNG 无损保存本次 8 位 RGB 调整结果，文件通常较大。' : 'JPEG 使用有损压缩；较高质量可以保留更多细节。'}
         </p>
-        {!available && <p className="error" role="alert">
-          {!media?.file ? '原分辨率导出需要重新绑定原文件。' : '请先确认照片输入并完成色彩规范化，再导出。'}
-        </p>}
-        {error && <p className="error" role="alert">{error}</p>}
+        {!available && <Notice notice={createNotice(!media?.file ? '原分辨率导出需要重新绑定原文件。' : '请先确认照片输入并完成色彩规范化，再导出。', 'warning')} />}
+        <ErrorNotice error={error} fallback="照片导出未完成，请检查原文件与输入条件后重试。" onRetry={submit} retryLabel="重试导出" disabled={saving || !available} />
+        {exported && <Notice notice={createNotice(exported, 'success')} />}
         <div className="modal-actions">
-          <button className="btn btn-ghost" disabled={saving} onClick={onClose}>取消</button>
-          <button className="btn-primary" disabled={!available || saving} onClick={submit}>
+          <button type="button" className="btn btn-ghost" disabled={saving} onClick={onClose}>取消</button>
+          <button type="submit" className="btn-primary" disabled={!available || saving}>
             {saving ? '正在计算原分辨率效果…' : '导出照片'}
           </button>
         </div>
-      </section>
+      </form>
     </ModalSurface>
   )
 }

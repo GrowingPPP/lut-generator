@@ -40,6 +40,7 @@
 | 曲线与外部 LUT | `backend/lut_engine/curves.py`、`backend/lut_engine/imported.py`、`backend/lut_engine/lut3d.py`；`frontend/src/lib/curveMath.js`、`frontend/src/lib/cubeLut.js`、`frontend/src/lib/importedLuts.js` | [扩展设计](../specs/extended-grading-design.md) |
 | 风格资产与历史修订 | `backend/api/main.py`、`backend/api/asset_metadata.py`、`backend/storage/db.py`；`frontend/src/components/LibraryView.jsx`、`frontend/src/components/StyleSaveDialog.jsx`、`frontend/src/lib/styleRecipe.js` | [风格与版本](../specs/style-workspace-design.md)、[资产删除](../specs/library-deletion.md) |
 | 控件、主题与视觉 | `frontend/src/components/ui/`、`frontend/src/components/SelectField.jsx`、`frontend/src/components/ParameterPanel.jsx`、`frontend/src/components/ParameterHelp.jsx`、`frontend/src/themes.css`、`frontend/src/lib/theme.js` | [手动参数入口与指南](../specs/manual-parameter-discoverability.md)、[Radix 体验](../specs/radix-ui-experience.md)、[主题](../specs/theme-design.md)、[视觉质量](../specs/visual-quality.md) |
+| 通知、表单与落地页 | `frontend/src/lib/notices.js`、`frontend/src/hooks/useOperationNotice.js`、`frontend/src/components/ui/Notice.jsx`、`frontend/src/components/ui/Dialog.jsx`、`frontend/src/LandingView.jsx` | [第二批 UI 设计与验收](../specs/ui-ux-phase2.md)，提示按账号／项目隔离；技术错误只展示安全摘要；通知不改变请求身份或自动重试 |
 | 加载与重试 | `frontend/src/components/FeatureLoader.jsx`、`frontend/build/lazyModuleUrls.mjs`、`frontend/scripts/check_build_loading.mjs` | [质量与加载](../specs/ai-quality-and-loading.md) |
 
 表中的代码路径均相对仓库根目录。文件移动或职责变化时同步维护该表；检索实现优先使用 `rg` 与 `rg --files`。

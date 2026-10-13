@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ModalSurface } from './ui/Dialog.jsx'
 import ActionMenu from './ui/ActionMenu.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
+import { ErrorNotice } from './ui/Notice.jsx'
 import './ProjectManager.css'
 
 export function projectName(project) {
@@ -30,10 +31,10 @@ export default function ProjectManager({ projects, currentId, busy, loading, err
       </header>
       <p id="project-manager-description" className="project-manager-description">每个项目保留独立的调色进度。版本记录属于项目，已保存的 LUT 可重复使用。</p>
       <div className="project-manager-tools">
-        <input type="search" aria-label="搜索调色项目" placeholder="搜索项目名称" value={query} onChange={event => setQuery(event.target.value)} />
+        <label className="project-manager-search">搜索项目<input type="search" aria-label="搜索调色项目" placeholder="输入项目名称" value={query} onChange={event => setQuery(event.target.value)} /></label>
         <button type="button" className="btn-primary" disabled={busy} onClick={onNew}>新建调色项目</button>
       </div>
-      {error && <div className="project-manager-error" role="alert"><span className="project-manager-error-text">{error}</span><button type="button" className="btn btn-soft" onClick={onRetry} disabled={busy}>重试同步</button></div>}
+      <ErrorNotice error={error} fallback="项目列表未能同步，请重试；本机草稿继续保留。" onRetry={onRetry} retryLabel="重试同步" disabled={busy} />
       <div className="project-manager-list" aria-label="项目列表" aria-busy={busy || loading}>
         {filtered.map(project => <article key={project.id} className="project-manager-row" data-current={project.id === currentId || undefined}>
           <div className="project-manager-mark" aria-hidden="true">{project.id === currentId ? '●' : '◇'}</div>

@@ -48,7 +48,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 34px;
+  min-height: var(--control-height);
   padding: 5px 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -74,7 +74,7 @@
 .photo-viewer-modes .photo-viewer-button { border-color: transparent; background: transparent; }
 .photo-viewer-scale select { width: 83px; min-height: 34px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--text); padding: 4px 6px; font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; }
 .photo-viewer-status { flex-wrap: wrap; padding-top: 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.photo-viewer-status .photo-viewer-button { min-height: 28px; font-size: 12px; }
+.photo-viewer-status .photo-viewer-button { min-height: var(--control-height); font-size: 12px; }
 .photo-viewer-source-size { margin-left: auto; }
 .photo-viewer-notice, .photo-viewer-error { flex: 0 0 auto; margin: 0; padding: 7px 16px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .photo-viewer-notice { color: var(--info); background: var(--info-soft); border-top: 1px solid var(--info-line); }
@@ -86,7 +86,7 @@
 .photo-viewer-adjustment-heading { position: sticky; top: -16px; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: -16px -16px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .photo-viewer-adjustment-heading h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
 .photo-viewer-history { display: flex; gap: 4px; }
-.photo-viewer-history .photo-viewer-button { min-height: 30px; padding: 4px 8px; font-size: 12px; }
+.photo-viewer-history .photo-viewer-button { min-height: var(--control-height); padding: 4px 8px; font-size: 12px; }
 .photo-viewer-edit-notice { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .photo-viewer-edit-notice p { margin: 0 0 12px; }
 .photo-viewer-adjustments .photo-adjustments { display: grid; gap: 12px; min-width: 0; }
@@ -178,6 +178,7 @@
   .photo-viewer-tools { gap: 8px; }
   .photo-viewer-zoom { width: 100%; justify-content: center; }
   .photo-viewer-zoom > .photo-viewer-button { padding-left: 7px; padding-right: 7px; }
+  .photo-viewer-zoom > .photo-viewer-button:not(.photo-viewer-step) > .action-icon { display:none; }
   .photo-viewer-zoom > .photo-viewer-step { width: 34px; }
   .photo-viewer-step-label { display: none; }
   .photo-viewer-source-size { margin-left: 0; }
@@ -190,6 +191,10 @@
 @media (max-height: 650px) and (max-width: 999px) {
   .photo-viewer-main { min-height: 110px; }
   .photo-viewer-adjustments { flex-basis: 30dvh; max-height: 30dvh; min-height: 100px; }
+}
+@media (max-width:740px), (pointer:coarse) {
+  .photo-viewer-button, .photo-viewer-adjustments .param-group-head, .photo-viewer-adjustments .group-reset { min-height:44px; }
+  .photo-viewer-zoom > .photo-viewer-step, .photo-viewer-adjustments .group-reset { min-width:44px; }
 }
 @media (max-height: 500px) and (min-width: 701px) {
   .photo-viewer-backdrop { padding: 0; }

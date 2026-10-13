@@ -3,6 +3,20 @@
 :root[data-theme-switching] *::before,
 :root[data-theme-switching] *::after { transition: none !important; }
 :root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --page-gutter: 24px;
+  --page-reading-width: 1280px;
+  --page-studio-width: 1540px;
+  --control-height: 40px;
+  --radius-control: 8px;
+  --radius-panel: 10px;
   color-scheme: dark;
   --ink: #0e0f11;
   --panel: #191b1e;
@@ -40,6 +54,13 @@
   --photo-text: #f4f4f4;
   --photo-muted: #c8c8c8;
   --photo-line: #777777;
+}
+
+@media (max-width: 740px), (pointer: coarse) {
+  :root { --control-height: 44px; }
+}
+@media (max-width: 740px) {
+  :root { --page-gutter: 16px; }
 }
 
 :root[data-theme='gray'] {

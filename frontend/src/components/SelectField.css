@@ -6,7 +6,7 @@
   gap: 10px;
   width: 100%;
   min-width: 0;
-  min-height: 40px;
+  min-height: var(--control-height);
   padding: 8px 11px;
   border: 1px solid var(--control-line);
   border-radius: 8px;
@@ -45,7 +45,7 @@
 .select-native { position: absolute !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; max-width: 1px !important; max-height: 1px !important; margin: -1px !important; padding: 0 !important; border: 0 !important; opacity: 0 !important; clip: rect(0, 0, 0, 0); clip-path: inset(50%); overflow: hidden; pointer-events: none; }
 .select-validation { display: block; margin-top: 5px; font-size: 12px; line-height: 1.5; color: var(--danger); }
 .theme-picker .select-field { width: 112px; }
-.theme-picker .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: 34px; padding: 5px 9px; font-size: 12px; }
+.theme-picker .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: var(--control-height); padding: 5px 9px; font-size: 12px; }
 .workspace-select .select-field { flex: 1; }
 .gen-workbench .workspace-select .select-field > button.select-trigger[data-chroma-select-trigger] { font-size: 14px; font-weight: 600; }
 .mode-select .select-field { width: 120px; }
@@ -54,8 +54,12 @@
 .purpose-select .select-field { width: 160px; }
 .comparison-controls .select-field { width: 220px; }
 .photo-viewer-scale .select-field { width: 94px; font-variant-numeric: tabular-nums; }
-.photo-viewer-scale .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: 34px; padding: 6px 9px; }
-.library-tools .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: 40px; font-size: 14px; }
+.photo-viewer-scale .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: var(--control-height); padding: 6px 9px; }
+.library-tools .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: var(--control-height); font-size: 14px; }
 @keyframes select-appear { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 600px) { .select-option { min-height: 44px; } .comparison-controls .select-field { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .select-content { animation: none; } .select-field > button.select-trigger[data-chroma-select-trigger], .select-chevron { transition: none; } }
+@media (max-width: 740px), (pointer: coarse) {
+  .select-field > button.select-trigger[data-chroma-select-trigger] { min-height: 44px; }
+  .select-option { min-height: 44px; }
+}

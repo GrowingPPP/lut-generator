@@ -9,6 +9,9 @@ import { defaultParams, normalizeParams } from './lib/lutEngine.js'
 import usePreview from './hooks/usePreview.js'
 import useWorkspace from './hooks/useWorkspace.js'
 import useCreationFlow from './hooks/useCreationFlow.js'
+import useOperationNotice from './hooks/useOperationNotice.js'
+import Notice, { ErrorNotice } from './components/ui/Notice.jsx'
+import { createNotice, describeError } from './lib/notices.js'
 import useAutoRetouchController from './hooks/useAutoRetouchController.js'
 import { CREATION_STEPS, creationToolTab } from './lib/creationFlow.js'
 import CreationNavigation from './components/CreationNavigation.jsx'
@@ -151,7 +154,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const [referenceBusy, setReferenceBusy] = useState(false)
   const [deliveryBusy, setDeliveryBusy] = useState(false)
   const [allParameters, setAllParameters] = useState(false)
-  const [status, setStatus] = useState('')
+  const { notice, notify: setStatus, dismiss: dismissNotice } = useOperationNotice(`${user}:${workspace.id}`)
   const [groupOpen, setGroupOpen] = useState(defaultGroupOpen)
   const [sessions, setSessions] = useState([])
   const [remoteWorkspaces, setRemoteWorkspaces] = useState([])
@@ -192,6 +195,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const mainCurveRef = useRef(null)
   const photoAdjustmentsRef = useRef(null)
   const photoViewerEntryRef = useRef(null)
+  const photoExportEntryRef = useRef(null)
   const sampleGalleryRef = useRef(null)
   const creationTitleRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -335,7 +339,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   useEffect(() => {
     listSessions()
       .then(setSessions)
-      .catch((e) => setStatus(e.message))
+      .catch((e) => setStatus(e, { tone: 'error', channel: 'general' }))
     void refreshProjects()
   }, [])
 
@@ -372,7 +376,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       .catch((e) => {
         if (!cancelled) {
           if (e.status === 410) void recoverDeletedProject(workspace.id)
-          else setStatus(`调色项目同步失败：${e.message}`)
+          else setStatus(e, { tone: 'error', channel: 'general', fallback: '调色项目同步失败，请稍后重试同步。' })
         }
       })
     if (!workspace.report) {
@@ -473,10 +477,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       e.preventDefault()
       if (e.shiftKey && editor.canRedo) {
         redoAdjustment()
-        setStatus('已重做上一项调整')
+        setStatus('已重做上一项调整', { tone: 'success', channel: 'general' })
       } else if (!e.shiftKey && editor.canUndo) {
         undoAdjustment()
-        setStatus('已撤销上一项调整')
+        setStatus('已撤销上一项调整', { tone: 'success', channel: 'general' })
       }
     }
     window.addEventListener('keydown', onKey)
@@ -505,7 +509,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       || parameterSignature(result.before_params) !== parameterSignature(ws.params)
       || result.workspace_id !== ws.id || result.source_digest !== sample?.source_digest
       || result.main_sample_id !== ws.primary_sample_id || result.job_id !== meta?.jobId) {
-      setStatus('调色项目、参数或主样张已变化，本次响应未应用')
+      setStatus('调色项目、参数或主样张已变化，本次响应未应用', { tone: 'warning', channel: 'ai' })
       return false
     }
     if ((ws.applied_auto_job_ids || []).includes(meta.jobId)) return true
@@ -522,11 +526,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       _context_json: contextSignature(meta.requestSummary.context), _applied_at: new Date().toISOString() }
     const next = editor.commit(result.params, { id: meta.jobId, source: 'auto', purpose: 'correction',
       phases: effectivePhases(result), report })
-    if (!next) { setStatus('参数未应用，请查看草稿提示'); return false }
+    if (!next) { setStatus('参数未应用，请查看草稿提示', { tone: 'warning', channel: 'ai' }); return false }
     await editor.setMeta({ report: next.report?.job_id === meta.jobId ? next.report : report,
       applied_auto_job_ids: [...(ws.applied_auto_job_ids || []), meta.jobId].slice(-200),
       ...(result.session_id ? { session_id: result.session_id } : {}) })
-    if (!(await editor.flush())) { setStatus('本次结果未能保存，恢复记录保留，请重试草稿保存'); return false }
+    if (!(await editor.flush())) { setStatus('本次结果未能保存，恢复记录保留，请重试草稿保存', { tone: 'warning', channel: 'ai' }); return false }
     if (result.session_id) listSessions().then(setSessions).catch(() => {})
     return true
   }
@@ -542,7 +546,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     setLocalProjects(items => items.filter(item => item.id !== id))
     if (currentRef.current.id === id) {
       await editor.loadWorkspace({ sessionId: null })
-      setStatus('此调色项目已被删除，已切换到可用草稿')
+      setStatus('此调色项目已被删除，已切换到可用草稿', { tone: 'warning', channel: 'general' })
     }
   }
 
@@ -590,9 +594,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       setSessions((prev) => [session, ...prev])
       await ensureRemote(loaded)
       setProjectManager(false)
-      setStatus('已创建新的调色项目')
+      setStatus('已创建新的调色项目', { tone: 'success', channel: 'general' })
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     } finally {
       projectOperationRef.current = false
       setRemoteBusy(false)
@@ -626,7 +630,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     let syncError
     await ensureRemote(loaded).catch(error => {
       if (!local || error.status === 410 || error.status === 401) throw error
-      syncError = error.message
+      syncError = describeError(error, '账户同步暂未完成，请稍后重试同步。').message
     })
     return { ...loaded, syncError }
   }
@@ -642,10 +646,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       const loaded = await loadProject(record)
       if (!loaded) return
       setProjectManager(false)
-      setStatus(loaded.syncError ? `已恢复本机草稿；账户同步失败：${loaded.syncError}` : '已载入调色项目；本机草稿优先恢复')
+      setStatus(loaded.syncError ? `已恢复本机草稿；账户同步失败：${loaded.syncError}` : '已载入调色项目；本机草稿优先恢复', { tone: loaded.syncError ? 'warning' : 'success', channel: 'general' })
     } catch (e) {
       if (e.status === 410) void recoverDeletedProject(id)
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     } finally {
       projectOperationRef.current = false
       setRemoteBusy(false)
@@ -671,10 +675,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       setRemoteWorkspaces(items => items.map(item => item.id === id ? remote : item))
       if (!(await editor.renameProject(name, id))) throw new Error('项目名称已同步到账户，本机保存失败，请重试保存')
       setLocalProjects(items => items.map(item => item.id === id ? { ...item, name } : item))
-      setStatus(`已重命名项目：${name}`)
+      setStatus(`已重命名项目：${name}`, { tone: 'success', channel: 'general' })
     } catch (error) {
       if (error.status === 410) void recoverDeletedProject(id)
-      setStatus(error.message)
+      setStatus(error, { tone: 'error', channel: 'general' })
       setProjectError(error.message)
     } finally {
       projectOperationRef.current = false
@@ -697,10 +701,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       if (!duplicate) throw new Error('副本未能保存，源项目已保留，请查看草稿提示')
       setSessions(items => [session, ...items])
       await ensureRemote(duplicate)
-      setStatus('已复制当前调色效果与样张设置，可以在副本中继续创作')
+      setStatus('已复制当前调色效果与样张设置，可以在副本中继续创作', { tone: 'success', channel: 'general' })
     } catch (error) {
       if (session && !duplicate) await deleteSession(session.id).catch(() => {})
-      setStatus(error.message)
+      setStatus(error, { tone: 'error', channel: 'general' })
     } finally {
       projectOperationRef.current = false
       setRemoteBusy(false)
@@ -755,10 +759,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       }
       listSessions().then(setSessions).catch(() => {})
       setProjectError(retired ? '' : '项目已删除，本机缓存清理未完成，请重试同步')
-      setStatus(retired ? '调色项目已删除；已保存 LUT 和原照片已保留' : '项目已删除，本机缓存清理未完成，请重试同步')
+      setStatus(retired ? '调色项目已删除；已保存 LUT 和原照片已保留' : '项目已删除，本机缓存清理未完成，请重试同步', { tone: 'warning', channel: 'general' })
     } catch (error) {
       const message = deleted ? `项目已删除；切换项目失败：${error.message}` : `删除项目失败：${error.message}`
-      setStatus(message)
+      setStatus(message, { tone: 'error', channel: 'general' })
       setProjectError(message)
     } finally {
       if (deleted && removingCurrent) editor.notifyProjectDeletion(id, replacementId)
@@ -786,9 +790,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         name: sessions.find((s) => s.id === id)?.title || '',
       })
       if (!loaded) throw new Error('会话草稿未能载入，请查看本机保存提示')
-      setStatus('旧会话已转为调色项目，保存可复用风格前需确认旧参数来源')
+      setStatus('旧会话已转为调色项目，保存可复用风格前需确认旧参数来源', { tone: 'warning', channel: 'general' })
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     } finally {
       setRemoteBusy(false)
     }
@@ -808,7 +812,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       )
       if (workspace.session_id === id) await editor.setMeta({ session_id: null })
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     } finally {
       setRemoteBusy(false)
     }
@@ -865,7 +869,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     const text = input.trim()
     if (!text || busy) return
     setSending(true)
-    setStatus('正在根据文字提取调整项…')
+    setStatus('正在根据文字提取调整项…', { tone: 'progress', channel: 'ai', intent: 'text' })
     const request = captureRequest()
     const history = messages
       .slice(-6)
@@ -881,7 +885,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         main_sample_id: request.primary_id,
       })
       if (!requestMatches(request)) {
-        setStatus('调色项目已变化，本次响应未应用')
+        setStatus('调色项目已变化，本次响应未应用', { tone: 'warning', channel: 'ai', intent: 'text' })
         return
       }
       setMessages((m) => [...m, { role: 'agent', text: resp.reply }])
@@ -893,8 +897,8 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             ? effectivePhases(resp, { chatPurpose: workspace.purpose })
             : undefined,
         })
-        setStatus(next ? (diffParams(params, next.params).length ? '文字调整已更新当前效果，可撤销；对话中的生成确认请按回复操作' : '本次没有改变参数，请查看回复') : '本次文字调整未应用，请查看草稿提示')
-      } else setStatus('已收到回复，当前参数未改变；请查看回复中的下一步')
+        setStatus(next ? (diffParams(params, next.params).length ? '文字调整已更新当前效果，可撤销；对话中的生成确认请按回复操作' : '本次没有改变参数，请查看回复') : '本次文字调整未应用，请查看草稿提示', { tone: next && diffParams(params, next.params).length ? 'success' : 'warning', channel: 'ai', intent: 'text' })
+      } else setStatus('已收到回复，当前参数未改变；请查看回复中的下一步', { tone: 'info', channel: 'ai', intent: 'text' })
       if (resp.session_id) {
         await editor.setMeta({ session_id: resp.session_id })
         await updateWorkspace(workspace.id, { session_id: resp.session_id })
@@ -903,8 +907,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           .catch(() => {})
       }
     } catch (e) {
-      setMessages((m) => [...m, { role: 'agent', text: `生成失败：${e.message}` }])
-      setStatus(`文字调整未完成：${e.message}`)
+      const message = describeError(e, '文字调整未完成，请检查当前条件后重试。').message
+      setMessages((m) => [...m, { role: 'agent', text: message }])
+      setStatus(e, { tone: 'error', channel: 'ai', intent: 'text', fallback: '文字调整未完成，请检查当前条件后重试。' })
     } finally {
       setSending(false)
     }
@@ -915,9 +920,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     const request = captureRequest()
     const unlockFields = await confirmConflicts(preset.params)
     if (unlockFields === null) return
-    if (!requestMatches(request)) { setStatus('草稿已变化，请重新选择预设'); return }
+    if (!requestMatches(request)) { setStatus('草稿已变化，请重新选择预设', { tone: 'warning', channel: 'general' }); return }
     editor.commit(preset.params, { source: 'preset', unlockFields, replaceBaseline: true })
-    setStatus(`已载入「${preset.name}」完整效果；旧来源需明确确认后才能保存为可复用风格`)
+    setStatus(`已载入「${preset.name}」完整效果；旧来源需明确确认后才能保存为可复用风格`, { tone: 'warning', channel: 'general' })
   }
 
   function prepareAsset(lut) {
@@ -929,7 +934,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           : normalizeParams(lut.params)
       setPendingAsset({ lut, candidate, request: captureRequest() })
     } catch (e) {
-      setStatus(`无法载入：${e.message}`)
+      setStatus(e, { tone: 'error', channel: 'general', fallback: '无法载入此作品，请检查资源后重试。' })
     }
   }
   const applyAsset = async () => {
@@ -941,7 +946,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     }
     if (!requestMatches(request)) {
       setPendingAsset(null)
-      setStatus('草稿已变化，请重新预览资产候选')
+      setStatus('草稿已变化，请重新预览资产候选', { tone: 'warning', channel: 'general' })
       return
     }
     const unlockFields = await confirmConflicts(candidate)
@@ -961,7 +966,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       return
     if (deletedAssetIds.current.has(lut.id) || !requestMatches(request)) {
       setPendingAsset(null)
-      setStatus('草稿或资产已变化，请重新预览候选')
+      setStatus('草稿或资产已变化，请重新预览候选', { tone: 'warning', channel: 'general' })
       return
     }
     setRemoteBusy(true)
@@ -982,11 +987,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       )
       if (deletedAssetIds.current.has(lut.id)) {
         setPendingAsset(null)
-        setStatus('该资产已删除，候选未应用')
+        setStatus('该资产已删除，候选未应用', { tone: 'warning', channel: 'general' })
         return
       }
       if (!requestMatches(request)) {
-        setStatus('草稿已变化，候选未应用')
+        setStatus('草稿已变化，候选未应用', { tone: 'warning', channel: 'general' })
         return
       }
       if (!equivalentCandidate(checked.params, candidate))
@@ -1005,11 +1010,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         setPendingAsset(null)
         setSavedAsset(lut)
         setStatus(
-          `${lut.kind === 'portable_style' ? '已在当前效果上追加风格' : '已替换当前完整参数'}${checked.validation_status === 'not_verified' ? '；尚未验证图像效果' : '；已检查主样张新增风险'}`,
-        )
+          `${lut.kind === 'portable_style' ? '已在当前效果上追加风格' : '已替换当前完整参数'}${checked.validation_status === 'not_verified' ? '；尚未验证图像效果' : '；已检查主样张新增风险'}`, { tone: checked.validation_status === 'not_verified' ? 'warning' : 'success', channel: 'general' })
       }
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     } finally {
       setRemoteBusy(false)
     }
@@ -1036,13 +1040,13 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     const isCurrent = () => currentRef.current.id === sourceWorkspace.id
       && currentRef.current.user_id === sourceWorkspace.user_id
     if (!selection || selection.workspaceId !== sourceWorkspace.id || selection.userId !== sourceWorkspace.user_id) {
-      setStatus('调色项目已变化，请在当前项目重新选择照片')
+      setStatus('调色项目已变化，请在当前项目重新选择照片', { tone: 'warning', channel: 'general' })
       return
     }
     const feedback = (phase, message) => {
       if (!isCurrent()) return
       setSampleBinding({ workspaceId: sourceWorkspace.id, sampleId: selection.sampleId, phase, message })
-      setStatus(message)
+      setStatus(message, { tone: phase === 'loading' ? 'progress' : phase, channel: 'photo' })
     }
     if (busy) {
       feedback('error', '当前操作尚未完成，照片未绑定。请等待完成后重新选择同一文件。')
@@ -1125,9 +1129,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         validation: ws.validation ? { ...ws.validation, stale: true } : null })
       if (currentRef.current.id === ws.id) {
         setSampleBinding(null)
-        setStatus(`已确认 ${sample.name} 的 ${contract.base_photo_style} 照片输入`)
+        setStatus(`已确认 ${sample.name} 的 ${contract.base_photo_style} 照片输入`, { tone: 'success', channel: 'general' })
       }
-    } catch (failure) { setStatus(failure.message) }
+    } catch (failure) { setStatus(failure, { tone: 'error', channel: 'general' }) }
     finally { setSampleLoading(false) }
   }
 
@@ -1171,8 +1175,8 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
     setSampleLoading(true)
     try {
       await updateSubjectMetadata(id, patch)
-      setStatus('已保存照片内容与肤色保护区域，统计验证需重新运行')
-    } catch (failure) { setStatus(failure.message) }
+      setStatus('已保存照片内容与肤色保护区域，统计验证需重新运行', { tone: 'success', channel: 'general' })
+    } catch (failure) { setStatus(failure, { tone: 'error', channel: 'general' }) }
     finally { setSampleLoading(false) }
   }
   const setSampleSubject = (id, selection) => {
@@ -1207,7 +1211,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         const item = mediaRef.current.get(id)
         if (!item?.file) detection = fallback('failed', 'source_required')
         else {
-          setStatus(`正在识别 ${sample.name} 的人物与肤色区域；照片将发送给模型`)
+          setStatus(`正在识别 ${sample.name} 的人物与肤色区域；照片将发送给模型`, { tone: 'progress', channel: 'ai' })
           try {
             const result = await analyzePhotoSubjects({ file: item.file, params: ws.params, source_digest: sample.source_digest })
             detection = normalizeSubjectDetection(result, sample.source_digest, sample.input_contract?.base_photo_style)
@@ -1220,9 +1224,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       }
       if (!stillCurrent()) throw new Error('调色项目、参数或照片已变化，识别结果未写入草稿')
       await updateSubjectMetadata(id, { subject_detection: detection })
-      if (detection.status === 'failed') setStatus('人物识别未完成，未启用自动肤色保护；可重试识别或人工框选，调色可继续')
-      else if (detection.status === 'uncertain') setStatus('人物识别暂不确定，可人工修正照片内容与皮肤区域，调色可继续')
-      else if (detection.status === 'resolved') setStatus('人物识别已保存，可查看或修正肤色保护区域')
+      if (detection.status === 'failed') setStatus('人物识别未完成，未启用自动肤色保护；可重试识别或人工框选，调色可继续', { tone: 'warning', channel: 'ai' })
+      else if (detection.status === 'uncertain') setStatus('人物识别暂不确定，可人工修正照片内容与皮肤区域，调色可继续', { tone: 'warning', channel: 'ai' })
+      else if (detection.status === 'resolved') setStatus('人物识别已保存，可查看或修正肤色保护区域', { tone: 'success', channel: 'ai' })
       return detection
     } finally {
       if (subjectMountedRef.current && requestId === subjectRequestRef.current) setDetectingSampleId(null)
@@ -1239,7 +1243,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   const detectSubjectsManually = async id => {
     if (busy) return
     try { await detectSampleSubjects(id, { force: true }) }
-    catch (failure) { setStatus(failure.message) }
+    catch (failure) { setStatus(failure, { tone: 'error', channel: 'general' }) }
   }
   const retain = async (enabled) => {
     if (busy) return
@@ -1253,7 +1257,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           if (item) await editor.cachePreview(sample.id, item.blob, sample)
         }
     } catch (e) {
-      setStatus(`本机预览未保存：${e.message}`)
+      setStatus(`本机预览未保存：${describeError(e, '请检查浏览器存储后重试。').message}`, { tone: 'warning', channel: 'general' })
     } finally {
       setRemoteBusy(false)
     }
@@ -1290,7 +1294,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           )
         : { results: [] }
       if (!requestMatches(request)) {
-        setStatus('调色项目已变化，统计结果未覆盖当前验证')
+        setStatus('调色项目已变化，统计结果未覆盖当前验证', { tone: 'warning', channel: 'general' })
         return
       }
       editor.setMeta({
@@ -1302,9 +1306,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           measured_at: Date.now(),
         },
       })
-      setStatus('统计验证完成；结果反映新增可测风险，不代表风格优劣')
+      setStatus('统计验证完成；结果反映新增可测风险，不代表风格优劣', { tone: 'success', channel: 'general' })
     } catch (e) {
-      setStatus(`验证失败：${e.message}`)
+      setStatus(e, { tone: 'error', channel: 'general', fallback: '验证未完成，请检查照片输入和当前效果后重试。' })
     } finally {
       setValidating(false)
     }
@@ -1340,7 +1344,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         : await createLut(data.name, data.description, data.params, metadata)
     if (!stillCurrent()) return
     setSavedAsset(deletedAssetIds.current.has(asset.id) ? null : asset)
-    setStatus(`已保存「${data.name}」，当前草稿保持原效果`)
+    setStatus(`已保存「${data.name}」，当前草稿保持原效果`, { tone: 'success', channel: 'general' })
   }
 
   const saveVersion = async (name) => {
@@ -1363,11 +1367,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
       })
       if (currentRef.current.id === workspaceId && version.workspace_id === workspaceId) {
         setVersions((v) => [version, ...v])
-        setStatus(`已保存版本「${name}」`)
+        setStatus(`已保存版本「${name}」`, { tone: 'success', channel: 'general' })
       }
       return true
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
       return false
     } finally {
       setRemoteBusy(false)
@@ -1385,7 +1389,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           name ? v.map((x) => (x.id === id ? { ...x, name } : x)) : v.filter((x) => x.id !== id),
         )
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     } finally {
       setRemoteBusy(false)
     }
@@ -1404,11 +1408,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         description: '该版本使用不同输入基准或显示映射。确认使用其已保存的输入条件后，当前样张会重新检查兼容性。', confirmLabel: '确认恢复' }))
     )
       return
-    if (!requestMatches(request)) { setStatus('草稿已变化，请重新选择恢复版本'); return }
+    if (!requestMatches(request)) { setStatus('草稿已变化，请重新选择恢复版本', { tone: 'warning', channel: 'general' }); return }
     const restored = editor.restoreVersion(version, { unlockFields, confirmInput: inputChanged })
     if (!restored) return
     showCurrentComparison()
-    setStatus(`已恢复「${version.name}」到当前草稿，可撤销`)
+    setStatus(`已恢复「${version.name}」到当前草稿，可撤销`, { tone: 'success', channel: 'general' })
   }
   const compare = (side, item) => {
     finishMainAdjustment()
@@ -1438,9 +1442,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           ? cameraFileName(name)
           : `${name}_${params.base_photo_style === 'VLOG' ? 'VLOG_to_Rec709' : `${params.base_photo_style}_sRGB`}.cube`
       saveTextFile(paramsToCube(params, { title: name, mode }), filename)
-      setStatus(`已下载当前完整效果：${filename}`)
+      setStatus(`已下载当前完整效果：${filename}`, { tone: 'success', channel: 'general' })
     } catch (e) {
-      setStatus(e.message)
+      setStatus(e, { tone: 'error', channel: 'general' })
     }
   }
   const backup = () => saveTextFile(editor.backup(), `CHROMA_${workspace.id}.json`)
@@ -1457,7 +1461,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         if (!(await editor.flush())) throw new Error('当前草稿未能保存，请先重试保存')
         await ensureRemote()
         return request
-      } catch (error) { setStatus(error.message); return false }
+      } catch (error) { setStatus(error, { tone: 'error', channel: 'ai' }); return false }
     },
     getAppliedJob: id => (currentRef.current.applied_auto_job_ids || []).includes(id),
     onResult: (result, request, meta) => applyAutoResult(result, meta, request),
@@ -1490,6 +1494,10 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   }
   const bindingNotice = sampleBinding?.workspaceId === workspace.id &&
     (!sampleBinding.sampleId || sampleBinding.sampleId === selectedSample?.id) ? sampleBinding : null
+
+  const inAiPanel = notice?.channel === 'ai' && flow.step === 'style' && effectiveToolTab === 'ai'
+  const aiNotice = inAiPanel && (!notice.intent || notice.intent === aiIntent)
+  const showNotice = notice && !aiNotice && (bindingNotice?.phase === 'success' || notice.message !== bindingNotice?.message)
 
   return (
     <div className="gen-workbench creation-flow" data-creation-step={flow.step}>
@@ -1524,11 +1532,13 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         </div>
         <button className="btn btn-ghost workspace-history-toggle" aria-label="打开对话历史" onClick={() => setWorkspaceHistory(true)}><ActionIcon name="history" /><span>对话历史</span></button>
         <WorkspaceToolbar showNew={false} mode="header" editor={toolbarEditor} busy={busy} onNew={newWorkspace} onBackup={backup}
-          onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
+          onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整', { tone: 'success', channel: 'general' })} />
       </header>
       <WorkspaceToolbar mode="recovery" editor={toolbarEditor} busy={busy} onBackup={backup} />
       <CreationNavigation step={flow.step} onNavigate={goToStep} titleRef={creationTitleRef} disabled={!ready || sampleLoading || deliveryBusy} />
-      {status && (bindingNotice?.phase === 'success' || status !== bindingNotice?.message) && <div className="workbench-notice" role="status"><span>{status}</span><button type="button" className="btn btn-ghost btn-icon" aria-label="关闭操作提示" onClick={() => setStatus('')}><ActionIcon name="close" /></button>{activeAiIntent && !(flow.step === 'style' && aiIntent === activeAiIntent) && <button className="btn" onClick={() => { openTool('ai'); setAiIntent(activeAiIntent) }}>{grading ? '查看进度与取消' : '查看当前操作'}</button>}</div>}
+      {showNotice && <Notice key={notice.id} notice={notice} onDismiss={notice.tone === 'progress' ? undefined : dismissNotice}
+        className={notice.tone === 'success' ? 'workbench-toast' : 'workbench-feedback'}
+        action={notice.channel === 'ai' ? { label: grading ? '查看进度与取消' : '查看当前操作', onClick: () => { openTool('ai'); setAiIntent(notice.intent || activeAiIntent || aiIntent) } } : undefined} />}
       <div className="workbench-body creation-body">
         <section className={`photo-workspace ${curvesVisible ? 'curves-open' : ''}`} aria-label="照片预览与检查">
         <section className="creation-preview-panel" aria-label="照片预览">
@@ -1592,8 +1602,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         </details>
         </div>
         {bindingNotice && bindingNotice.phase !== 'success' && (
-          <p className="sample-binding-status" data-phase={bindingNotice.phase}
-            role={bindingNotice.phase === 'error' ? 'alert' : 'status'}>{bindingNotice.message}</p>
+          <Notice className="sample-binding-status" notice={createNotice(bindingNotice.message, { tone: bindingNotice.phase === 'loading' ? 'progress' : bindingNotice.phase })} />
         )}
         </div>
         <div className="photo-stage" style={{ '--photo-ratio': selectedMedia?.canvas ? selectedMedia.canvas.width / selectedMedia.canvas.height : 800 / 560 }}>
@@ -1668,7 +1677,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           onSelect={setSelectedId}
           onPrimary={(id) => {
             editor.setMeta({ primary_sample_id: id })
-            setStatus('已更换 AI 主样张并保留当前参数；现有校正可能来自此前样张')
+            setStatus('已更换 AI 主样张并保留当前参数；现有校正可能来自此前样张', { tone: 'warning', channel: 'general' })
           }}
           onRemove={removeSample}
           onConfirm={confirmSample}
@@ -1681,7 +1690,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           onGuide={(sample) => setCameraGuide({ sample: sample || selectedSample })}
         /></div>
           <div hidden={flow.step !== 'adjust'}><DiagnosticsPanel compact image={selectedMedia?.canvas} params={params} compatible={compatible} sampleName={selectedSample?.name} /></div>
-          {(resourceError || previewError) && <p className="draft-error" role="alert">效果未能生成：{resourceError || previewError}</p>}
+          {(resourceError || previewError) && <ErrorNotice error={resourceError || previewError} fallback="效果未能生成，请检查照片输入和外部 LUT 资源。" />}
         </section>
         <TabsRoot asChild value={effectiveToolTab} onValueChange={next => {
           finishMainAdjustment()
@@ -1698,7 +1707,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             workspace={workspace} image={selectedMedia?.canvas} compatible={compatible} media={selectedMedia} sample={selectedSample}
             savedAsset={savedAsset} disabled={busy} resourceError={resourceError} onSave={saveAsset} onBusyChange={setDeliverySaving}
             onBind={() => { goToStep('photos'); if (selectedSample && !selectedMedia?.file) openSamplePicker(selectedSample.id) }}
-            onDownload={downloadCube} onPhotoExport={() => setPhotoExport(true)} onGuide={() => setCameraGuide({ sample: selectedSample })} /></DeferredFeature></div>
+            onDownload={downloadCube} photoExportEntryRef={photoExportEntryRef} onPhotoExport={() => setPhotoExport(true)} onGuide={() => setCameraGuide({ sample: selectedSample })} /></DeferredFeature></div>
           <div className="manual-tool-header" hidden={flow.step !== 'adjust'}>
           <TabsList className="task-tabs" aria-label="比较与调整工具">
             {TOOL_TABS.filter(([key]) => key !== 'ai').map(([key, label]) => <TabsTrigger key={key} value={key}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</TabsTrigger>)}
@@ -1715,6 +1724,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             <h2 id="creation-ai-title" className="tool-heading">选择创作方式</h2>
             <div className="ai-intents" role="group" aria-label="创作方式">{AI_INTENTS.map(([key, label]) => <button key={key} aria-pressed={aiIntent === key} onClick={() => setAiIntent(key)}>{label}</button>)}</div>
             <WorkspaceToolbar mode="goal" editor={toolbarEditor} busy={busy} onBackup={backup} />
+            {aiNotice && !(notice.intent === 'reference' && notice.tone === 'error') && <Notice key={notice.id} notice={notice} onDismiss={notice.tone === 'progress' ? undefined : dismissNotice} className="ai-operation-notice" />}
             <div className="ai-method" hidden={aiIntent !== 'optimize'}>
         <AutoRetouchBar controller={autoController} context={context} running={grading} disabled={busy}
           hasRealPhoto={!!primaryMedia?.file && primaryCompatible} sampleName={primarySample?.name} showSample={false} />
@@ -1755,7 +1765,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           const next = editor.commit(result.params, { source: 'reference', purpose: 'style' })
           if (!next) return false
           if (!(await editor.flush())) throw new Error('候选未能保存，请重试草稿保存')
-          setSelectedId(primaryId); clearComparison(); setStatus('参考匹配候选已应用，可一次撤销')
+          setSelectedId(primaryId); clearComparison(); setStatus('参考匹配候选已应用，可一次撤销', { tone: 'success', channel: 'general' })
           return true
         }} /></DeferredFeature>
             </div>
@@ -1781,7 +1791,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             applied={Boolean(gradeResult.job_id && workspace.applied_auto_job_ids?.includes(gradeResult.job_id))}
             onUndo={
               !busy && !reportHistorical && editor.histories.past.at(-1)?.source === 'auto'
-                ? () => { undoAdjustment(); setStatus('已撤销本次 AI 调整') }
+                ? () => { undoAdjustment(); setStatus('已撤销本次 AI 调整', { tone: 'success', channel: 'ai' }) }
                 : undefined
             }
           />
@@ -1805,7 +1815,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             onSetLocks={editor.setLocks}
             onReset={(fields, group) => {
               editor.reset(fields)
-              if (group) setStatus(`已复位未保护项，保留 ${fields.filter(locked).length} 项`)
+              if (group) setStatus(`已复位未保护项，保留 ${fields.filter(locked).length} 项`, { tone: 'success', channel: 'general' })
             }}
           >
           <details className="professional-settings">
@@ -1814,7 +1824,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
               mixed={['external_lut_id', 'external_lut_strength', 'external_lut_mode'].some(locked) && !['external_lut_id', 'external_lut_strength', 'external_lut_mode'].every(locked)} disabled={busy}
               onClick={event => { event.preventDefault(); event.stopPropagation(); toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode']) }} /></summary>
           <DeferredFeature active={flow.step === 'adjust' && effectiveToolTab === 'manual'}><ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
-            locked={workspace.locked_fields} onError={(error) => setStatus(error.message)} onReady={() => setResourceError('')}
+            locked={workspace.locked_fields} onError={(error) => setStatus(error, { tone: 'error', channel: 'general' })} onReady={() => setResourceError('')}
             onCommit={(patch) => editor.commit(patch, { source: 'external_lut', purpose: 'style' })} /></DeferredFeature>
           </details>
           <details className="professional-settings" open={workspace.input_status === 'pending_confirmation'}>
@@ -1925,8 +1935,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
                 setStatus(
                   baselineFields.length
                     ? '已明确分类所选旧参数为固定风格目标'
-                    : '已明确排除旧基线，保留新增风格贡献',
-                )
+                    : '已明确排除旧基线，保留新增风格贡献', { tone: 'success', channel: 'general' })
               }}
             >
               确认所选分类
@@ -1972,7 +1981,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
                     if (title == null) return
                     setRemoteBusy(true)
                     try { await updateSession(s.id, title); setSessions(await listSessions()) }
-                    catch (error) { setStatus(error.message) }
+                    catch (error) { setStatus(error, { tone: 'error', channel: 'general' }) }
                     finally { setRemoteBusy(false) }
                   }}>改名</button>
                 <button
@@ -1988,7 +1997,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           </div>
       </WorkbenchDialog>}
       {photoExport && <PhotoExportDialog loadingSurface={ToolLoadingSurface} loadingClose={() => setPhotoExport(false)} sample={selectedSample} media={selectedMedia} params={params}
-        compatible={compatible} onClose={() => setPhotoExport(false)} onBusyChange={setRemoteBusy} />}
+        compatible={compatible} returnFocusRef={photoExportEntryRef} onClose={() => setPhotoExport(false)} onBusyChange={setRemoteBusy} />}
       {photoViewer && !viewerUnavailable && <PhotoViewer loadingSurface={ToolLoadingSurface} loadingClose={() => setPhotoViewer(false)} key={`${workspace.id}:${selectedSample?.id || 'synthetic'}`}
         sample={selectedSample} media={viewerMedia} params={params} comparison={visibleComparison}
         compatible={visibleComparison ? comparisonSampleMatches : !samples.length || compatible}

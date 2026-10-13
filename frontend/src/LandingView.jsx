@@ -22,24 +22,17 @@ const HERO_LOOK = {
   split_balance: 0.45,
 }
 
-// 「实时预览」区块演示的另一档影调。与 HERO_LOOK 明显不同(更冷、对比更强),
-// 否则同一个页面里出现两次同款调色,会显得像同一个效果贴了两遍。
-const PREVIEW_LOOK = {
-  temp: -280,
-  tint: -40,
-  contrast: 0.32,
-  highlights: -0.25,
-  shadows: -0.1,
-  blacks: -0.12,
-  whites: 0.1,
-  vibrance: 0.35,
-  saturation: -0.1,
-  split_shadow_hue: 220,
-  split_shadow_sat: 0.3,
-  split_highlight_hue: 45,
-  split_highlight_sat: 0.12,
-  split_balance: 0.55,
+// 案例为固定配方，不在落地页调用模型。摘要与渲染使用同一个对象。
+const CASE_LOOK = {
+  temp: 180, contrast: 0.1, highlights: -0.22, shadows: 0.14,
+  vibrance: 0.1, saturation: -0.12,
+  split_shadow_hue: 205, split_shadow_sat: 0.06,
+  split_highlight_hue: 38, split_highlight_sat: 0.1, split_balance: 0.45,
 }
+const CASE_SUMMARY = [
+  ['冷暖偏移', CASE_LOOK.temp, 0], ['高光', CASE_LOOK.highlights, 2],
+  ['阴影', CASE_LOOK.shadows, 2], ['饱和度', CASE_LOOK.saturation, 2],
+]
 
 // 渲染走的降采样宽度:样张显示区最宽约 640px,CSS 像素 2x 也够用,
 // 再大只是徒增 CPU 与内存(getImageData 会产出 w*h*4 的 Uint8ClampedArray)。
@@ -136,6 +129,7 @@ function useGradedSample(src, look) {
 /** 前后对比:原图铺底,调色图层按 clip-path 揭示,分界线可拖拽。 */
 function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
   const [at, setAt] = useState(50)
+  const [imageFailed, setImageFailed] = useState(false)
   const barRef = useRef(null)
   const dragging = useRef(false)
 
@@ -149,6 +143,7 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
   }
 
   const onDown = (e) => {
+    if (!gradedSrc || imageFailed) return
     dragging.current = true
     moveTo(e.clientX)
   }
@@ -176,7 +171,7 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
       style={{ '--ba-at': `${at}%` }}
       onPointerDown={onDown}
     >
-      <img className="landing-ba-img" src={src} alt="原图" draggable="false" />
+      <img className="landing-ba-img" src={src} alt="原图" draggable="false" onError={() => setImageFailed(true)} />
       {gradedSrc && (
         <img
           className="landing-ba-img landing-ba-graded"
@@ -196,12 +191,14 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
         max="100"
         step="0.1"
         value={at}
+        disabled={!gradedSrc || imageFailed}
         aria-label="拖动对比 LUT 前后效果"
         onChange={(e) => setAt(Number(e.target.value))}
       />
 
       <span className="landing-ba-tag landing-ba-tag-before">{beforeLabel}</span>
       <span className="landing-ba-tag landing-ba-tag-after">{gradedSrc ? afterLabel : '效果未就绪'}</span>
+      {imageFailed && <div className="landing-image-error" role="status"><strong>示例照片暂未加载</strong><span>你仍可以进入创作，使用自己的照片。</span></div>}
     </div>
   )
 }
@@ -212,7 +209,7 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
  */
 export default function LandingView({ onEnter }) {
   const gradedHero = useGradedSample(HERO_PHOTO, HERO_LOOK)
-  const gradedPreview = useGradedSample(PREVIEW_PHOTO, PREVIEW_LOOK)
+  const gradedPreview = useGradedSample(PREVIEW_PHOTO, CASE_LOOK)
 
   return (
     <div className="landing" id="top">
@@ -286,102 +283,57 @@ export default function LandingView({ onEnter }) {
 
         <section id="features" className="landing-section" aria-labelledby="landing-features-title">
           <div className="landing-head">
-            <p className="landing-eyebrow">创作工具</p>
-            <h2 id="landing-features-title">先找到感觉，再慢慢精调</h2>
-            <p className="landing-sub">从第一句想法到最后一处细节，始终围绕你的照片。</p>
+            <p className="landing-eyebrow">一次创作，从想法到画面</p>
+            <h2 id="landing-features-title">把想要的感觉，调成看得见的色彩</h2>
+            <p className="landing-sub">先表达方向，再比较变化。每一项调整都可以理解、微调和撤销。</p>
           </div>
+          <article className="landing-case">
+            <div className="landing-case-copy">
+              <span className="landing-demo-label">公开样张 · 预设创作示例</span>
+              <h3>留住林间的暖光</h3>
+              <blockquote>“暖一点，色彩收敛一些，保留林间光线和暗部层次。”</blockquote>
+              <p>从温和的冷暖偏移开始，压低高光、轻提暗部，再降低饱和度。对比照片，决定是否继续精调。</p>
+              <dl className="landing-case-values">{CASE_SUMMARY.map(([label, value, digits]) => <div key={label}>
+                <dt>{label}</dt><dd>{value > 0 ? '+' : ''}{value.toFixed(digits)}</dd>
+              </div>)}</dl>
+              <p className="landing-case-note">示例使用固定配方与产品引擎渲染，未实时调用 AI。创作页中可按你的照片继续调整。</p>
+              <button className="btn btn-soft" onClick={onEnter}>用自己的照片开始</button>
+            </div>
+            <figure className="landing-case-photo">
+              <BeforeAfter src={PREVIEW_PHOTO} gradedSrc={gradedPreview} beforeLabel="原图" afterLabel="林间暖调 · 示例效果" />
+              <figcaption>拖动或使用方向键，比较同一张照片的变化。</figcaption>
+            </figure>
+          </article>
           <div className="landing-features">
             <article className="landing-feature">
               <div className="landing-feature-copy">
-                <p className="landing-feature-kicker">AI 创作与自动修图</p>
-                <h3>说出想法，看见具体的调整</h3>
-                <p>
-                  用「偏暖的复古胶片感」表达想法，再通过对话修改。
-                  也可以优化照片或匹配参考色彩；查看具体的参数变化，继续微调或撤销。
-                </p>
+                <p className="landing-feature-kicker">精细调整</p>
+                <h3>把细节，留在你手中</h3>
+                <p>基础参数帮你起步，全部参数按组展开。放大后继续调色，参数说明、保护和撤销让每次尝试更从容。</p>
               </div>
               <div className="landing-feature-mock">
-                <span className="landing-demo-label">对话示例</span>
-                <p className="landing-bubble landing-bubble-user">我想要偏暖的复古胶片感，暗部轻轻提亮。</p>
-                <div className="landing-bubble landing-bubble-bot">
-                  <strong>把想法变成可调整的参数</strong>
-                  <p>尝试增加冷暖偏移、降低饱和度，并提亮暗部。确认后可以在样张上查看变化。</p>
-                  <span>查看说明 · 继续微调 · 随时撤销</span>
+                <span className="landing-demo-label">四通道曲线 · 界面示意</span>
+                <div className="landing-curve-channels" aria-label="主曲线和 RGB 通道曲线示意">
+                  {['主曲线', 'R', 'G', 'B'].map(channel => <div className="landing-curve-channel" key={channel}>
+                    <span>{channel}</span><svg viewBox="0 0 64 64" aria-hidden="true">
+                      <path className="landing-curve-grid" d="M0 16H64M0 32H64M0 48H64M16 0V64M32 0V64M48 0V64" />
+                      <path className="landing-curve-line" d="M2 62C20 58 22 22 62 2" />
+                    </svg>
+                  </div>)}
                 </div>
               </div>
             </article>
-
             <article className="landing-feature">
               <div className="landing-feature-copy">
-                <p className="landing-feature-kicker">实时预览与细节查看</p>
-                <h3>一边看画面，一边调色</h3>
-                <p>
-                  滑动对比或并排查看原图与调整结果。放大后可以继续调整参数和曲线，
-                  检查高光、肤色与暗部细节，多张样张帮助判断风格是否合适。
-                </p>
-              </div>
-              <div className="landing-feature-mock landing-feature-photo">
-                <BeforeAfter
-                  src={PREVIEW_PHOTO}
-                  gradedSrc={gradedPreview}
-                  beforeLabel="原图"
-                  afterLabel="LUT 后"
-                />
-              </div>
-            </article>
-
-            <article className="landing-feature">
-              <div className="landing-feature-copy">
-                <p className="landing-feature-kicker">参数与四通道曲线</p>
-                <h3>从简单微调，到自己的色彩细节</h3>
-                <p>
-                  曝光、影调、全局与局部色彩按组展开，参数说明帮助理解增减的效果。
-                  主曲线和 R、G、B 曲线独立展示；直接输入数值、保护参数和撤销记录让精调更从容。
-                </p>
-              </div>
-              <div className="landing-feature-mock">
-                <span className="landing-demo-label">调色面板示意</span>
-                <div className="landing-params">
-                  <div className="landing-params-group">
-                    <div className="landing-params-head"><strong>单张校正</strong><span className="landing-quiet">参数说明 ?</span></div>
-                    <div className="landing-params-row">
-                      <div className="landing-params-label"><span>冷暖偏移</span><em>+350</em></div>
-                      <div className="landing-params-track"><i style={{ width: '56%' }} /></div>
-                    </div>
-                    <div className="landing-params-row">
-                      <div className="landing-params-label"><span>曝光</span><em>0.00 EV</em></div>
-                      <div className="landing-params-track"><i style={{ width: '50%' }} /></div>
-                    </div>
-                  </div>
-                  <div className="landing-curve-channels" aria-label="主曲线和 RGB 通道曲线示意">
-                    {['主曲线', 'R', 'G', 'B'].map((channel) => (
-                      <div className="landing-curve-channel" key={channel}>
-                        <span>{channel}</span>
-                        <svg viewBox="0 0 64 64" aria-hidden="true">
-                          <path className="landing-curve-grid" d="M0 16H64M0 32H64M0 48H64M16 0V64M32 0V64M48 0V64" />
-                          <path className="landing-curve-line" d="M2 62C20 58 22 22 62 2" />
-                        </svg>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <article className="landing-feature">
-              <div className="landing-feature-copy">
-                <p className="landing-feature-kicker">参考、试套与导出</p>
-                <h3>用喜欢的作品启发下一次创作</h3>
-                <p>
-                  从参考图的色彩出发，或导入已有 .cube 在样张上试套。
-                  保存作品与版本，导出供相机或后期使用的 LUT，也能把当前效果导出为照片。
-                </p>
+                <p className="landing-feature-kicker">保存与复用</p>
+                <h3>喜欢的色彩，还能再次使用</h3>
+                <p>项目保留创作过程，版本记录阶段效果。满意后保存 LUT，或把调整结果导出为照片。</p>
               </div>
               <div className="landing-feature-mock landing-workflow-mock">
-                <span className="landing-demo-label">调色项目能力</span>
-                <div className="landing-workflow-item"><span>01</span><div><strong>参考图风格匹配</strong><p>从参考色彩开始，继续调整自己的样张</p></div></div>
-                <div className="landing-workflow-item"><span>02</span><div><strong>外部 .cube 导入与试套</strong><p>在真实照片上比较已有 LUT 的效果</p></div></div>
-                <div className="landing-workflow-item"><span>03</span><div><strong>保存 LUT 与导出照片</strong><p>保留创作版本，让喜欢的效果再次使用</p></div></div>
+                <span className="landing-demo-label">三种保留方式</span>
+                <div className="landing-workflow-item"><span>01</span><div><strong>调色项目与版本</strong><p>继续编辑，比较不同方向</p></div></div>
+                <div className="landing-workflow-item"><span>02</span><div><strong>我的 LUT</strong><p>保存完整效果或可复用风格</p></div></div>
+                <div className="landing-workflow-item"><span>03</span><div><strong>照片与 .cube 导出</strong><p>按输入条件用于照片、相机或后期</p></div></div>
               </div>
             </article>
           </div>

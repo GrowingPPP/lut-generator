@@ -25,6 +25,9 @@
   color: var(--text);
   font-size: 13px;
 }
+.project-manager-search { display:grid; gap:8px; flex:1; min-width:0; font-size:14px; }
+.project-manager-tools { align-items:flex-end; }
+.project-manager-tools input { width:100%; }
 .project-manager-list { min-height: 100px; max-height: min(48dvh, 430px); overflow-y: auto; overscroll-behavior: contain; }
 .project-manager-row { min-height: 78px; padding: 14px 12px; border-bottom: 1px solid var(--line); }
 .project-manager-row[data-current] { background: var(--accent-soft); border-radius: 9px; }

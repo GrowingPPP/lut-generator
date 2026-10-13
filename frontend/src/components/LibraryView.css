@@ -1,6 +1,8 @@
 .library-page {
   min-width: 0;
-  gap: 24px;
+  max-width: var(--page-studio-width);
+  padding-inline: var(--page-gutter);
+  gap: var(--space-6);
 }
 .library-page .lib-head {
   display: flex;

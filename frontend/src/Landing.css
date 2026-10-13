@@ -1,7 +1,7 @@
 /* 首页使用全局主题，照片叠加层保持固定中性色。 */
 .landing {
-  --landing-gutter: 24px;
-  --landing-wrap: 1280px;
+  --landing-gutter: var(--page-gutter);
+  --landing-wrap: var(--page-reading-width);
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -225,24 +225,6 @@
   background: var(--panel);
 }
 .landing-demo-label { color: var(--muted); font-size: 11px; line-height: 1.6; }
-.landing-bubble { max-width: 90%; margin: 0; padding: 13px 15px; border-radius: 10px; font-size: 13px; line-height: 1.8; }
-.landing-bubble-user { align-self: flex-end; background: var(--panel2); color: var(--text); }
-.landing-bubble-bot { background: var(--accent-soft); color: var(--text); }
-.landing-bubble-bot strong { font-weight: 700; }
-.landing-bubble-bot p { margin: 8px 0 10px; color: var(--muted); }
-.landing-bubble-bot > span { color: var(--accent-strong); font-size: 11px; }
-.landing-feature-photo { padding: 0; overflow: hidden; }
-.landing-feature-photo .landing-ba { aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
-
-.landing-params { display: flex; flex-direction: column; gap: 16px; }
-.landing-params-group { padding: 16px; border-radius: 8px; background: var(--panel2); }
-.landing-params-head,
-.landing-params-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
-.landing-params-row { margin-top: 18px; }
-.landing-params-label { margin-bottom: 10px; color: var(--muted); }
-.landing-params-label em { color: var(--accent-strong); font-style: normal; font-variant-numeric: tabular-nums; }
-.landing-params-track { height: 4px; overflow: hidden; border-radius: 999px; background: var(--control-line); }
-.landing-params-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .landing-curve-channels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .landing-curve-channel { color: var(--muted); font-size: 11px; }
 .landing-curve-channel > span { display: block; margin-bottom: 7px; }
@@ -353,3 +335,21 @@
   .landing-textlink,
   .landing-faq-mark { transition: none; }
 }
+
+.landing-case { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); align-items:center; gap:32px; padding:32px; margin-bottom:32px; border:1px solid var(--line); border-radius:var(--radius-panel); background:var(--panel); }
+.landing-case-copy { min-width:0; }
+.landing-case h3 { margin:12px 0 16px; font-size:23px; line-height:1.4; letter-spacing:-.02em; }
+.landing-case blockquote { margin:0 0 16px; padding:0 0 0 16px; border-left:2px solid var(--accent-line); font-size:18px; line-height:1.75; color:var(--text); }
+.landing-case-copy > p { margin:0 0 16px; color:var(--muted); font-size:14px; line-height:1.8; }
+.landing-case-values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 24px; margin:24px 0; padding-block:16px; border-block:1px solid var(--line); }
+.landing-case-values > div { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
+.landing-case-values dt { color:var(--muted); font-size:13px; }
+.landing-case-values dd { margin:0; color:var(--accent-strong); font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; }
+.landing-case-copy > .landing-case-note { font-size:12px; }
+.landing-case-photo { min-width:0; margin:0; }
+.landing-case-photo figcaption { margin-top:12px; color:var(--muted); font-size:12px; line-height:1.7; }
+.landing-feature .landing-feature-mock { margin-top:auto; }
+.landing-image-error { position:absolute; inset:0; display:grid; place-content:center; text-align:center; gap:8px; padding:24px; color:var(--photo-text); background:var(--photo-surround); font-size:14px; }
+@media (max-width:900px) { .landing-case { grid-template-columns:minmax(0,1fr); gap:24px; padding:24px; } }
+@media (max-width:500px) { .landing-case { padding:20px 16px; } .landing-case-values { gap:12px; } .landing-case blockquote { font-size:16px; } }
+@media (max-width:740px), (pointer:coarse) { .landing-nav-actions button, .landing-item > summary { min-height:44px; } }

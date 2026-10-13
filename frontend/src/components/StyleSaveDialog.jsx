@@ -12,6 +12,7 @@ import { RenderedImage } from './ComparisonPreview.jsx'
 import { diffParams, PARAM_LABELS } from '../lib/autoGrade.js'
 import { ModalSurface } from './ui/Dialog.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
+import { ErrorNotice } from './ui/Notice.jsx'
 import { parseTags } from '../lib/assetLibrary.js'
 
 export default function StyleSaveDialog({
@@ -80,22 +81,24 @@ export default function StyleSaveDialog({
       })
       if (!inline) onClose()
     } catch (e) {
-      setError(e.message)
+      setError(e)
     } finally {
       setSaving(false)
       onBusyChange?.(false)
     }
   }
   const content = (
-      <section
+      <form
         className={inline ? "workspace-modal creation-save-form" : "workspace-modal"}
         role={inline ? undefined : "dialog"}
         aria-modal={inline ? undefined : "true"}
         aria-labelledby="save-title"
+        aria-describedby="save-description" aria-busy={saving}
+        onSubmit={event => { event.preventDefault(); submit() }}
       >
         <div className="section-heading">
           <h2 id="save-title">保存到我的 LUT</h2>
-          {!inline && <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
+          {!inline && <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
             <ActionIcon name="close" />关闭
           </button>}
         </div>
@@ -133,7 +136,7 @@ export default function StyleSaveDialog({
             可复用风格
           </label>
         </div>
-        <p className="workspace-note">
+        <p className="workspace-note" id="save-description">
           {kind === 'full_snapshot'
             ? '保存当前全部参数，包含单张校正。载入时替换完整参数。'
             : '保存实际生效的风格贡献；可在兼容输入上追加到另一调色项目的当前效果。展开「查看保存内容与当前效果」可比较两者。'}
@@ -291,16 +294,12 @@ export default function StyleSaveDialog({
             <span className="asset-update-text">更新「{savedAsset.name}」，保留旧修订</span>
           </label>
         )}
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
+        <ErrorNotice error={error} fallback="作品未能保存，请检查名称、标签和保存条件后重试。" />
         <div className="modal-actions">
-{!inline && <button className="btn btn-ghost" onClick={onClose} disabled={saving}>取消</button>}
+{!inline && <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>取消</button>}
           <button
             className="btn-primary"
-            onClick={submit}
+            type="submit"
             disabled={
               disabled || saving || !!candidate.error || (kind === 'portable_style' && !eligibility.allowed)
             }
@@ -308,7 +307,7 @@ export default function StyleSaveDialog({
             {saving ? '正在保存…' : '保存到我的 LUT'}
           </button>
         </div>
-      </section>
+      </form>
   )
   return inline ? content : <ModalSurface onClose={onClose} busy={saving}>{content}</ModalSurface>
 }

@@ -15,3 +15,25 @@
   .dialog-request { padding: 20px 16px; }
   .dialog-request .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 }
+
+/* Applies to task dialogs, leaving the dedicated photo viewer layout intact. */
+.modal-backdrop[data-chroma-dialog-overlay] { padding:24px var(--page-gutter); align-items:center; }
+[data-chroma-dialog-content].workspace-modal {
+  max-height:calc(100dvh - 48px); overflow:auto; overscroll-behavior:contain;
+  scrollbar-gutter:stable; scroll-padding-block:24px; padding:var(--space-6);
+  border-radius:var(--radius-panel); border-color:var(--line);
+}
+[data-chroma-dialog-content].workspace-modal h2 { font-size:18px; line-height:1.5; overflow-wrap:anywhere; }
+[data-chroma-dialog-content].workspace-modal :is(.section-heading,.project-manager-heading) { align-items:flex-start; gap:16px; }
+[data-chroma-dialog-content].workspace-modal :is(.section-heading,.project-manager-heading) > :first-child { min-width:0; }
+[data-chroma-dialog-content].workspace-modal :is(.section-heading,.project-manager-heading) > button { flex-shrink:0; }
+[data-chroma-dialog-content].workspace-modal .modal-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:24px; padding-top:16px; border-top:1px solid var(--line); }
+[data-chroma-dialog-content].workspace-modal > label { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; align-items:start; margin:16px 0; font-size:14px; }
+[data-chroma-dialog-content].workspace-modal > label.preview-cache-option { display:flex; align-items:center; }
+[data-chroma-dialog-content].workspace-modal .ui-notice { margin-top:16px; }
+@media (max-width:740px), (pointer:coarse) {
+  [data-chroma-dialog-content].workspace-modal { padding:20px 16px; max-height:calc(100dvh - 32px); scroll-padding-block:16px; }
+  .modal-backdrop[data-chroma-dialog-overlay] { padding:16px; }
+  [data-chroma-dialog-content].workspace-modal .modal-actions { flex-wrap:wrap; }
+  [data-chroma-dialog-content].workspace-modal .modal-actions > :is(.btn,.btn-primary,.btn-danger) { min-height:44px; }
+}

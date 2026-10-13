@@ -2,6 +2,7 @@ import { Children, cloneElement, createContext, isValidElement, useCallback, use
 import * as Dialog from '@radix-ui/react-dialog'
 import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import './Dialog.css'
+import { ErrorNotice } from './Notice.jsx'
 
 const DialogsContext = createContext(null)
 const OPEN_CHILD_LAYER = '[data-chroma-select-trigger][data-state="open"], [data-chroma-popover-trigger][data-state="open"], [data-chroma-menu-trigger][data-state="open"]'
@@ -143,7 +144,7 @@ function DialogRequest({ request, settle }) {
             aria-required="true" aria-invalid={!!error} aria-describedby={error ? `${id}-error` : undefined}
             onChange={event => { setValue(event.target.value); setError('') }} />
         </label>}
-        {error && <p id={`${id}-error`} className="error" role="alert">{error}</p>}
+        {error && <div id={`${id}-error`}><ErrorNotice error={error} /></div>}
         <div className="modal-actions">
           <button type="button" ref={cancelRef} className="btn btn-ghost" onClick={cancel}>{options.cancelLabel || '取消'}</button>
           <button type="submit" className={destructive ? 'btn-danger btn-danger-primary' : 'btn-primary'}>{options.confirmLabel || (isPrompt ? '保存' : '确认')}</button>

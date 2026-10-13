@@ -2,8 +2,8 @@
 .gen-workbench.creation-flow {
   --creation-panel-line: color-mix(in srgb, var(--line) 65%, var(--control-line));
   --creation-panel-radius: 10px;
-  height: auto; min-height: calc(100dvh - var(--app-header-height,60px)); max-width: 1540px;
-  padding: 16px 24px 28px; gap: 12px; overflow: visible;
+  height: auto; min-height: calc(100dvh - var(--app-header-height,60px)); max-width: var(--page-studio-width);
+  padding: var(--space-4) var(--page-gutter) 28px; gap: var(--space-3); overflow: visible;
 }
 .creation-flow :is(.workbench-header,.creation-steps,.creation-preview-panel,.task-panel,.curve-workbench) {
   border: 1px solid var(--creation-panel-line); border-radius: var(--creation-panel-radius); background: var(--workbench-surface);
@@ -124,8 +124,9 @@
 .creation-actions { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0 0; border-top:1px solid var(--line); }
 .creation-actions p { color:var(--muted); font-size:12px; line-height:1.7; margin:0; text-align:center; }
 .creation-actions > button { flex:0 0 auto; }
-.creation-flow > .workbench-notice { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:40; width:max-content; max-width:calc(100vw - 32px); padding:8px 12px; font-size:13px; line-height:1.6; background:var(--panel); border-color:var(--control-line); border-radius:8px; box-shadow:0 4px 16px var(--shadow); }
-.creation-flow > .workbench-notice > span { flex:1; min-width:0; }
+.creation-flow > .workbench-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:40; width:max-content; max-width:min(640px,calc(100vw - 32px)); box-shadow:0 4px 16px var(--shadow); }
+.creation-flow > .workbench-feedback { width:100%; }
+.ai-operation-notice { margin:12px 0; }
 @media(min-width:961px) and (min-height:740px) {
   .creation-flow .photo-workspace:not(.curves-open) { position:sticky; top:12px; align-self:start; }
 }
@@ -200,7 +201,7 @@
   .creation-flow .task-panel .ai-intents { margin-top:0; }
   .creation-flow .task-panel .workspace-toolbar-goal { margin:8px 0; }
   .creation-flow .auto-run-actions, .creation-flow .text-adjustment > .btn-primary { position:sticky; bottom:0; z-index:2; background:var(--panel); box-shadow:0 0 0 6px var(--panel); }
-  .creation-flow:has(.task-panel[data-mobile-panel]) > .workbench-notice { bottom:calc(var(--mobile-tool-height) + env(safe-area-inset-bottom) + 12px); }
+  .creation-flow:has(.task-panel[data-mobile-panel]) > .workbench-toast { bottom:calc(var(--mobile-tool-height) + env(safe-area-inset-bottom) + 12px); }
   .creation-flow .creation-side-section { padding:16px; }
   .creation-actions { gap:8px; flex-wrap:wrap; padding-top:12px; }
   .creation-actions p { order:3; width:100%; text-align:left; }

@@ -1,3 +1,4 @@
+import { ErrorNotice } from './ui/Notice.jsx'
 import RangeField from './ui/RangeField.jsx'
 import CheckboxField from './ui/CheckboxField.jsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -12,6 +13,7 @@ import './ReferenceMatchDialog.css'
 
 export default function ReferenceMatchDialog({ file, image, params, context, workspaceId,
   sourceDigest, mainSampleId, compatible, onClose, onBusyChange, onPrepare, onApply, inline = false, visible = true, disabled = false, onStatus }) {
+  const notify = (message, tone = 'info') => onStatus?.(message, { tone, channel: 'ai', intent: 'reference' })
   const neutral = useMemo(() => defaultParams(), [])
   const [reference, setReference] = useState(null)
   const [color, setColor] = useState(true)
@@ -34,12 +36,12 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
     if (!selected) return
     const id = ++generation.current
     setLoading(true); setError(''); setCandidate(null)
-    onStatus?.('正在统一参考图的色彩…')
+    notify('正在统一参考图的色彩…', 'progress')
     onBusyChange(true)
     try {
       const decoded = await decodeSample(selected, defaultParams())
-      if (id === generation.current) { setReference(decoded); onStatus?.('参考图已就绪，可生成匹配候选') }
-    } catch (failure) { if (id === generation.current) { setError(failure.message); onStatus?.(`参考图未能载入：${failure.message}`) } }
+      if (id === generation.current) { setReference(decoded); notify('参考图已就绪，可生成匹配候选') }
+    } catch (failure) { if (id === generation.current) { setError(failure); notify(failure, 'error') } }
     finally { if (id === generation.current) { setLoading(false); onBusyChange(false) } }
   }
   const match = async () => {
@@ -49,7 +51,7 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
       workspaceId, sourceDigest, mainSampleId, referenceDigest: reference.metadata.source_digest,
       color, tone, strength }
     setMatching(true); setError(''); setCandidate(null); onBusyChange(true)
-    onStatus?.('正在生成参考匹配候选，尚未修改当前效果…')
+    notify('正在生成参考匹配候选，尚未修改当前效果…', 'progress')
     try {
       const request = await onPrepare()
       if (request === false) return
@@ -57,25 +59,25 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
       if (id !== generation.current) return
       if (!matchingReferenceResult(result, args)) throw new Error('参考匹配结果与冻结来源不一致，本次未应用')
       setCandidate({ result, request })
-      onStatus?.('参考匹配候选已生成，尚未应用；可对比后应用')
-    } catch (failure) { if (id === generation.current) { setError(failure.message); onStatus?.(`参考匹配未完成：${failure.message}`) } }
+      notify('参考匹配候选已生成，尚未应用；可对比后应用')
+    } catch (failure) { if (id === generation.current) { setError(failure); notify(failure, 'error') } }
     finally { if (id === generation.current) { setMatching(false); onBusyChange(false) } }
   }
   const apply = async () => {
     if (!candidate || blocked) return
     setMatching(true); onBusyChange(true)
-    onStatus?.('正在应用并保存参考候选…')
+    notify('正在应用并保存参考候选…', 'progress')
     try {
       if (await onApply(candidate.result, candidate.request) !== false) onClose()
-      else { setError('调色项目或来源已变化，候选未应用，请重新匹配'); onStatus?.('调色项目或来源已变化，候选未应用，请重新匹配') }
-    } catch (failure) { setError(failure.message); onStatus?.(`参考候选未确认应用：${failure.message}`) }
+      else { setError(''); notify('调色项目或来源已变化，候选未应用，请重新匹配', 'warning') }
+    } catch (failure) { setError(failure); notify(failure, 'error') }
     finally { setMatching(false); onBusyChange(false) }
   }
   const changes = candidate ? diffParams(candidate.result.before_params, candidate.result.params) : []
-  const content = <section className={inline ? 'reference-match' : 'workspace-modal reference-match'} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-labelledby="reference-match-title">
+  const content = <section className={inline ? 'reference-match' : 'workspace-modal reference-match'} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-labelledby="reference-match-title" aria-describedby="reference-match-description">
       <div className="section-heading"><div><span className="reference-kicker">色彩与影调</span><h2 id="reference-match-title">参考图风格匹配</h2></div>
         {!inline && <button className="btn btn-ghost" disabled={running} onClick={onClose}><ActionIcon name="close" />关闭</button>}</div>
-      <p className="workspace-note">参考图不会成为主样张。匹配在现有调色参数中寻找接近的色彩与影调，保留参数保护；场景和光照差异会影响结果。</p>
+      <p className="workspace-note" id="reference-match-description">参考图不会成为主样张。匹配在现有调色参数中寻找接近的色彩与影调，保留参数保护；场景和光照差异会影响结果。</p>
       {visible && <div className="reference-images">
         <RenderedImage image={image} params={params} label="当前效果" />
         {reference ? <RenderedImage image={reference.canvas} params={neutral} label="参考图 · sRGB" />
@@ -93,7 +95,7 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
             onChange={(e) => { setStrength(Number(e.target.value)); setCandidate(null) }} /></label>
       </fieldset>
       {(!compatible || !file) && <p className="workspace-note">请先绑定当前主样张原文件，并确认匹配的输入。</p>}
-      {error && <p className="error" role="alert">{error}</p>}
+      <ErrorNotice error={error} fallback="参考匹配未完成，请检查两张照片和匹配条件后重试。" />
       {candidate && <div className="reference-result" aria-live="polite">
         <strong>{changes.length ? `${changes.length} 项调整 · 统计距离降低 ${candidate.result.improvement_pct.toFixed(1)}%` : '本次保留当前效果'}</strong>
         <p>{changes.map((change) => change.text).join('；')}</p>

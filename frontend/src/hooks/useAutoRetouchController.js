@@ -44,17 +44,17 @@ export default function useAutoRetouchController({
     if (next.status === 'cancelling' || token.cancelRequested)
       callbacksRef.current.setStatus(next.can_cancel === false && next.status !== 'cancelling'
         ? '分析已完成，正在保存；取消未生效，请等待最终状态'
-        : '正在取消，等待当前调用返回并确认候选未保存、未应用…')
-    else callbacksRef.current.setStatus(next.status === 'queued' ? '等待开始分析…' : '正在执行分析，可查看真实阶段进度')
+        : '正在取消，等待当前调用返回并确认候选未保存、未应用…', { tone: 'progress', channel: 'ai', intent: 'optimize' })
+    else callbacksRef.current.setStatus(next.status === 'queued' ? '等待开始分析…' : '正在执行分析，可查看真实阶段进度', { tone: 'progress', channel: 'ai', intent: 'optimize' })
   }
   const waitForKnownJob = async (token) => waitRestoredAutoJob(token.id, {
     get: id => getAutoJob(id, token.workspaceId), isCurrent: () => current(token),
     resolved: () => token.resolvedJob,
     onMissing: () => {
       setRecoveryMissing(true)
-      callbacksRef.current.setStatus('暂未找到作业，编辑保持冻结；原提交可能尚未登记、已失效或服务已重启。可继续等待或明确结束未确认提交')
+      callbacksRef.current.setStatus('暂未找到作业，编辑保持冻结；原提交可能尚未登记、已失效或服务已重启。可继续等待或明确结束未确认提交', { tone: 'warning', channel: 'ai', intent: 'optimize' })
     },
-    onConnectionError: () => callbacksRef.current.setStatus('恢复查询尚未确认作业终态，编辑保持冻结；正在重新查询'),
+    onConnectionError: () => callbacksRef.current.setStatus('恢复查询尚未确认作业终态，编辑保持冻结；正在重新查询', { tone: 'warning', channel: 'ai', intent: 'optimize' }),
   })
   const watch = async (token, initial) => {
     let known = initial
@@ -66,7 +66,7 @@ export default function useAutoRetouchController({
         return await pollAutoJob(token.id, {
           get: id => getAutoJob(id, token.workspaceId), isCurrent: () => current(token),
           onProgress: next => showProgress(token, next),
-          onConnectionError: () => callbacksRef.current.setStatus('连接中断，尚未确认作业结束；正在重新查询，编辑保持冻结'),
+          onConnectionError: () => callbacksRef.current.setStatus('连接中断，尚未确认作业结束；正在重新查询，编辑保持冻结', { tone: 'warning', channel: 'ai', intent: 'optimize' }),
         })
       } catch (error) {
         if (error.code !== 'job_lost') throw error
@@ -85,12 +85,12 @@ export default function useAutoRetouchController({
       if (!current(token)) return
       callbacksRef.current.setStatus(completed.not_accepted
         ? '未确认提交已明确结束，后续提交已阻止；当前草稿未应用该结果'
-        : '已取消，候选未保存、未应用，当前草稿保持原状')
+        : '已取消，候选未保存、未应用，当前草稿保持原状', { tone: 'info', channel: 'ai', intent: 'optimize' })
       return
     }
     if (completed.status === 'failed') {
       setFailedRequest({ args, request, restored: restoring })
-      callbacksRef.current.setStatus(completed.error?.message || '本次分析未完成，可核对来源后重试原请求')
+      callbacksRef.current.setStatus(completed.error?.message || '本次分析未完成，可核对来源后重试原请求', { tone: 'error', channel: 'ai', intent: 'optimize' })
       return
     }
     if (!completed.persisted || !completed.result) throw new Error('结果尚未确认保存，本次未应用')
@@ -98,7 +98,7 @@ export default function useAutoRetouchController({
       await patchReceipt(token, { state: 'applied', applied: true })
       if (!current(token)) return
       setContinuable(continuationRequest(args, completed))
-      callbacksRef.current.setStatus('已恢复本次作业状态；该结果此前已应用，不会再次写入草稿或撤销历史')
+      callbacksRef.current.setStatus('已恢复本次作业状态；该结果此前已应用，不会再次写入草稿或撤销历史', { tone: 'info', channel: 'ai', intent: 'optimize' })
       return
     }
     if (!matchingAutoResult(args, completed) || completed.result.job_id !== token.id)
@@ -106,7 +106,7 @@ export default function useAutoRetouchController({
     if (!(restoring ? sameAutoMetadata(args, conditionsRef.current) : sameAutoConditions(args, conditionsRef.current))) {
       await patchReceipt(token, { state: 'conflict', message: '当前草稿或来源已变化' })
       if (!current(token)) return
-      callbacksRef.current.setStatus('作业已保存，但当前草稿、上下文或主样张来源已变化；恢复候选未应用，可查看历史报告')
+      callbacksRef.current.setStatus('作业已保存，但当前草稿、上下文或主样张来源已变化；恢复候选未应用，可查看历史报告', { tone: 'warning', channel: 'ai', intent: 'optimize' })
       return
     }
     const meta = { jobId: token.id, requestSummary: token.summary || args }
@@ -121,11 +121,11 @@ export default function useAutoRetouchController({
         ? '分析已完成并保存，取消未生效；结果已应用，可查看报告与撤销'
         : completed.result.blocked_reasons?.length
           ? `已完成本次分析：${completed.result.blocked_reasons.join('；')}`
-          : restoring ? '已恢复并应用已保存候选，无需原文件；再次分析前需重新绑定原文件' : '已完成本次调整，可查看报告与撤销')
+          : restoring ? '已恢复并应用已保存候选，无需原文件；再次分析前需重新绑定原文件' : '已完成本次调整，可查看报告与撤销', { tone: token.cancelRequested || completed.result.blocked_reasons?.length ? 'warning' : 'success', channel: 'ai', intent: 'optimize' })
     } else if (current(token)) {
       await patchReceipt(token, { state: 'conflict', message: '候选未应用或草稿未确认保存' })
       if (!current(token)) return
-      callbacksRef.current.setStatus('候选已保存，但未确认应用或本机保存；请查看草稿提示与历史报告')
+      callbacksRef.current.setStatus('候选已保存，但未确认应用或本机保存；请查看草稿提示与历史报告', { tone: 'warning', channel: 'ai', intent: 'optimize' })
     }
   }
   const release = (token) => {
@@ -176,7 +176,7 @@ export default function useAutoRetouchController({
           release(token)
           return
         }
-        callbacksRef.current.setStatus('正在恢复本调色项目的 AI 作业，编辑保持冻结…')
+        callbacksRef.current.setStatus('正在恢复本调色项目的 AI 作业，编辑保持冻结…', { tone: 'progress', channel: 'ai', intent: 'optimize' })
         const initial = await waitForKnownJob(token)
         const completed = await watch(token, initial)
         if (completed) await finish(token, receipt.request, completed, null, true)
@@ -185,7 +185,7 @@ export default function useAutoRetouchController({
         if (!current(token)) return
         callbacksRef.current.setStatus(receipt
           ? `已确认的候选未应用：${error.message}`
-          : `无法读取本机作业记录，编辑保持冻结：${error.message}；请修复存储后刷新`)
+          : `无法读取本机作业记录，编辑保持冻结：${error.message}；请修复存储后刷新`, { tone: 'error', channel: 'ai', intent: 'optimize' })
         if (receipt) release(token)
       } finally {
         if (mountedRef.current && restoreGenerationRef.current === generation
@@ -224,12 +224,12 @@ export default function useAutoRetouchController({
     setFailedRequest(null)
     setContinuable(null)
     setJob(null)
-    setStatus('正在保存请求摘要并提交分析…')
+    setStatus('正在保存请求摘要并提交分析…', { tone: 'progress', channel: 'ai', intent: 'optimize' })
     let request = null, submitted = false, receiptSaved = false
     try {
       if (!retry && onPrepare) {
         setPreparing(true)
-        setStatus('正在检查人物与肤色保护区域…')
+        setStatus('正在检查人物与肤色保护区域…', { tone: 'progress', channel: 'ai', intent: 'optimize' })
         const prepared = await onPrepare({ useVision, isCurrent: () => current(token) && !token.cancelRequested })
         if (!prepared || !current(token) || token.cancelRequested) return
         conditionsRef.current = prepared
@@ -238,7 +238,7 @@ export default function useAutoRetouchController({
       request = onBeforeRun ? await onBeforeRun(args.params) : null
       if (request === false || !current(token) || token.cancelRequested) return
       if (!sameAutoConditions(args, conditionsRef.current)) {
-        setStatus('调色项目、参数或主样张已变化，请用当前条件重新开始')
+        setStatus('调色项目、参数或主样张已变化，请用当前条件重新开始', { tone: 'warning', channel: 'ai', intent: 'optimize' })
         return
       }
       const receipt = await storageRef.current.begin(userId, args)
@@ -254,11 +254,11 @@ export default function useAutoRetouchController({
       submitted = true
       const initial = await ensureAutoJob(args, {
         start: startAutoJob, get: id => getAutoJob(id, workspaceId), isCurrent: () => current(token),
-        onConnectionError: () => setStatus('提交响应未确认，编辑保持冻结；正在按同一请求标识恢复作业'),
+        onConnectionError: () => setStatus('提交响应未确认，编辑保持冻结；正在按同一请求标识恢复作业', { tone: 'warning', channel: 'ai', intent: 'optimize' }),
       })
       if (!initial || !current(token)) return
       await patchReceipt(token, { state: 'accepted' }).catch(() => {
-        if (current(token)) setStatus('请求已提交，本机状态更新失败；仍按已保存标识等待服务端终态，编辑保持冻结')
+        if (current(token)) setStatus('请求已提交，本机状态更新失败；仍按已保存标识等待服务端终态，编辑保持冻结', { tone: 'warning', channel: 'ai', intent: 'optimize' })
       })
       const completed = await watch(token, initial)
       if (completed) await finish(token, args, completed, request, false)
@@ -267,7 +267,7 @@ export default function useAutoRetouchController({
       if (receiptSaved && (!submitted || error.confirmedNotAccepted))
         await patchReceipt(token, { state: 'rejected', message: error.message }).catch(() => {})
       setFailedRequest({ args, request })
-      setStatus(error.message)
+      setStatus(error, { tone: 'error', channel: 'ai', intent: 'optimize' })
     } finally { release(token) }
   }
   const cancel = async () => {
@@ -276,10 +276,10 @@ export default function useAutoRetouchController({
     token.cancelRequested = true
     setCancelling(true)
     if (token.preparing) {
-      setStatus('已取消本次分析，等待当前识别请求返回；调色作业不会提交')
+      setStatus('已取消本次分析，等待当前识别请求返回；调色作业不会提交', { tone: 'info', channel: 'ai', intent: 'optimize' })
       return
     }
-    setStatus(recoveryMissing ? '正在确认结束未登记提交…' : '正在取消，等待服务端确认…')
+    setStatus(recoveryMissing ? '正在确认结束未登记提交…' : '正在取消，等待服务端确认…', { tone: 'progress', channel: 'ai', intent: 'optimize' })
     try {
       await patchReceipt(token, { cancel_requested: true }).catch(() => {})
       const next = await cancelAutoJob(token.id, { workspaceId: token.workspaceId, preventLate: recoveryMissing })
@@ -290,7 +290,7 @@ export default function useAutoRetouchController({
     } catch (error) {
       if (current(token)) {
         setCancelling(false)
-        setStatus('取消或结束尚未确认，编辑保持冻结；正在重新查询')
+        setStatus('取消或结束尚未确认，编辑保持冻结；正在重新查询', { tone: 'warning', channel: 'ai', intent: 'optimize' })
       }
     }
   }
