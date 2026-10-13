@@ -1,6 +1,9 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import CheckboxField from './ui/CheckboxField.jsx'
 import SelectField from './SelectField.jsx'
+import ActionMenu from './ui/ActionMenu.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
+import { useDialogs } from './ui/Dialog.jsx'
 import { inputContract } from '../lib/styleRecipe.js'
 import { photoMetadataNotes } from '../lib/photoMetadata.js'
 import { normalizeSubjectMode, sampleIsNormalized, SUBJECT_MODE_LABELS } from '../lib/samples.js'
@@ -30,9 +33,25 @@ function SampleThumbnail({ sample, media, selected, primary, result, stale, onSe
 
 function SampleDetails({ sample, media, primary, result, stale, busy, onPrimary, onRemove, onConfirm, onRebind, onGuide, onSubjectChange }) {
   const [style, setStyle] = useState(sample.input_contract?.base_photo_style || 'STD')
+  const dialogs = useDialogs()
+  const mounted = useRef(false)
+  const current = useRef({ busy, revision: 0 })
+  if (current.current.busy !== busy) current.current.revision++
+  current.current = { sample, busy, revision: current.current.revision, onRemove }
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const metadata = photoMetadataNotes(sample.photo_metadata)
   const needsDecode = !sampleIsNormalized(sample) || style !== sample.input_contract?.base_photo_style
   const needsConfirmation = !sample.input_confirmed || needsDecode
+  const needsOriginal = !media?.file
+  const remove = async () => {
+    const captured = current.current
+    const confirmed = await dialogs.confirm({ title: `移除样张「${sample.name}」？`,
+      description: '仅移除此调色项目中的样张引用。电脑上的原照片、当前调色参数和已保存的 LUT 都会保留。',
+      destructive: true, confirmLabel: '移除样张' })
+    const latest = current.current
+    if (confirmed && mounted.current && !latest.busy && latest.revision === captured.revision &&
+      latest.sample.id === captured.sample.id && latest.sample.source_digest === captured.sample.source_digest) latest.onRemove()
+  }
   const sourceWidth = sample.source_width || sample.photo_metadata?.source_width
   const sourceHeight = sample.source_height || sample.photo_metadata?.source_height
   return <div className="sg-selected-details">
@@ -46,8 +65,9 @@ function SampleDetails({ sample, media, primary, result, stale, busy, onPrimary,
     <div className="sg-input-row"><label>照片输入<SelectField aria-label={sample.name + ' 输入基准'} value={style} onChange={(event) => setStyle(event.target.value)} disabled={busy}>
       <option value="STD">Standard</option><option value="NAT">Natural</option><option value="VIVD">Vivid</option><option value="VLOG">V-Log / V-Gamut</option>
     </SelectField></label>
-      {needsConfirmation ? <button className="btn sg-action" disabled={busy || (needsDecode && !media?.file)}
-        onClick={() => onConfirm({ ...inputContract({ base_photo_style: style, tone_map: 1 }), tone_map: sample.input_contract?.tone_map ?? 1 })}>确认照片输入基准</button>
+      <button type="button" className="btn btn-ghost sg-action" disabled={busy} onClick={onGuide}><ActionIcon name="help" />如何选择？</button>
+      {needsConfirmation ? <button className={needsOriginal ? 'btn sg-action' : 'btn-primary sg-action'} disabled={busy || (needsDecode && !media?.file)}
+        onClick={() => onConfirm({ ...inputContract({ base_photo_style: style, tone_map: 1 }), tone_map: sample.input_contract?.tone_map ?? 1 })}><ActionIcon name="check" />确认照片输入</button>
         : <span className="sg-confirmed">已确认 · {style}</span>}
     </div>
     {onSubjectChange && <div className="sg-input-row"><label>当前照片内容
@@ -59,10 +79,17 @@ function SampleDetails({ sample, media, primary, result, stale, busy, onPrimary,
     {onSubjectChange && <p className="sg-help">{subjectStatusText(sample)}。主样张的保护区域可在“AI 创作”中查看与修正。</p>}
     {needsConfirmation && <p className="sg-help">{needsDecode && !media?.file ? '请先重新绑定同一原文件，再更新或确认输入。' : metadata.input}</p>}
     {!media?.file && media?.canvas && <p className="sg-help">兼容的缓存预览可继续手调、比较版本与保存或导出 LUT；照片分析、参考匹配和原尺寸照片导出需要原文件。</p>}
-    <div className="sg-detail-actions"><button className="btn sg-action" onClick={onPrimary} disabled={busy || primary}>设为 AI 主样张</button>
-      <button className="btn sg-action" onClick={onRebind} disabled={busy}>{media?.file ? '重新绑定' : '绑定原文件'}</button>
-      <button className="btn sg-action" onClick={onGuide}>输入与相机引导</button>
-      <button className="btn-danger sg-action" onClick={onRemove} disabled={busy} aria-label={'移除 ' + sample.name}>移除照片</button></div>
+    {needsOriginal && <div className="sg-next-action"><p>绑定原文件后，可以进行照片分析和原尺寸导出；已有兼容预览可继续手动调色。</p>
+      <button type="button" className="btn-primary sg-action" onClick={onRebind} disabled={busy}><ActionIcon name="upload" />绑定原文件</button></div>}
+    <div className="sg-detail-actions">
+      {primary ? <span className="sg-primary-state"><ActionIcon name="star" />已为 AI 主样张</span>
+        : <button type="button" className="btn btn-soft sg-action" onClick={onPrimary} disabled={busy}><ActionIcon name="star" />设为 AI 主样张</button>}
+      <ActionMenu label={`管理样张 ${sample.name}`} disabled={busy} trigger={<button type="button" className="btn btn-ghost sg-action" aria-label={`管理样张 ${sample.name}`}><ActionIcon name="more" />更多</button>} items={[
+        media?.file && { id: 'rebind', label: '重新绑定原文件', description: '保留当前样张的输入与人物设置', onSelect: onRebind },
+        { id: 'guide', label: '输入与相机引导', onSelect: onGuide },
+        { id: 'remove', label: '移除样张…', description: '保留原照片和已保存 LUT', separator: true, destructive: true, onSelect: remove },
+      ]} />
+    </div>
     {result && <p className={'sg-validation ' + (stale ? 'is-stale' : result.status === 'attention' ? 'needs-attention' : result.status === 'no_new_risk' ? 'is-verified' : '')}>
       {stale && '此前验证 · '}{result.summary || result.label || VALIDATION_LABELS[result.status] || result.status}{result.reason && ' · ' + result.reason}</p>}
     {result && <dl className="sg-metadata"><dt>当次照片内容</dt>
@@ -84,8 +111,8 @@ export default function SampleGallery({ samples, media, selectedId, primaryId, v
   return <section className="sample-gallery sample-gallery-compact" aria-label="照片样张">
     <div className="sg-heading"><div className="sg-title"><h3>样张 <span>{samples.length}/5</span></h3>
       {primary && <span className="sg-main-summary" title={primary.name}>AI 主样张：{primary.name}</span>}</div>
-      <div className="sg-heading-actions"><button className="btn sg-action" onClick={onAdd} disabled={busy || samples.length >= 5}>＋ 添加</button>
-        <button className="btn sg-action" onClick={() => setDetailsOpen((open) => !open)} aria-expanded={detailsOpen} aria-controls={detailsId}>
+      <div className="sg-heading-actions"><button className="btn btn-ghost sg-action" onClick={onAdd} disabled={busy || samples.length >= 5}>＋ 添加</button>
+        <button className="btn btn-ghost sg-action" onClick={() => setDetailsOpen((open) => !open)} aria-expanded={detailsOpen} aria-controls={detailsId}>
           {detailsOpen ? '收起详情' : selected ? '照片详情' : '设置与验证'} {detailsOpen ? '↑' : '↓'}</button></div>
     </div>
     {samples.length ? <div className="sg-strip">{samples.map((sample) => <SampleThumbnail key={sample.id} sample={sample} media={media.get(sample.id)}
@@ -100,7 +127,7 @@ export default function SampleGallery({ samples, media, selectedId, primaryId, v
         onRebind={() => onRebind(selected.id)} onGuide={() => onGuide(selected)}
         onSubjectChange={typeof onSubjectChange === 'function' ? mode => onSubjectChange(selected.id, mode) : undefined} />}
       <div className="sg-gallery-settings"><div className="sg-validation-actions"><button className="btn sg-action" onClick={onValidate} disabled={busy || !samples.length}>验证全部样张的当前效果</button>
-        {!selected && <button className="btn sg-action" onClick={() => onGuide()} disabled={busy}>输入与相机引导</button>}<span>统计测量，不调用模型</span></div>
+        {!selected && <button className="btn btn-ghost sg-action" onClick={() => onGuide()} disabled={busy}>输入与相机引导</button>}<span>统计测量，不调用模型</span></div>
         {validation && <details className="sg-validation-details"><summary>{stale ? '参数或样张已变化，上次验证仅供回看' : '查看全部统计验证详情'}</summary>
           <p className="sg-help">人物识别或人工标注确定保护区域后，统计检查区域内的肤色变化。自动区域是近似矩形；尚无可用区域时不按全图暖色猜测肤色。</p>
           <pre>{JSON.stringify(validation.results, null, 2)}</pre></details>}

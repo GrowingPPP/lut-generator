@@ -51,6 +51,10 @@
 .sample-gallery-compact .sg-confirmed { color: var(--success); font-size: 12px; }
 .sample-gallery-compact .sg-help { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
 .sample-gallery-compact .sg-detail-actions { margin-top: 10px; }
+.sample-gallery-compact .sg-detail-actions { padding-top: 12px; border-top: 1px solid var(--line); }
+.sample-gallery-compact .sg-primary-state { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; color: var(--accent-strong); font-size: 12px; }
+.sample-gallery-compact .sg-next-action { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
+.sample-gallery-compact .sg-next-action p { flex: 1 1 180px; margin: 0; color: var(--text); font-size: 12px; line-height: 1.6; }
 .sample-gallery-compact .sg-validation { margin: 12px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--panel2); color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .sample-gallery-compact .sg-validation.is-verified { background: var(--success-soft); color: var(--success); }
 .sample-gallery-compact .sg-validation.needs-attention { background: var(--warn-soft); color: var(--warn); }

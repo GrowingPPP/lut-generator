@@ -9,7 +9,12 @@ import { defaultParams } from '../src/lib/lutEngine.js'
 
 const require = createRequire(import.meta.url)
 async function loadComponent(filename) {
-  const bundled = await build({ entryPoints: [fileURLToPath(new URL(`../src/components/${filename}`, import.meta.url))],
+  const componentPath = fileURLToPath(new URL(`../src/components/${filename}`, import.meta.url))
+  const entry = filename === 'SampleGallery.jsx' ? { stdin: {
+    contents: `import {createElement} from 'react'; import Component from './SampleGallery.jsx'; import {DialogProvider} from './ui/Dialog.jsx'; export default function Gallery(props) { return createElement(DialogProvider, null, createElement(Component, props)) }`,
+    resolveDir: fileURLToPath(new URL('../src/components/', import.meta.url)), sourcefile: 'gallery-with-dialogs.jsx', loader: 'jsx',
+  } } : { entryPoints: [componentPath] }
+  const bundled = await build({ ...entry,
     bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', jsx: 'automatic',
     external: ['react', 'react/jsx-runtime'],
     loader: { '.css': 'empty' }, plugins: [{ name: 'plain-controls', setup(builder) {

@@ -14,6 +14,8 @@ import { TabsRoot, TabsList, TabsTrigger, TabsContent } from './components/ui/Ta
 import RangeField from './components/ui/RangeField.jsx'
 import CheckboxField from './components/ui/CheckboxField.jsx'
 import Tooltip from './components/ui/Tooltip.jsx'
+import ProtectionButton from './components/ui/ProtectionButton.jsx'
+import ActionIcon from './components/ui/ActionIcon.jsx'
 import { inputContract, applyStyleRecipe } from './lib/styleRecipe.js'
 import { lockConflicts } from './lib/workspace.js'
 import { duplicateProjectName } from './lib/projectManagement.js'
@@ -771,17 +773,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   }
   const locked = (key) => workspace.locked_fields.includes(key)
   const labelFor = parameterLabel
-  const lockButton = (key) => (
-    <button
-      type="button"
-      className={`parameter-lock ${locked(key) ? 'locked' : ''}`}
-      aria-label={`${locked(key) ? '解锁' : '保护'}${labelFor(key)}`}
-      title={locked(key) ? '解除参数保护' : '保护参数'}
-      onClick={() => toggleLock([key])}
-    >
-      {locked(key) ? '已保护' : '保护'}
-    </button>
-  )
+  const lockButton = (key) => <ProtectionButton label={labelFor(key)} locked={locked(key)} disabled={busy} onClick={() => toggleLock([key])} />
   const gesture = {
     onPointerDown: () => editor.begin({ source: 'manual' }),
     onPointerUp: () => editor.commit(),
@@ -1426,7 +1418,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
   return (
     <div className="gen-workbench">
       <header className="workbench-header">
-        <button className="btn workspace-history-toggle" aria-label="打开对话历史" onClick={() => setWorkspaceHistory(true)}>对话历史</button>
+        <button className="btn btn-ghost workspace-history-toggle" aria-label="打开对话历史" onClick={() => setWorkspaceHistory(true)}>对话历史</button>
         <label className="workspace-select">
           调色项目
           <SelectField
@@ -1447,7 +1439,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
               ))}
           </SelectField>
         </label>
-        <ActionMenu label="项目管理" disabled={busy} trigger={<button type="button" className="btn project-management-trigger">项目管理 <span aria-hidden="true">⌄</span></button>} items={[
+        <ActionMenu label="项目管理" disabled={busy} trigger={<button type="button" className="btn btn-ghost project-management-trigger">项目管理 <span aria-hidden="true">⌄</span></button>} items={[
           { id: 'name', type: 'label', label: projectName(workspace) },
           { id: 'rename', label: '重命名项目', onSelect: () => renameProject() },
           { id: 'duplicate', label: '复制当前项目', description: '保留当前效果与样张，独立继续创作', onSelect: duplicateProject },
@@ -1457,9 +1449,9 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         <WorkspaceToolbar mode="header" editor={toolbarEditor} busy={busy} onNew={newWorkspace} onBackup={backup}
           onHistory={direction => setStatus(direction === 'undo' ? '已撤销上一项调整' : '已重做上一项调整')} />
         <div className="delivery-actions">
-          <button className="btn" onClick={() => setToolTab('versions')}>版本</button>
+          <button className="btn btn-ghost" onClick={() => setToolTab('versions')}>版本</button>
           <button className="btn-primary" disabled={busy} onClick={() => setSaveDialog(true)}>保存至我的 LUT</button>
-          <ActionMenu label="导出选项" trigger={<button type="button" className="btn">导出 <span aria-hidden="true">⌄</span></button>} items={[
+          <ActionMenu label="导出选项" trigger={<button type="button" className="btn btn-soft">导出 <span aria-hidden="true">⌄</span></button>} items={[
             { id: 'lut-label', type: 'label', label: 'LUT · 当前完整效果' },
             { id: 'camera', label: '机内 LUT · .cube', description: resourceError ? '请先重新载入外部 LUT 资源' : busy ? '当前操作完成后可导出' : '用于相机导入', disabled: busy || !!resourceError, onSelect: () => downloadCube('camera') },
             { id: 'software', label: '后期 LUT · .cube', description: resourceError ? '请先重新载入外部 LUT 资源' : busy ? '当前操作完成后可导出' : '用于后期软件调色', disabled: busy || !!resourceError, onSelect: () => downloadCube('software') },
@@ -1491,17 +1483,17 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           <Tooltip content={viewerUnavailable || '放大照片查看细节，可打开调色面板边看边调整'}><button type="button" className="btn photo-viewer-launch" aria-label="放大查看照片"
             disabled={!!viewerUnavailable}
             onClick={() => setPhotoViewer(true)}>放大查看</button></Tooltip>
-          <button type="button" className="btn curve-quick-toggle" ref={curveEntryRef}
+          <button type="button" className="btn btn-ghost curve-quick-toggle" ref={curveEntryRef}
             aria-expanded={curvesVisible} aria-controls="curve-workbench"
             onClick={() => curvesVisible ? closeCurves() : openCurves()}>
             自由曲线{curvesVisible ? ' · 收起' : curvesChanged ? ' · 已调整' : ''}
           </button>
           <button
-            className="upload-sm"
+            className={samples.length ? 'btn btn-ghost upload-sm' : 'btn-primary upload-sm'}
             disabled={busy || samples.length >= 5}
             onClick={() => openSamplePicker()}
           >
-            上传样张
+            <ActionIcon name="upload" />上传样张
           </button>
           <input
             ref={fileInputRef}
@@ -1542,7 +1534,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
               样张文件仅保留于上次页面内存，请重新绑定照片。
               <div className="preview-empty-actions">
                 <button className="btn-primary" disabled={busy} onClick={() => openSamplePicker(selectedSample.id)}>重新绑定照片</button>
-                <button className="btn" onClick={() => setToolTab('manual')}>检查 LUT 输入</button>
+                <button className="btn btn-ghost" onClick={() => setToolTab('manual')}>检查 LUT 输入</button>
               </div>
             </div>
           )}
@@ -1584,7 +1576,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         </div>
         </div>
         <div className="curve-workbench" id="curve-workbench" ref={curveWorkbenchRef} role="region" aria-label="自由曲线 · 四通道" tabIndex={-1} hidden={!curvesVisible}>
-          <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><button className="btn" onClick={closeCurves}>收起曲线</button></div>
+          <div className="curve-workbench-heading"><h3>自由曲线 · 四通道</h3><div className="curve-heading-actions"><ProtectionButton label="自由曲线" locked={locked('curve_points')} compact={false} disabled={busy} onClick={() => toggleLock(['curve_points'])} /><button className="btn btn-ghost" onClick={closeCurves}>收起曲线</button></div></div>
           <div className="curve-workbench-body">
             <DeferredFeature active={curvesVisible}><CurveEditor ref={mainCurveRef} key={`curves:${workspace.id}`} params={params} disabled={busy || !curvesVisible} locked={workspace.locked_fields}
               onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })}
@@ -1625,10 +1617,11 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           <TabsList className="task-tabs" aria-label="调色任务">
             {TOOL_TABS.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</TabsTrigger>)}
           </TabsList>
-          <div className="manual-tool-shortcuts" hidden={toolTab !== 'manual'}>
+          <div className="manual-tool-shortcuts feature-protection-heading" hidden={toolTab !== 'manual'}>
             <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => curvesOpen ? closeCurves() : openCurves()}>
               <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>
             </button>
+            <ProtectionButton label="自由曲线" locked={locked('curve_points')} compact={false} disabled={busy} onClick={() => toggleLock(['curve_points'])} />
           </div>
           <TabsContent value="ai" forceMount asChild><section className="tool-view">
             <h2 className="tool-heading">形成你想要的效果</h2>
@@ -1742,6 +1735,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
           <p className="tool-note">基础调整优先；已调整或受保护的高级项会在标题中提示。</p>
           <ParameterControls
             params={params}
+            contextKey={workspace.id}
             lockedFields={workspace.locked_fields}
             disabled={busy}
             groupOpen={groupOpen}
@@ -1757,15 +1751,14 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             }}
           />
           <details className="professional-settings">
-            <summary>外部 LUT · {params.external_lut_id ? `${Math.round(params.external_lut_strength * 100)}% 已叠加` : '未叠加'}{locked('external_lut_id') ? ' · 已保护' : ''}</summary>
+            <summary className="feature-protection-heading"><span>外部 LUT · {params.external_lut_id ? `${Math.round(params.external_lut_strength * 100)}% 已叠加` : '未叠加'}</span><ProtectionButton label="外部 LUT" compact={false}
+              locked={['external_lut_id', 'external_lut_strength', 'external_lut_mode'].every(locked)}
+              mixed={['external_lut_id', 'external_lut_strength', 'external_lut_mode'].some(locked) && !['external_lut_id', 'external_lut_strength', 'external_lut_mode'].every(locked)} disabled={busy}
+              onClick={event => { event.preventDefault(); event.stopPropagation(); toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode']) }} /></summary>
           <DeferredFeature active={toolTab === 'manual'}><ImportedLutPanel key={`imported:${workspace.id}`} params={params} disabled={baseBusy} onLoading={setAdvancedLoading}
             locked={workspace.locked_fields} onError={(error) => setStatus(error.message)} onReady={() => setResourceError('')}
             onCommit={(patch) => editor.commit(patch, { source: 'external_lut', purpose: 'style' })} /></DeferredFeature>
           </details>
-          <div className="advanced-locks">
-            <button className="parameter-lock" onClick={() => toggleLock(['curve_points'])}>{locked('curve_points') ? '解除自由曲线保护' : '保护自由曲线'}</button>
-            <button className="parameter-lock" onClick={() => toggleLock(['external_lut_id', 'external_lut_strength', 'external_lut_mode'])}>{locked('external_lut_id') ? '解除外部 LUT 保护' : '保护外部 LUT'}</button>
-          </div>
           <details className="professional-settings" open={workspace.input_status === 'pending_confirmation'}>
             <summary>输入技术设置 · {params.base_photo_style}{locked('base_photo_style') ? ' · 已保护' : ''}</summary>
           <div className="controls">
@@ -1818,7 +1811,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             <div className="draft-error">
               输入或显示映射已改变，旧配方需要重新确认。
               <button
-                className="btn"
+                className="btn btn-soft"
                 disabled={!compatible || !selectedMedia}
                 onClick={() => setInputConfirmation(true)}
               >
@@ -1830,7 +1823,7 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
         </fieldset>
           </section></TabsContent>
           <TabsContent value="versions" forceMount asChild><section className="tool-view">
-            <div className="workspace-name-label project-version-name"><span>当前调色项目<strong>{projectName(workspace)}</strong></span><button type="button" className="btn" disabled={busy} onClick={() => renameProject()}>重命名</button></div>
+            <div className="workspace-name-label project-version-name"><span>当前调色项目<strong>{projectName(workspace)}</strong></span><button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => renameProject()}>重命名</button></div>
         <VersionPanel
           expanded
           versions={versions}

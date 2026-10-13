@@ -145,8 +145,8 @@ function DialogRequest({ request, settle }) {
         </label>}
         {error && <p id={`${id}-error`} className="error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button type="button" ref={cancelRef} className="btn" onClick={cancel}>{options.cancelLabel || '取消'}</button>
-          <button type="submit" className={destructive ? 'btn-danger' : 'btn-primary'}>{options.confirmLabel || (isPrompt ? '保存' : '确认')}</button>
+          <button type="button" ref={cancelRef} className="btn btn-ghost" onClick={cancel}>{options.cancelLabel || '取消'}</button>
+          <button type="submit" className={destructive ? 'btn-danger btn-danger-primary' : 'btn-primary'}>{options.confirmLabel || (isPrompt ? '保存' : '确认')}</button>
         </div>
       </form>
     </section>

@@ -39,7 +39,7 @@ export default function InputConfirmationDialog({ workspace, image, onConfirm, o
           <RenderedImage image={image} params={candidate} label="新输入风格候选" />
         )}
         <div className="modal-actions">
-          <button className="btn" onClick={onClose}>
+          <button className="btn btn-ghost" onClick={onClose}>
             取消
           </button>
           <button className="btn-primary" onClick={onConfirm} disabled={!candidate || !image}>

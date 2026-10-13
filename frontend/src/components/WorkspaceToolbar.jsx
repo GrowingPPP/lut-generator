@@ -1,5 +1,6 @@
 import SelectField from './SelectField.jsx'
 import Tooltip from './ui/Tooltip.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import { editingContextForSample, SUBJECT_MODE_LABELS } from '../lib/samples.js'
 const GOALS = [
   ['preserve', '保留氛围', '基础校正保留全局曝光、冷暖与绿洋红；明确的风格要求可调整未锁定项。'],
@@ -76,13 +77,13 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
           {SAVE_STATES[saveStatus] || saveStatus}
         </span>}
         {showHeader && <div className="workspace-history">
-          <Tooltip content="撤销上一项调整 · ⌘ / Ctrl + Z"><button className="btn" onClick={() => { undo(); onHistory?.('undo') }} disabled={!canUndo || busy}>
-            撤销
+          <Tooltip content="撤销上一项调整 · ⌘ / Ctrl + Z"><button className="btn btn-ghost btn-sm" onClick={() => { undo(); onHistory?.('undo') }} disabled={!canUndo || busy}>
+            <ActionIcon name="undo" />撤销
           </button></Tooltip>
-          <Tooltip content="重做上一项调整 · ⌘ / Ctrl + Shift + Z"><button className="btn" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
-            重做
+          <Tooltip content="重做上一项调整 · ⌘ / Ctrl + Shift + Z"><button className="btn btn-ghost btn-sm" onClick={() => { redo(); onHistory?.('redo') }} disabled={!canRedo || busy}>
+            <ActionIcon name="redo" />重做
           </button></Tooltip>
-          <Tooltip content="保存当前项目，使用默认参数开始新的创作"><button className="btn" onClick={onNew} disabled={busy}>
+          <Tooltip content="保存当前项目，使用默认参数开始新的创作"><button className="btn btn-ghost btn-sm" onClick={onNew} disabled={busy}>
             新建调色项目
           </button></Tooltip>
         </div>}
@@ -109,10 +110,10 @@ export default function WorkspaceToolbar({ editor, busy, onNew, onBackup, onHist
         <div className="draft-error" role="alert">
           {error?.message || '检测到其他标签页的更新，已暂停覆盖。'}
           <div className="workspace-toolbar-row">
-            <button className="btn" disabled={busy} onClick={() => (conflict ? fork() : flush())}>
+            <button className="btn btn-soft" disabled={busy} onClick={() => (conflict ? fork() : flush())}>
               {conflict ? '另存本机副本' : '重试保存'}
             </button>
-            <button className="btn" onClick={onBackup}>
+            <button className="btn btn-ghost" onClick={onBackup}>
               下载参数备份
             </button>
           </div>

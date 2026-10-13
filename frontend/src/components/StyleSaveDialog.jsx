@@ -11,6 +11,7 @@ import {
 import { RenderedImage } from './ComparisonPreview.jsx'
 import { diffParams, PARAM_LABELS } from '../lib/autoGrade.js'
 import { ModalSurface } from './ui/Dialog.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import { parseTags } from '../lib/assetLibrary.js'
 
 export default function StyleSaveDialog({
@@ -89,8 +90,8 @@ export default function StyleSaveDialog({
       >
         <div className="section-heading">
           <h2 id="save-title">保存调色资产</h2>
-          <button className="btn" onClick={onClose} disabled={saving}>
-            关闭
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            <ActionIcon name="close" />关闭
           </button>
         </div>
         <label>
@@ -282,7 +283,7 @@ export default function StyleSaveDialog({
           </p>
         )}
         <div className="modal-actions">
-          <button className="btn" onClick={onClose} disabled={saving}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
             取消
           </button>
           <button

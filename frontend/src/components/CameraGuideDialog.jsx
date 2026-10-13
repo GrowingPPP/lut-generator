@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { ModalSurface } from './ui/Dialog.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import { cameraFileName, saveTextFile } from '../lib/api.js'
 import {
   CAMERA_GUIDE_SOURCES,
@@ -24,8 +25,8 @@ export default function CameraGuideDialog({ params, name, sample, onClose, onDow
       >
         <div className="section-heading">
           <h2 id="camera-guide-title">输入与相机使用引导</h2>
-          <button className="btn" onClick={onClose}>
-            关闭
+          <button className="btn btn-ghost" onClick={onClose}>
+            <ActionIcon name="close" />关闭
           </button>
         </div>
         <label>
@@ -122,7 +123,7 @@ export default function CameraGuideDialog({ params, name, sample, onClose, onDow
         </p>
         <div className="modal-actions">
           <button
-            className="btn"
+            className="btn btn-soft"
             onClick={() =>
               saveTextFile(
                 cameraGuideText({ params, filename, model: modelName }),

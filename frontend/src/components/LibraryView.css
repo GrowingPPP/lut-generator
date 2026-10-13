@@ -117,11 +117,13 @@
 .library-page .card-actions .btn {
   padding: 6px 8px;
   min-height: 34px;
-  background: transparent;
-  border-color: transparent;
   font-size: 12px;
 }
-.library-page .card-actions .btn:hover:not(:disabled) { background: var(--panel2); border-color: var(--line); }
+.library-page .card-actions .btn:where(:not(.btn-primary, .btn-danger)) {
+  background: transparent;
+  border-color: transparent;
+}
+.library-page .card-actions .btn:where(:not(.btn-primary, .btn-danger)):hover:not(:disabled) { background: var(--panel2); border-color: var(--line); }
 .library-page .library-delete-entry { color: var(--danger); }
 .library-page .library-delete-entry:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-line); }
 .library-page .card-actions button:disabled { opacity: .5; cursor: not-allowed; }

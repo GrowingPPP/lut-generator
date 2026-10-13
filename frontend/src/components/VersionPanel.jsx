@@ -1,6 +1,8 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { useDialogs } from './ui/Dialog.jsx'
+import ActionMenu from './ui/ActionMenu.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 
 export default function VersionPanel({
   versions,
@@ -17,6 +19,7 @@ export default function VersionPanel({
 }) {
   const [name, setName] = useState('')
   const [open, setOpen] = useState(false)
+  const listId = useId()
   const { confirm, prompt } = useDialogs()
   const current = useRef(null)
   current.current = { versions, busy, onRename, onDelete }
@@ -31,7 +34,7 @@ export default function VersionPanel({
         <h3>
           命名版本 <span>{versions.length}/20</span>
         </h3>
-        {!expanded && <button className="btn" onClick={() => setOpen(!open)}>
+        {!expanded && <button className="btn btn-ghost btn-sm" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
           {open ? '收起版本' : '查看版本'}
         </button>}
       </div>
@@ -44,7 +47,7 @@ export default function VersionPanel({
           maxLength={100}
         />
         <button
-          className="btn"
+          className="btn btn-soft"
           disabled={busy || versions.length >= 20}
           onClick={async () => {
             if (await onSave(name.trim() || '未命名版本')) setName('')
@@ -84,17 +87,17 @@ export default function VersionPanel({
             ))}
           </SelectField>
         </label>
-        <button className="btn" onClick={() => onCompare('b', choices[0])}>
+        <button className="btn btn-ghost btn-sm" onClick={() => onCompare('b', choices[0])}>
           更新 B 为当前草稿
         </button>
         {comparison && (
-          <button className="btn" onClick={onCloseCompare}>
+          <button className="btn btn-soft btn-sm" onClick={onCloseCompare}>
             返回当前编辑
           </button>
         )}
       </div>
       {(expanded || open) && (
-        <div className="version-list">
+        <div className="version-list" id={listId}>
           {versions.map((v) => (
             <div key={v.id} className="version-row">
               <div>
@@ -103,34 +106,26 @@ export default function VersionPanel({
                   {v.params.base_photo_style} · {v.created_at}
                 </small>
               </div>
-              <button className="btn" onClick={() => onCompare('a', v)}>
+              <button className="btn btn-ghost btn-sm" onClick={() => onCompare('a', v)}>
                 查看 A
               </button>
-              <button className="btn" disabled={busy} onClick={() => onRestore(v)}>
+              <button className="btn btn-soft btn-sm" disabled={busy} onClick={() => onRestore(v)}>
                 恢复到草稿
               </button>
-              <button
-                className="btn"
-                disabled={busy}
-                onClick={async () => {
-                  const name = await prompt({ title: '修改版本名称', label: '版本名称', defaultValue: v.name, maxLength: 100, confirmLabel: '保存名称' })
-                  const latest = current.current
-                  if (name !== null && !latest.busy && latest.versions.some(version => version.id === v.id)) latest.onRename(v.id, name)
-                }}
-              >
-                改名
-              </button>
-              <button
-                className="btn-danger"
-                disabled={busy}
-                onClick={async () => {
-                  const allowed = await confirm({ title: `删除版本「${v.name}」？`, description: '删除后无法恢复此命名版本，当前草稿保持原样。', confirmLabel: '删除版本', destructive: true })
-                  const latest = current.current
-                  if (allowed && !latest.busy && latest.versions.some(version => version.id === v.id)) latest.onDelete(v.id)
-                }}
-              >
-                删除
-              </button>
+              <ActionMenu label={`管理版本 ${v.name}`} disabled={busy}
+                trigger={<button type="button" className="btn btn-ghost btn-sm" aria-label={`管理版本 ${v.name}`}><ActionIcon name="more" /></button>}
+                items={[
+                  { id: 'rename', label: '修改版本名称', onSelect: async () => {
+                    const name = await prompt({ title: '修改版本名称', label: '版本名称', defaultValue: v.name, maxLength: 100, confirmLabel: '保存名称' })
+                    const latest = current.current
+                    if (name !== null && !latest.busy && latest.versions.some(version => version.id === v.id)) latest.onRename(v.id, name)
+                  } },
+                  { id: 'delete', label: '删除版本', separator: true, destructive: true, onSelect: async () => {
+                    const allowed = await confirm({ title: `删除版本「${v.name}」？`, description: '删除后无法恢复此命名版本，当前草稿保持原样。', confirmLabel: '删除版本', destructive: true })
+                    const latest = current.current
+                    if (allowed && !latest.busy && latest.versions.some(version => version.id === v.id)) latest.onDelete(v.id)
+                  } },
+                ]} />
             </div>
           ))}
           {!versions.length && (

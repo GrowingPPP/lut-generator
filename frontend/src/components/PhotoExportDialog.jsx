@@ -2,6 +2,7 @@ import RangeField from './ui/RangeField.jsx'
 import { useState } from 'react'
 import SelectField from './SelectField.jsx'
 import { ModalSurface } from './ui/Dialog.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import { exportPhoto, savePhotoFile } from '../lib/photoApi.js'
 import { sampleIsNormalized } from '../lib/samples.js'
 import './PhotoExportDialog.css'
@@ -37,7 +38,7 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
         aria-modal="true" aria-labelledby="photo-export-title">
         <div className="section-heading">
           <h2 id="photo-export-title">导出调整后照片</h2>
-          <button className="btn" disabled={saving} onClick={onClose}>关闭</button>
+          <button className="btn btn-ghost" disabled={saving} onClick={onClose}><ActionIcon name="close" />关闭</button>
         </div>
         <div className="photo-export-source">
           <strong>{sample?.name || '尚未选择照片'}</strong>
@@ -69,7 +70,7 @@ export default function PhotoExportDialog({ sample, media, params, compatible, o
         </p>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button className="btn" disabled={saving} onClick={onClose}>取消</button>
+          <button className="btn btn-ghost" disabled={saving} onClick={onClose}>取消</button>
           <button className="btn-primary" disabled={!available || saving} onClick={submit}>
             {saving ? '正在计算原分辨率效果…' : '导出照片'}
           </button>

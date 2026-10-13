@@ -7,6 +7,7 @@ import { matchingReferenceResult, requestReferenceMatch } from '../lib/reference
 import { diffParams } from '../lib/autoGrade.js'
 import { RenderedImage } from './ComparisonPreview.jsx'
 import { ModalSurface } from './ui/Dialog.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import './ReferenceMatchDialog.css'
 
 export default function ReferenceMatchDialog({ file, image, params, context, workspaceId,
@@ -73,7 +74,7 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
   const changes = candidate ? diffParams(candidate.result.before_params, candidate.result.params) : []
   const content = <section className={inline ? 'reference-match' : 'workspace-modal reference-match'} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-labelledby="reference-match-title">
       <div className="section-heading"><div><span className="reference-kicker">色彩与影调</span><h2 id="reference-match-title">参考图风格匹配</h2></div>
-        {!inline && <button className="btn" disabled={running} onClick={onClose}>关闭</button>}</div>
+        {!inline && <button className="btn btn-ghost" disabled={running} onClick={onClose}><ActionIcon name="close" />关闭</button>}</div>
       <p className="workspace-note">参考图不会成为主样张。匹配在现有调色参数中寻找接近的色彩与影调，保留参数保护；场景和光照差异会影响结果。</p>
       {visible && <div className="reference-images">
         <RenderedImage image={image} params={params} label="当前效果" />
@@ -82,7 +83,7 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
         {candidate && <RenderedImage image={image} params={candidate.result.params} label="匹配候选 · 未应用" />}
       </div>}
       {reference && <div className="reference-file"><span>{reference.metadata.name}</span>
-        <label className="btn">更换参考图<input type="file" accept="image/jpeg,image/png,image/webp" disabled={blocked} onChange={upload} /></label></div>}
+        <label className="btn btn-ghost"><ActionIcon name="upload" />更换参考图<input type="file" accept="image/jpeg,image/png,image/webp" disabled={blocked} onChange={upload} /></label></div>}
       {reference && reference.metadata.color_management?.warning && <p className="workspace-note">{reference.metadata.color_management.warning}</p>}
       <fieldset className="reference-options" disabled={blocked}>
         <label><CheckboxField checked={color} onChange={(e) => { setColor(e.target.checked); setCandidate(null) }} />匹配色彩</label>
@@ -99,10 +100,10 @@ export default function ReferenceMatchDialog({ file, image, params, context, wor
         {candidate.result.warnings.map((warning) => <p className="workspace-note" key={warning}>{warning}</p>)}
       </div>}
       <p className="text-muted">确定性匹配不调用模型；两张原照片只在本次请求中处理，不在服务器保存。</p>
-      <div className="modal-actions"><button className="btn" onClick={match}
+      <div className="modal-actions"><button className={changes.length ? 'btn btn-soft' : 'btn-primary'} onClick={match}
         disabled={blocked || !reference || !file || !compatible || (!color && !tone)}>
         {loading ? '正在统一参考图色彩…' : matching ? '正在匹配…' : '生成匹配候选'}</button>
-        <button className="btn-primary" disabled={blocked || !changes.length} onClick={apply}>应用候选</button></div>
+        <button className={changes.length ? 'btn-primary' : 'btn btn-soft'} disabled={blocked || !changes.length} onClick={apply}>应用候选</button></div>
     </section>
   return inline ? <div className="reference-match-inline">{content}</div>
     : <ModalSurface onClose={onClose} busy={running}>{content}</ModalSurface>

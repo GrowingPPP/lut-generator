@@ -195,10 +195,16 @@
 .gen-workbench .preview-toolbar .curve-quick-toggle {
   min-height: 34px;
   padding: 6px 10px;
+  border-color: transparent;
+  color: var(--workbench-muted);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.gen-workbench .preview-toolbar .curve-quick-toggle[aria-expanded='true'] {
   border-color: var(--accent-line);
   color: var(--accent-strong);
   background: var(--accent-soft);
-  white-space: nowrap;
 }
 
 .gen-workbench .preview-toolbar .photo-viewer-launch {
@@ -692,6 +698,18 @@
   min-height: 52px;
   padding: 8px 12px;
 }
+.gen-workbench .manual-tool-shortcuts.feature-protection-heading .curve-workbench-toggle { flex: 1; min-width: 0; }
+.gen-workbench .curve-heading-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gen-workbench .params .parameter-lock.protection-button { min-height: 32px; padding: 5px 7px; border-color: transparent; background: transparent; color: var(--muted); }
+.gen-workbench .params .parameter-lock.protection-button.is-compact { width: 32px; padding: 5px; }
+.gen-workbench .params .parameter-lock.protection-button[aria-pressed='true'],
+.gen-workbench .params .parameter-lock.protection-button[aria-pressed='mixed'] { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }
+@media (pointer: coarse) {
+  .gen-workbench .params .parameter-lock.protection-button { min-height: 40px; }
+  .gen-workbench .params .parameter-lock.protection-button.is-compact { width: 40px; }
+}
+.gen-workbench .professional-settings > summary.feature-protection-heading { gap: 8px; }
+.gen-workbench .professional-settings > summary.feature-protection-heading > span { flex: 1; }
 
 .gen-workbench .task-tabs button {
   position: relative;
@@ -1236,7 +1254,7 @@
   text-align: left;
 }
 
-.gen-workbench .params .param-group-header > .parameter-lock,
+.gen-workbench .params .param-group-header > .parameter-lock:not(.protection-button),
 .gen-workbench .params .param-group-header > .group-reset {
   min-height: 28px;
   padding: 4px 6px;
@@ -1258,7 +1276,7 @@
   width: 64px;
 }
 
-.gen-workbench .params .slider > .parameter-lock {
+.gen-workbench .params .slider > .parameter-lock:not(.protection-button) {
   min-height: 28px;
   padding: 4px 6px;
   border-color: var(--line);
@@ -1267,13 +1285,13 @@
   font-size: 12px;
 }
 
-.gen-workbench .params .parameter-lock.locked {
+.gen-workbench .params .parameter-lock.locked:not(.protection-button) {
   border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
-.gen-workbench .params .parameter-lock:hover:not(:disabled),
+.gen-workbench .params .parameter-lock:not(.protection-button):hover:not(:disabled),
 .gen-workbench .params .group-reset:hover:not(:disabled) {
   border-color: var(--line);
   background: var(--hover);
@@ -1417,7 +1435,7 @@
 
 .gen-workbench .version-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 7px;
   padding: 12px 0;
 }

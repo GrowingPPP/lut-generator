@@ -3,6 +3,7 @@ import SelectField from './SelectField.jsx'
 import { ModalSurface } from './ui/Dialog.jsx'
 import RangeField from './ui/RangeField.jsx'
 import Tooltip from './ui/Tooltip.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import { generateLUT } from '../lib/lutEngine.js'
 import { LUTRenderer } from '../lib/lutPreview.js'
 import { preloadExternalLut } from '../lib/importedLuts.js'
@@ -316,34 +317,34 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
   const previewAgain = () => { setImage(preview); setOriginal(false); setSourceError(''); setView({ scale: 1, x: 0, y: 0, fit: true }) }
   const resolution = !sample ? '合成示意图' : original ? '原分辨率' : !file ? '缓存预览 · 无原文件' : '规范化预览'
   const percent = Math.round(view.scale * 1000) / 10
-  const modes = [['slider', '滑动对比'], ['side-by-side', '并排'], ['original', hasComparison && !fallback ? '仅 A' : '仅原图'], ['effect', hasComparison ? '仅 B' : '仅效果']]
+  const modes = [['slider', '滑动对比', 'split'], ['side-by-side', '并排', 'compare'], ['original', hasComparison && !fallback ? '仅 A' : '仅原图', 'image'], ['effect', hasComparison ? '仅 B' : '仅效果', 'adjust']]
 
   return <ModalSurface onClose={close} contentRef={modalRef} overlayClassName="photo-viewer-backdrop">
     <section className={`photo-viewer${panelOpen && adjustmentPanel ? ' has-adjustments' : ''}`} aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`} onKeyDown={key}>
       <header className="photo-viewer-header">
         <div className="photo-viewer-title"><h2 id={`${id}-title`}>放大查看</h2><span title={sample?.name}>{sample?.name || '调色示意图'}</span></div>
         <div className="photo-viewer-header-actions">
-          {adjustmentPanel && <button type="button" className="photo-viewer-button" aria-expanded={panelOpen} aria-controls={`${id}-adjustments`} onClick={() => { if (panelOpen) finishAdjustment(); setPanelOpen(value => !value) }}>调色面板{panelOpen ? ' · 收起' : ''}</button>}
-          <button type="button" className="photo-viewer-button photo-viewer-close" onClick={close}>关闭 <span aria-hidden="true">×</span></button>
+          {adjustmentPanel && <button type="button" className={`photo-viewer-button ${panelOpen ? 'btn-soft' : 'btn-ghost'}`} aria-pressed={panelOpen} aria-expanded={panelOpen} aria-controls={`${id}-adjustments`} onClick={() => { if (panelOpen) finishAdjustment(); setPanelOpen(value => !value) }}><ActionIcon name="adjust" />调色面板{panelOpen ? ' · 收起' : ''}</button>}
+          <button type="button" className="photo-viewer-button btn-ghost photo-viewer-close" onClick={close}><ActionIcon name="close" />关闭</button>
         </div>
       </header>
       <div className="photo-viewer-tools">
-        <div className="photo-viewer-modes" role="group" aria-label="照片查看模式">{modes.map(([value, label]) => <button type="button" key={value} className="photo-viewer-button" aria-pressed={visibleMode === value} disabled={(!compatible || (!!renderError && !renderReady)) && value !== 'original'} onClick={() => setMode(value)}>{label}</button>)}</div>
+        <div className="photo-viewer-modes" role="group" aria-label="照片查看模式">{modes.map(([value, label, icon]) => <button type="button" key={value} className={`photo-viewer-button ${visibleMode === value ? 'btn-soft' : 'btn-ghost'}`} aria-pressed={visibleMode === value} disabled={(!compatible || (!!renderError && !renderReady)) && value !== 'original'} onClick={() => setMode(value)}><ActionIcon name={icon} />{label}</button>)}</div>
         <div className="photo-viewer-zoom" role="group" aria-label="照片缩放">
-          <button type="button" className="photo-viewer-button" onClick={fit}>适应窗口</button>
-          <Tooltip content="按照片像素查看细节；有原文件时载入原分辨率"><button type="button" className="photo-viewer-button" disabled={sourceLoading} onClick={() => loadOriginal(true)}>{file ? '1:1 像素' : sample ? '预览 1:1' : '示意图 1:1'}</button></Tooltip>
-          <button type="button" className="photo-viewer-button photo-viewer-step" aria-label="缩小照片" onClick={() => zoom(view.scale / 1.25)} disabled={view.scale <= 0.25}>−</button>
+          <button type="button" className={`photo-viewer-button ${view.fit ? 'btn-soft' : 'btn-ghost'}`} aria-pressed={view.fit} onClick={fit}><ActionIcon name="fit" />适应窗口</button>
+          <Tooltip content="按照片像素查看细节；有原文件时载入原分辨率"><button type="button" className={`photo-viewer-button ${!view.fit && view.scale === 1 ? 'btn-soft' : 'btn-ghost'}`} aria-pressed={!view.fit && view.scale === 1} disabled={sourceLoading} onClick={() => loadOriginal(true)}><ActionIcon name="pixels" />{file ? '1:1 像素' : sample ? '预览 1:1' : '示意图 1:1'}</button></Tooltip>
+          <button type="button" className="photo-viewer-button btn-ghost photo-viewer-step" aria-label="缩小照片" onClick={() => zoom(view.scale / 1.25)} disabled={view.scale <= 0.25}><ActionIcon name="zoom-out" /><span className="photo-viewer-step-label">缩小</span></button>
           <label className="photo-viewer-scale"><span className="photo-viewer-sr-only">缩放比例</span><SelectField aria-label="照片缩放比例" value={String(percent)} onChange={event => zoom(Number(event.target.value) / 100)}>
             {![25, 50, 75, 100, 150, 200, 300, 400].includes(percent) && <option value={percent}>{percent}%</option>}
             {[25, 50, 75, 100, 150, 200, 300, 400].map(value => <option value={value} key={value}>{value}%</option>)}
           </SelectField></label>
-          <button type="button" className="photo-viewer-button photo-viewer-step" aria-label="放大照片" onClick={() => zoom(view.scale * 1.25)} disabled={view.scale >= 4}>+</button>
+          <button type="button" className="photo-viewer-button btn-ghost photo-viewer-step" aria-label="放大照片" onClick={() => zoom(view.scale * 1.25)} disabled={view.scale >= 4}><ActionIcon name="zoom-in" /><span className="photo-viewer-step-label">放大</span></button>
         </div>
       </div>
       <div className="photo-viewer-status" aria-live="polite">
         <span>{resolution} · {image?.width} × {image?.height}px · {percent}%{view.fit ? ' · 适应窗口' : ''}</span>
-        {file && !original && <button type="button" className="photo-viewer-button" disabled={sourceLoading} onClick={() => loadOriginal(false)}>{sourceLoading ? '正在载入原分辨率…' : '载入原分辨率'}</button>}
-        {original && <button type="button" className="photo-viewer-button" onClick={previewAgain}>使用预览分辨率</button>}
+        {file && !original && <button type="button" className="photo-viewer-button btn-soft" disabled={sourceLoading} onClick={() => loadOriginal(false)}><ActionIcon name="pixels" />{sourceLoading ? '正在载入原分辨率…' : '载入原分辨率'}</button>}
+        {original && <button type="button" className="photo-viewer-button btn-ghost" onClick={previewAgain}><ActionIcon name="image" />使用预览分辨率</button>}
         {sourceWidth && sourceHeight && !original && <span className="photo-viewer-source-size">原照片 {sourceWidth} × {sourceHeight}px</span>}
       </div>
       <div className="photo-viewer-content">
@@ -376,12 +377,12 @@ export default function PhotoViewer({ sample, media, params, compatible, compari
       {adjustmentPanel && panelOpen && <aside id={`${id}-adjustments`} className="photo-viewer-adjustments" aria-label="放大查看调色面板">
         <div className="photo-viewer-adjustment-heading"><h3>{hasComparison ? '版本比较' : '调整当前草稿'}</h3>
           {historyAvailable && <div className="photo-viewer-history" role="group" aria-label="调色历史">
-            <button type="button" className="photo-viewer-button" disabled={!canUndo} onClick={() => { finishAdjustment(); onUndo?.() }}>撤销</button>
-            <button type="button" className="photo-viewer-button" disabled={!canRedo} onClick={() => { finishAdjustment(); onRedo?.() }}>重做</button>
+            <button type="button" className="photo-viewer-button btn-ghost" disabled={!canUndo} onClick={() => { finishAdjustment(); onUndo?.() }}><ActionIcon name="undo" />撤销</button>
+            <button type="button" className="photo-viewer-button btn-ghost" disabled={!canRedo} onClick={() => { finishAdjustment(); onRedo?.() }}><ActionIcon name="redo" />重做</button>
           </div>}
         </div>
         {hasComparison ? <div className="photo-viewer-edit-notice"><p>A / B 为固定版本快照。切换到当前草稿后，可在此继续调色。</p>
-          {onEditDraft && <button type="button" className="photo-viewer-button" onClick={() => { finishAdjustment(); onEditDraft() }}>调整当前草稿</button>}
+          {onEditDraft && <button type="button" className="photo-viewer-button btn-soft" onClick={() => { finishAdjustment(); onEditDraft() }}><ActionIcon name="adjust" />调整当前草稿</button>}
         </div> : !compatible ? <p className="photo-viewer-edit-notice">请确保照片与当前草稿的输入基准一致。可用撤销／重做恢复输入，或关闭查看器后确认照片输入，再调整参数。</p> : adjustmentPanel}
       </aside>}
       </div>

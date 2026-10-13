@@ -5,6 +5,7 @@ import RangeField from './ui/RangeField.jsx'
 import { importLut, listImportedLuts, preloadExternalLut } from '../lib/importedLuts.js'
 import { MAX_CUBE_BYTES } from '../lib/cubeLut.js'
 import ParameterHelp from './ParameterHelp.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import './ImportedLutPanel.css'
 
 const SIGNALS = ['sRGB', 'Rec709', 'VLOG']
@@ -86,7 +87,7 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
   }
   const selected = artifacts.find(artifact => artifact.id === params.external_lut_id)
   return <section className="imported-lut-panel" aria-label="外部 LUT">
-    <div className="imported-lut-heading"><h3>外部 LUT</h3><button type="button" disabled={blocked || loading} onClick={() => setShowImport(value => !value)}>导入 .cube</button></div>
+    <div className="imported-lut-heading"><h3>外部 LUT</h3><button type="button" className="btn btn-ghost btn-sm" disabled={blocked || loading} aria-expanded={showImport} onClick={() => setShowImport(value => !value)}><ActionIcon name={showImport ? 'close' : 'upload'} />{showImport ? '取消导入' : '导入 .cube'}</button></div>
     <ParameterHelp parameter="external_lut_id" />
     <label className="imported-lut-choice">账号导入库
       <SelectField aria-label="外部 LUT 选择" disabled={blocked || loading} value={params.external_lut_id || ''} onChange={event => select(event.target.value)}>
@@ -117,7 +118,7 @@ export default function ImportedLutPanel({ params, disabled = false, locked = fa
       </div>
       <label className="imported-lut-confirm"><CheckboxField checked={confirmed} disabled={loading} onChange={event => setConfirmed(event.target.checked)} />我已依据 LUT 来源确认信号声明，且文件为 SDR。</label>
       <p className="imported-lut-help">支持纯3D 2–65点、R最快、DOMAIN。仅接受 sRGB→sRGB、Rec709→Rec709 或 VLOG→Rec709；不支持1D、混合及HDR。账号保存解析网格，不保存照片；导出33点可能降低高密度 LUT 细节。</p>
-      <button type="submit" disabled={blocked || loading || !file || !confirmed}>{loading ? '正在导入…' : '确认并导入'}</button>
+      <button type="submit" className="btn-primary" disabled={blocked || loading || !file || !confirmed}>{loading ? '正在导入…' : '确认并导入'}</button>
     </form>}
     {loading && <p className="imported-lut-status" role="status">正在载入外部 LUT…</p>}
     {error && <p className="imported-lut-status" role="status">{error}</p>}

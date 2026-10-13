@@ -3,6 +3,7 @@ import ParameterControls from './ParameterControls.jsx'
 import CurveEditor from './CurveEditor.jsx'
 import ParameterHelp from './ParameterHelp.jsx'
 import RangeField, { NumberField } from './ui/RangeField.jsx'
+import ProtectionButton from './ui/ProtectionButton.jsx'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from './ui/Tabs.jsx'
 
 const SAVE_STATES = {
@@ -17,7 +18,9 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
   const [tab, setTab] = useState('parameters')
   const [feedback, setFeedback] = useState('')
   const curveRef = useRef(null)
-  const externalLocked = EXTERNAL_FIELDS.some(field => locked.includes(field))
+  const externalProtectedCount = EXTERNAL_FIELDS.filter(field => locked.includes(field)).length
+  const externalLocked = externalProtectedCount > 0
+  const externalFullyLocked = externalProtectedCount === EXTERNAL_FIELDS.length
   const finishPendingEdit = () => { curveRef.current?.finishPendingEdit(); return editor.commit() }
   useImperativeHandle(ref, () => ({ finishPendingEdit }))
   const selectTab = next => { finishPendingEdit(); setTab(next) }
@@ -28,7 +31,7 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
     <p className={`draft-status ${saveStatus}`} role="status">{SAVE_STATES[saveStatus] || saveStatus}</p>
     {(error || conflict || resourceError) && <div className="draft-error" role="alert">
       {error?.message || (conflict ? '另一标签页已更新草稿，请关闭查看器后载入最新内容或另存副本。' : resourceError)}
-      {error && !conflict && <button type="button" className="btn" disabled={disabled} onClick={editor.flush}>重试保存</button>}
+      {error && !conflict && <button type="button" className="btn btn-soft btn-sm" disabled={disabled} onClick={editor.flush}>重试保存</button>}
       {resourceError && <p>请关闭查看器后，在外部 LUT 区域重新选择并载入资源。</p>}
     </div>}
     <TabsRoot value={tab} onValueChange={selectTab}>
@@ -38,15 +41,15 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
     </TabsList>
     <TabsContent value="parameters" forceMount asChild>
     <fieldset className="params param-groups" disabled={disabled}>
-      <ParameterControls params={params} lockedFields={locked} disabled={disabled} gesture={gesture}
+      <ParameterControls params={params} lockedFields={locked} disabled={disabled} gesture={gesture} contextKey={workspace.id}
         onUpdateParam={onUpdateParam} onUpdateChannel={onUpdateChannel} onToggleLock={onToggleLock}
         onSetLocks={editor.setLocks} onReset={reset} />
       {params.external_lut_id && <section className="param-group photo-adjustment-external">
-        <div className="param-group-header"><strong className="param-group-label">外部 LUT</strong>
-          <button type="button" className={`parameter-lock ${externalLocked ? 'locked' : ''}`}
-            aria-label={`${externalLocked ? '解锁' : '保护'}外部 LUT`} onClick={() => externalLocked
-              ? editor.setLocks(locked.filter(field => !EXTERNAL_FIELDS.includes(field))) : onToggleLock(EXTERNAL_FIELDS)}>
-            {externalLocked ? '已保护' : '保护'}</button>
+        <div className="param-group-header parameter-effect-heading"><strong className="param-group-label">外部 LUT</strong>
+          <ProtectionButton label="外部 LUT" locked={externalFullyLocked} mixed={externalLocked && !externalFullyLocked}
+            compact={false} disabled={disabled}
+            onClick={() => externalFullyLocked
+              ? editor.setLocks(locked.filter(field => !EXTERNAL_FIELDS.includes(field))) : onToggleLock(EXTERNAL_FIELDS)} />
         </div>
         <div className="controls"><div className="slider">
           <span>叠加强度</span><RangeField min="0" max="1" step="0.01" value={params.external_lut_strength}
@@ -63,8 +66,11 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
     </TabsContent>
     <TabsContent value="curves" forceMount asChild>
     <div className="photo-adjustment-curves">
-      <button type="button" className={`parameter-lock ${locked.includes('curve_points') ? 'locked' : ''}`} disabled={disabled}
-        onClick={() => onToggleLock(['curve_points'])}>{locked.includes('curve_points') ? '解除自由曲线保护' : '保护自由曲线'}</button>
+      <div className="parameter-effect-heading">
+        <div><h3>自由曲线</h3><span className="tool-note">四通道独立调整</span></div>
+        <ProtectionButton label="自由曲线" locked={locked.includes('curve_points')} compact={false} disabled={disabled}
+          onClick={() => { finishPendingEdit(); onToggleLock(['curve_points']) }} />
+      </div>
       <CurveEditor ref={curveRef} params={params} disabled={disabled || tab !== 'curves'} locked={locked}
         onBegin={() => editor.begin({ source: 'curve', purpose: 'style' })} onPreview={editor.update}
         onCommit={patch => editor.commit(patch, { source: 'curve', purpose: 'style' })} onCancel={editor.cancel} />
