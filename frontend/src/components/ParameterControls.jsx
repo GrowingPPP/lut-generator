@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { PARAMETER_GROUP_HELP } from '../lib/parameterHelp.js'
-import { BeginnerGuide, ParameterInfo } from './ParameterHelp.jsx'
+import { ParameterInfo } from './ParameterHelp.jsx'
 import RangeField, { NumberField } from './ui/RangeField.jsx'
 import ActionMenu from './ui/ActionMenu.jsx'
 import ActionIcon from './ui/ActionIcon.jsx'
@@ -162,6 +162,5 @@ export default function ParameterControls({
         </div>}
       </section>
     })}
-    <div className="parameter-guide"><BeginnerGuide compact /></div>
   </>
 }

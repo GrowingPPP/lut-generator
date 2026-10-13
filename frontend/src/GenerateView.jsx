@@ -51,7 +51,7 @@ import { preloadExternalLut } from './lib/importedLuts.js'
 import ParameterPanel from './components/ParameterPanel.jsx'
 import ToolPanel from './components/ToolPanel.jsx'
 import ComparisonControl from './components/ui/ComparisonControl.jsx'
-import ParameterHelp from './components/ParameterHelp.jsx'
+import ParameterHelp, { BeginnerGuideHelp } from './components/ParameterHelp.jsx'
 import SelectField from './components/SelectField.jsx'
 import { defaultGroupOpen, parameterLabel } from './lib/parameterControls.js'
 import { makeTestImage } from './lib/preview.js'
@@ -1699,9 +1699,12 @@ export default function GenerateView({ previewLut, deletedAssetId, user }) {
             savedAsset={savedAsset} disabled={busy} resourceError={resourceError} onSave={saveAsset} onBusyChange={setDeliverySaving}
             onBind={() => { goToStep('photos'); if (selectedSample && !selectedMedia?.file) openSamplePicker(selectedSample.id) }}
             onDownload={downloadCube} onPhotoExport={() => setPhotoExport(true)} onGuide={() => setCameraGuide({ sample: selectedSample })} /></DeferredFeature></div>
-          <TabsList className="task-tabs" aria-label="比较与调整工具" hidden={flow.step !== 'adjust'}>
+          <div className="manual-tool-header" hidden={flow.step !== 'adjust'}>
+          <TabsList className="task-tabs" aria-label="比较与调整工具">
             {TOOL_TABS.filter(([key]) => key !== 'ai').map(([key, label]) => <TabsTrigger key={key} value={key}>{label}{key === 'ai' && activeAiIntent ? ' · 运行中' : ''}</TabsTrigger>)}
           </TabsList>
+          <div hidden={effectiveToolTab !== 'manual'}><BeginnerGuideHelp /></div>
+          </div>
           <div className="manual-tool-shortcuts feature-protection-heading" hidden={effectiveToolTab !== 'manual'}>
             <button type="button" className="curve-workbench-toggle" aria-expanded={curvesOpen} aria-controls="curve-workbench" onClick={() => curvesOpen ? closeCurves() : openCurves()}>
               <span>自由曲线 · 主 / R / G / B</span><small>{curvesChanged ? '已调整' : '未调整'}{locked('curve_points') ? ' · 已保护' : ''} · {curvesOpen ? '收起' : '展开'}</small>

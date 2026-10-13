@@ -53,6 +53,9 @@
 .task-panel-content { display:flex; flex-direction:column; min-height:0; min-width:0; }
 .mobile-tool-heading { display:none; }
 .creation-flow .task-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0 12px; order:0; }
+.creation-flow .manual-tool-header { display:flex; align-items:center; gap:8px; padding-right:8px; border-bottom:1px solid var(--line); order:0; min-width:0; }
+.creation-flow .manual-tool-header .task-tabs { flex:1; border-bottom:0; padding:0 4px; }
+.creation-flow .manual-tool-header .task-tabs button { min-height:44px; }
 .creation-flow .tool-view { flex:0 0 auto; overflow:visible; padding:16px; order:1; }
 .creation-flow .manual-tool-shortcuts { order:2; border-top:1px solid var(--line); border-bottom:0; padding:12px 16px; }
 .creation-flow .manual-tool-shortcuts .curve-workbench-toggle { min-height:44px; padding:0; background:transparent; border:0; border-radius:0; }
@@ -189,7 +192,7 @@
   .creation-flow .mobile-tool-heading .btn { min-height:44px; font-size:12px; padding:6px 10px; }
   .creation-flow .task-panel[data-mobile-panel] .task-panel-content { flex:1; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; scroll-padding-block:12px; }
   .creation-flow .task-panel[data-mobile-panel='closed'] .task-panel-content { display:none; }
-  .creation-flow .task-panel[data-mobile-panel] .task-tabs { position:sticky; top:0; z-index:2; background:var(--panel); }
+  .creation-flow .task-panel[data-mobile-panel] .manual-tool-header { position:sticky; top:0; z-index:2; background:var(--panel); }
   .creation-flow .task-panel[data-mobile-panel] .tool-view { padding:12px; }
   .creation-flow .task-panel .ai-method textarea { min-height:80px; font-size:16px; }
   .creation-flow .task-panel .auto-style-input { height:80px; }

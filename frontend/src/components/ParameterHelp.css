@@ -20,7 +20,7 @@
 .parameter-help-button > span { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--control-line); border-radius: 50%; font-size: 12px; }
 .parameter-help-button:hover, .parameter-help-button[aria-expanded='true'] { background: var(--accent-soft); color: var(--accent-strong); }
 .parameter-help-button:hover > span, .parameter-help-button[aria-expanded='true'] > span { border-color: var(--accent-line); }
-.parameter-help-button:focus-visible, .parameter-help-link:focus-visible, .beginner-guide > summary:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.parameter-help-button:focus-visible, .parameter-help-link:focus-visible, .beginner-guide-trigger:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
 .parameter-control { min-width: 0; }
 .parameter-help-content { min-width: 0; color: var(--text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .parameter-help-content p { margin: 0; }
@@ -35,16 +35,11 @@
 .parameter-group-description strong { font-weight: 500; color: var(--text); }
 .parameter-help-link { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; line-height: 1.6; text-align: left; cursor: pointer; }
 .parameter-help-link:hover, .parameter-help-link[aria-expanded='true'] { color: var(--accent-strong); }
-.beginner-guide > summary::-webkit-details-marker { display: none; }
 .parameter-help-symbol { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border: 1px solid var(--control-line); border-radius: 50%; color: var(--muted); font-weight: 600; }
-.beginner-guide { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel2); color: var(--text); }
-.beginner-guide > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; list-style: none; padding: 12px; cursor: pointer; }
-.beginner-guide > summary strong, .beginner-guide > summary small { display: block; }
-.beginner-guide > summary strong { font-size: 13px; font-weight: 600; }
-.beginner-guide > summary small { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.beginner-guide-arrow { color: var(--accent-strong); transition: transform .15s; }
-.beginner-guide[open] .beginner-guide-arrow { transform: rotate(180deg); }
-.beginner-guide-content { padding: 0 12px 16px; font-size: 13px; line-height: 1.7; }
+.beginner-guide-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; touch-action: manipulation; }
+.beginner-guide-trigger:hover, .beginner-guide-trigger[aria-expanded='true'] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent-line); }
+.beginner-guide-popover .ui-help-popover-close { min-width: 36px; min-height: 36px; }
+.beginner-guide-content { font-size: 13px; line-height: 1.7; }
 .beginner-guide-content > p { margin: 0 0 12px; }
 .beginner-guide-content ol { display: grid; gap: 12px; padding-left: 20px; margin: 0 0 16px; }
 .beginner-guide-content li::marker { color: var(--accent-strong); font-weight: 600; }
@@ -54,4 +49,7 @@
 .parameter-help-intro { margin: 0 2px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .photo-adjustment-external-help { margin: 0 12px 12px; }
 .curve-channel-learning { margin: 0; min-height: 2.8em; color: var(--muted); font-size: 12px; line-height: 1.5; }
-@media (prefers-reduced-motion: reduce) { .beginner-guide-arrow { transition: none; } }
+@media (pointer: coarse), (max-width: 740px) {
+  .beginner-guide-trigger { min-height: 44px; }
+  .beginner-guide-popover .ui-help-popover-close { min-width: 44px; min-height: 44px; }
+}

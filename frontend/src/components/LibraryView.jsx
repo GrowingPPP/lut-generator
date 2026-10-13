@@ -1,4 +1,6 @@
 import CheckboxField from './ui/CheckboxField.jsx'
+import ActionMenu from './ui/ActionMenu.jsx'
+import ActionIcon from './ui/ActionIcon.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import SelectField from './SelectField.jsx'
 
@@ -58,11 +60,14 @@ function AssetCover({ asset, thumb, children }) {
     <div
       className={`card-thumb library-cover library-cover-${asset.cover_id}`}
       style={
-        asset.cover_id === 'engine'
+        asset.cover_id === 'engine' && thumb
           ? { backgroundImage: `url(${thumb})` }
           : undefined
       }
     >
+      {asset.cover_id === 'engine' && !thumb && (
+        <span className="library-cover-unavailable">封面暂不可用</span>
+      )}
       {children}
     </div>
   )
@@ -101,7 +106,7 @@ function LibraryModal({
   )
 }
 
-export default function LibraryView({ onPreview, onDeleted }) {
+export default function LibraryView({ onPreview, onDeleted, onCreate }) {
   const { confirm } = useDialogs()
   const [luts, setLuts] = useState([])
   const [summary, setSummary] = useState({ total: 0, groups: [] })
@@ -117,6 +122,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
   const resultsRef = useRef(null)
   const [detail, setDetail] = useState(null)
   const [downloadError, setDownloadError] = useState('')
+  const [downloadNotice, setDownloadNotice] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
@@ -125,13 +131,17 @@ export default function LibraryView({ onPreview, onDeleted }) {
   const [busyIds, setBusyIds] = useState([])
   const [revisionAsset, setRevisionAsset] = useState(null)
   const [revisions, setRevisions] = useState([])
+  const [revisionLoading, setRevisionLoading] = useState(false)
+  const [revisionError, setRevisionError] = useState('')
+  const revisionRequestId = useRef(0)
   const requestId = useRef(0)
   const filtersRef = useRef(filters)
   const deleteCancelRef = useRef(null)
   const editingNameRef = useRef(null)
   filtersRef.current = filters
 
-  useEffect(() => { setDownloadError('') }, [detail?.id])
+  useEffect(() => { setDownloadError(''); setDownloadNotice('') }, [detail?.id])
+  useEffect(() => () => { revisionRequestId.current += 1 }, [])
 
   useEffect(() => {
     const active = document.activeElement
@@ -142,7 +152,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
 
   useEffect(() => {
     const timer = setTimeout(
-      () => setFilters((value) => ({ ...value, q: search })),
+      () => setFilters((value) => value.q === search ? value : { ...value, q: search }),
       250,
     )
     return () => clearTimeout(timer)
@@ -272,119 +282,92 @@ export default function LibraryView({ onPreview, onDeleted }) {
       setDeleting(false)
     }
   }
+  const closeRevisions = () => {
+    revisionRequestId.current += 1
+    setRevisionAsset(null)
+  }
   const openRevisions = async (lut) => {
+    const id = ++revisionRequestId.current
+    setRevisionAsset(lut)
+    setDetail(null)
+    setRevisions([])
+    setRevisionError('')
+    setRevisionLoading(true)
     try {
-      setRevisions(await listLutRevisions(lut.id))
-      setRevisionAsset(lut)
-      setDetail(null)
+      const loaded = await listLutRevisions(lut.id)
+      if (revisionRequestId.current === id) setRevisions(loaded)
     } catch (e) {
-      setError(`加载修订失败：${e.message}`)
+      if (revisionRequestId.current === id) setRevisionError(`加载修订失败：${e.message}`)
+    } finally {
+      if (revisionRequestId.current === id) setRevisionLoading(false)
     }
   }
   const preview = (lut) => {
     setDetail(null)
-    setRevisionAsset(null)
+    closeRevisions()
     onPreview(lut)
   }
+  const activeFilters = Boolean(search.trim() || filters.kind || filters.input || filters.favorite || filters.group !== 'all')
+  const moreFilterCount = Number(Boolean(filters.input)) + Number(filters.group !== 'all')
+  const assetMenuItems = (asset) => [
+    { id: 'edit', label: '编辑作品信息', description: '名称、用途、标签与封面', onSelect: () => openEdit(asset) },
+    { id: 'revisions', label: '调色修订历史', onSelect: () => openRevisions(asset) },
+    { id: 'delete', label: '删除作品', description: '保留调色项目和已导出文件', separator: true, destructive: true,
+      disabled: busyIds.includes(asset.id), onSelect: () => openDelete(asset) },
+  ]
   const downloadAsset = async (asset, mode) => {
     if (downloading) return
     setDownloadError('')
+    setDownloadNotice('')
     const portable = asset.kind === 'portable_style'
     if (portable && !(await confirm({ title: '导出中性参数上的风格？',
       description: '将风格应用于相同输入基准的中性参数并导出一个 LUT。若要叠加当前校正，请先载入调色项目，再直接下载当前完整效果。',
       confirmLabel: '导出风格' }))) return
     setDownloading(true)
-    try { await downloadAndSave(asset.id, mode, portable) }
+    try {
+      await downloadAndSave(asset.id, mode, portable)
+      setDownloadNotice(`已发起「${asset.name}」${mode === 'camera' ? '相机版' : '后期版'} .cube 下载，请在浏览器下载记录中查看。`)
+    }
     catch (failure) { setDownloadError(`下载失败：${failure.message}`) }
     finally { setDownloading(false) }
   }
 
   return (
     <div className="content library-page">
-      <div className="lib-head">
+      <header className="lib-head">
         <div>
+          <p className="library-eyebrow">你的色彩作品</p>
           <h1>我的 LUT</h1>
-          <p className="library-intro">
-            收藏你的色彩，按场景找到下一次创作的起点。
-          </p>
+          <p className="library-intro">把喜欢的色彩保存下来，成为下一次创作的起点。</p>
         </div>
-        <span className="count">共 {summary.total} 个</span>
-      </div>
-      <section className="library-tools" aria-label="资产检索">
-        <label className="library-search">
-          <span>搜索</span>
-          <input
-            type="search"
-            value={search}
-            maxLength={200}
-            placeholder="搜索名称、适用场景或标签"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <div className="library-filters">
+        {onCreate && <button className="btn-primary" onClick={onCreate}>开始创作</button>}
+      </header>
+      <section className="library-tools" aria-label="作品检索">
+        <div className="library-search-row">
+          <label className="library-search">
+            <span>搜索作品</span>
+            <input type="search" value={search} maxLength={200}
+              placeholder="名称、适用场景或标签" onChange={(e) => setSearch(e.target.value)} />
+          </label>
           <label>
-            种类
-            <SelectField
-              aria-label="资产种类"
-              value={filters.kind}
-              onChange={(e) => changeFilter('kind', e.target.value)}
-            >
-              <option value="">全部种类</option>
+            作品类型
+            <SelectField aria-label="资产种类" value={filters.kind} onChange={(e) => changeFilter('kind', e.target.value)}>
+              <option value="">全部类型</option>
               <option value="full_snapshot">完整效果</option>
               <option value="portable_style">可复用风格</option>
             </SelectField>
           </label>
           <label>
-            输入基准
-            <SelectField
-              aria-label="资产输入基准"
-              value={filters.input}
-              onChange={(e) => changeFilter('input', e.target.value)}
-            >
-              <option value="">全部输入</option>
-              {['STD', 'NAT', 'VIVD', 'VLOG'].map((input) => (
-                <option key={input}>{input}</option>
-              ))}
-            </SelectField>
-          </label>
-          <label>
-            分组
-            <SelectField
-              aria-label="资产分组筛选"
-              value={filters.group}
-              onChange={(e) => changeFilter('group', e.target.value)}
-            >
-              <option value="all">全部分组</option>
-              <option value="none">未分组</option>
-              {filters.group.startsWith('group:') && !summary.groups.includes(filters.group.slice(6)) && (
-                <option value={filters.group}>{filters.group.slice(6)}（暂无资产）</option>
-              )}
-              {summary.groups.map((group) => (
-                <option key={group} value={`group:${group}`}>
-                  {group}
-                </option>
-              ))}
-            </SelectField>
-          </label>
-          <label>
             收藏
-            <SelectField
-              aria-label="资产收藏筛选"
-              value={filters.favorite}
-              onChange={(e) => changeFilter('favorite', e.target.value)}
-            >
-              <option value="">全部资产</option>
+            <SelectField aria-label="资产收藏筛选" value={filters.favorite} onChange={(e) => changeFilter('favorite', e.target.value)}>
+              <option value="">全部作品</option>
               <option value="true">已收藏</option>
               <option value="false">未收藏</option>
             </SelectField>
           </label>
           <label>
             排序
-            <SelectField
-              aria-label="资产排序"
-              value={filters.sort}
-              onChange={(e) => changeFilter('sort', e.target.value)}
-            >
+            <SelectField aria-label="资产排序" value={filters.sort} onChange={(e) => changeFilter('sort', e.target.value)}>
               <option value="created_desc">最近创建</option>
               <option value="created_asc">最早创建</option>
               <option value="updated_desc">最近更新</option>
@@ -394,194 +377,122 @@ export default function LibraryView({ onPreview, onDeleted }) {
             </SelectField>
           </label>
         </div>
+        <details className="library-more-filters">
+          <summary>更多筛选{moreFilterCount > 0 && <span> · 已选择 {moreFilterCount} 项</span>}</summary>
+          <div className="library-filters">
+            <label>
+              输入基准
+              <SelectField aria-label="资产输入基准" value={filters.input} onChange={(e) => changeFilter('input', e.target.value)}>
+                <option value="">全部输入</option>
+                {['STD', 'NAT', 'VIVD', 'VLOG'].map((input) => <option key={input}>{input}</option>)}
+              </SelectField>
+            </label>
+            <label>
+              分组
+              <SelectField aria-label="资产分组筛选" value={filters.group} onChange={(e) => changeFilter('group', e.target.value)}>
+                <option value="all">全部分组</option>
+                <option value="none">未分组</option>
+                {filters.group.startsWith('group:') && !summary.groups.includes(filters.group.slice(6)) && (
+                  <option value={filters.group}>{filters.group.slice(6)}（暂无作品）</option>
+                )}
+                {summary.groups.map((group) => <option key={group} value={`group:${group}`}>{group}</option>)}
+              </SelectField>
+            </label>
+          </div>
+        </details>
       </section>
       <div className="library-result-line">
         <span ref={resultsRef} role="status" tabIndex={-1}>
-          {loading ? '正在加载…' : `找到 ${luts.length} 个资产`}
+          {loading ? '正在加载作品…' : error ? '列表更新失败' : `共 ${summary.total} 个作品 · 当前显示 ${luts.length} 个`}
         </span>
-        <button className="btn" onClick={resetFilters}>
-          清除筛选
-        </button>
-        <button className="btn" onClick={load} disabled={loading}>
-          刷新
-        </button>
+        {activeFilters && <button className="btn btn-ghost btn-sm" onClick={resetFilters}>清除筛选</button>}
+        <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>刷新</button>
       </div>
-      {error && (
-        <div className="error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <div className="library-error" role="alert"><p>{error}</p><button className="btn" onClick={load} disabled={loading}>重新加载</button></div>}
       {notice && <p className="library-notice" role="status">{notice}</p>}
-      <div className="lib-grid">
+      {loading && luts.length === 0 && <div className="library-loading" role="status"><ActionIcon name="image" /><p>正在取回你的色彩作品…</p></div>}
+      <div className="lib-grid" aria-label="已保存的 LUT 作品" aria-busy={loading}>
         {luts.map((lut) => (
           <article key={lut.id} className="lut-card">
             <AssetCover asset={lut} thumb={thumbs[lut.id]}>
-              <span className="card-badge">
-                {lut.params.base_photo_style || 'STD'}
-              </span>
-              <button
-                className={`library-favorite ${lut.favorite ? 'is-favorite' : ''}`}
-                aria-label={`${lut.favorite ? '取消收藏' : '收藏'}「${lut.name}」`}
-                aria-pressed={lut.favorite}
-                disabled={deleting || busyIds.includes(lut.id)}
-                onClick={() => toggleFavorite(lut)}
-              >
-                {lut.favorite ? '★' : '☆'}
+              <span className="card-badge">{lut.params.base_photo_style || 'STD'} 输入</span>
+              <button className={`library-favorite ${lut.favorite ? 'is-favorite' : ''}`}
+                aria-label={`${lut.favorite ? '取消收藏' : '收藏'}「${lut.name}」`} aria-pressed={lut.favorite}
+                disabled={deleting || busyIds.includes(lut.id)} onClick={() => toggleFavorite(lut)}>
+                <ActionIcon name="star" />
               </button>
             </AssetCover>
             <div className="card-body">
               <div className="library-card-title">
-                <h3 title={lut.name}>{lut.name}</h3>
+                <h2 title={lut.name}>{lut.name}</h2>
                 <span>{kindLabel(lut)}</span>
               </div>
-              {lut.group && <p className="library-group">{lut.group}</p>}
-              <p className="card-desc library-scene">
-                {lut.description || '尚未填写适用场景'}
-              </p>
-              {lut.tags.length > 0 && (
-                <div className="library-tags">
-                  {lut.tags.map((tag) => (
-                    <span key={tag}>{tag}</span>
-                  ))}
-                </div>
-              )}
+              <p className="card-desc library-scene">{lut.description || (lut.kind === 'portable_style' ? '在兼容输入上追加这份色彩风格' : '重现保存时的完整调色效果')}</p>
+              <div className="library-tags">
+                {lut.group && <span className="library-group">{lut.group}</span>}
+                {lut.tags.map((tag) => <span key={tag}>{tag}</span>)}
+              </div>
+              {lut.preview_error && <p className="library-preview-warning">外部 LUT 预览暂不可用：{lut.preview_error}</p>}
               <div className="library-card-footer">
-                <small className="library-updated">
-                  更新于 {dateLabel(lut.updated_at)}
-                </small>
+                <small className="library-updated">更新于 {dateLabel(lut.updated_at)}</small>
                 <div className="card-actions">
-                  <button className="btn-primary" disabled={deleting} onClick={() => preview(lut)}>
-                    {lut.kind === 'portable_style'
-                      ? '预览并追加风格'
-                      : '预览并载入完整效果'}
+                  <button className="btn btn-soft" disabled={deleting} onClick={() => preview(lut)}>
+                    {lut.kind === 'portable_style' ? '试用风格' : '试用完整效果'}
                   </button>
-                  <button className="btn" disabled={deleting} onClick={() => setDetail(lut)}>
-                    详情与导出
-                  </button>
-                  <button className="btn" disabled={deleting || busyIds.includes(lut.id)} onClick={() => openEdit(lut)}>
-                    编辑信息
-                  </button>
-                  <button className="btn library-delete-entry" aria-label={`删除「${lut.name}」`}
-                    disabled={deleting || busyIds.includes(lut.id)} onClick={() => openDelete(lut)}>
-                    删除
-                  </button>
+                  <button className="btn btn-ghost" disabled={deleting} onClick={() => setDetail(lut)}>详情</button>
+                  <ActionMenu label={`管理「${lut.name}」`} disabled={deleting || busyIds.includes(lut.id)}
+                    trigger={<button className="btn btn-ghost btn-icon" aria-label={`管理「${lut.name}」`}><ActionIcon name="more" /></button>}
+                    items={assetMenuItems(lut)} />
                 </div>
               </div>
             </div>
           </article>
         ))}
       </div>
-      {!loading && !error && luts.length === 0 && (
-        <div className="library-empty">
-          <h2>
-            {summary.total === 0
-              ? '你的色彩收藏，从这里开始'
-              : '没有匹配的资产'}
-          </h2>
-          <p>
-            {summary.total === 0
-              ? '在「生成」页面的调色项目中保存完整效果或可复用风格，它们会出现在这里。'
-              : '试试其他关键词，或清除种类、输入与收藏筛选。'}
-          </p>
-          {summary.total > 0 && (
-            <button className="btn-primary" onClick={resetFilters}>
-              查看全部资产
-            </button>
-          )}
-        </div>
-      )}
+      {!loading && !error && luts.length === 0 && <div className="library-empty">
+        <ActionIcon name="image" />
+        <h2>{summary.total === 0 ? '保存你的第一份色彩作品' : '没有找到匹配的作品'}</h2>
+        <p>{summary.total === 0
+          ? '在「开始创作」中调出喜欢的效果，再保存到我的 LUT。照片与调色项目草稿会单独保留。'
+          : '换个关键词，或清除筛选看看其他作品。'}</p>
+        {summary.total > 0 ? <button className="btn-primary" onClick={resetFilters}>查看全部作品</button>
+          : onCreate && <button className="btn-primary" onClick={onCreate}>开始创作</button>}
+      </div>}
       {detail && !deleteTarget && (
-        <LibraryModal label="资产详情" onClose={() => setDetail(null)} busy={downloading}>
-          <div className="section-heading">
-            <h2>{detail.name}</h2>
-            <button className="btn" disabled={downloading} onClick={() => setDetail(null)}>
-              关闭
-            </button>
+        <LibraryModal label="作品详情" onClose={() => setDetail(null)} busy={downloading}>
+          <div className="section-heading library-modal-heading">
+            <div><p className="library-eyebrow">{kindLabel(detail)}</p><h2>{detail.name}</h2></div>
+            <button className="btn btn-ghost btn-icon" aria-label="关闭作品详情" disabled={downloading} onClick={() => setDetail(null)}><ActionIcon name="close" /></button>
           </div>
-          <AssetCover
-            asset={detail}
-            thumb={
-              detail.cover_id === 'engine' && !detail.preview_error ? makeThumb(detail.params) : null
-            }
-          />
+          <AssetCover asset={detail} thumb={detail.cover_id === 'engine' && !detail.preview_error ? makeThumb(detail.params) : null} />
+          <div className="library-detail-scene"><h3>适用场景</h3><p>{detail.description || '尚未填写适用场景'}</p></div>
           <dl className="library-detail">
-            <div>
-              <dt>种类</dt>
-              <dd>
-                {kindLabel(detail)} ·{' '}
-                {detail.kind === 'portable_style' ? '相对追加' : '替换参数'}
-              </dd>
-            </div>
-            <div>
-              <dt>输入基准</dt>
-              <dd>
-                {detail.params.base_photo_style || 'STD'} ·{' '}
-                {detail.input_contract?.output_encoding ||
-                  (detail.params.base_photo_style === 'VLOG'
-                    ? 'Rec709'
-                    : 'sRGB')}
-              </dd>
-            </div>
-            <div>
-              <dt>分组</dt>
-              <dd>{detail.group || '未分组'}</dd>
-            </div>
-            <div>
-              <dt>标签</dt>
-              <dd>{detail.tags.join(' · ') || '暂无标签'}</dd>
-            </div>
-            <div>
-              <dt>收藏</dt>
-              <dd>{detail.favorite ? '已收藏' : '未收藏'}</dd>
-            </div>
-            <div>
-              <dt>创建时间</dt>
-              <dd>{dateLabel(detail.created_at)}</dd>
-            </div>
-            <div>
-              <dt>更新时间</dt>
-              <dd>{dateLabel(detail.updated_at)}</dd>
-            </div>
+            <div><dt>使用方式</dt><dd>{detail.kind === 'portable_style' ? '追加风格，保留当前单张校正' : '载入保存的完整参数'}</dd></div>
+            <div><dt>输入条件</dt><dd>{detail.params.base_photo_style || 'STD'} 输入 → {detail.input_contract?.output_encoding || (detail.params.base_photo_style === 'VLOG' ? 'Rec709' : 'sRGB')} 输出</dd></div>
+            <div><dt>分组</dt><dd>{detail.group || '未分组'}</dd></div>
+            <div><dt>标签</dt><dd>{detail.tags.join(' · ') || '暂无标签'}</dd></div>
+            <div><dt>收藏</dt><dd>{detail.favorite ? '已收藏' : '未收藏'}</dd></div>
+            <div><dt>创建时间</dt><dd>{dateLabel(detail.created_at)}</dd></div>
+            <div><dt>更新时间</dt><dd>{dateLabel(detail.updated_at)}</dd></div>
           </dl>
-          <div className="library-detail-scene">
-            <h3>适用场景</h3>
-            <p>{detail.description || '尚未填写适用场景'}</p>
-          </div>
-          <p className="workspace-note">
-            {detail.kind === 'portable_style'
-              ? '库内导出将风格应用于中性参数。叠加校正后的完整效果，请在调色项目中导出。'
-              : '库内导出使用已保存的完整参数。'}{' '}
-            载入前会显示候选预览。
-          </p>
+          <p className="workspace-note">{detail.kind === 'portable_style'
+            ? '库内下载将风格应用于中性参数；叠加校正后的完整效果，请在调色项目中导出。'
+            : '库内下载使用已保存的完整参数。'} 试用会先显示候选预览，确认后才改变调色项目。</p>
+          {detail.preview_error && <p className="library-preview-warning">外部 LUT 预览暂不可用：{detail.preview_error}</p>}
           {downloadError && <p className="error" role="alert">{downloadError}</p>}
-          {downloading && <p role="status">正在导出，请稍候…</p>}
-          <div className="library-modal-actions">
-            <button className="btn-primary" disabled={downloading} onClick={() => preview(detail)}>
-              预览并载入
-            </button>
-            <button
-              className="btn"
-              disabled={downloading}
-              onClick={() => downloadAsset(detail, 'camera')}
-            >
-              导出机内版
-            </button>
-            <button
-              className="btn"
-              disabled={downloading}
-              onClick={() => downloadAsset(detail, 'software')}
-            >
-              导出后期版
-            </button>
-            <button className="btn" disabled={downloading} onClick={() => openEdit(detail)}>
-              编辑信息
-            </button>
-            <button className="btn" disabled={downloading} onClick={() => openRevisions(detail)}>
-              调色修订历史
-            </button>
-            <button className="btn-danger" disabled={downloading || busyIds.includes(detail.id)} onClick={() => openDelete(detail)}>
-              删除资产
-            </button>
+          {downloadNotice && <p className="library-notice" role="status">{downloadNotice}</p>}
+          {downloading && <p role="status">正在下载到电脑，请稍候…</p>}
+          <div className="library-modal-actions library-detail-actions">
+            <button className="btn-primary" disabled={downloading} onClick={() => preview(detail)}>{detail.kind === 'portable_style' ? '预览并追加风格' : '预览并载入完整效果'}</button>
+            <ActionMenu label="下载 LUT" disabled={downloading}
+              trigger={<button className="btn">下载 .cube <span aria-hidden="true">⌄</span></button>}
+              items={[
+                { id: 'camera', label: '下载相机版', description: '用于支持 LUT 的 Lumix 相机', onSelect: () => downloadAsset(detail, 'camera') },
+                { id: 'software', label: '下载后期版', description: '用于兼容 .cube 的后期软件', onSelect: () => downloadAsset(detail, 'software') },
+              ]} />
+            <ActionMenu label="管理作品" disabled={downloading || busyIds.includes(detail.id)}
+              trigger={<button className="btn btn-ghost">管理作品 <span aria-hidden="true">⌄</span></button>}
+              items={assetMenuItems(detail)} />
           </div>
         </LibraryModal>
       )}
@@ -600,7 +511,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
           {deleteError && <p className="error" role="alert">{deleteError}</p>}
           {deleting && <p className="library-delete-progress" role="status">正在删除，请稍候…</p>}
           <div className="library-modal-actions library-delete-actions">
-            <button ref={deleteCancelRef} className="btn" disabled={deleting} onClick={closeDelete}>取消</button>
+            <button ref={deleteCancelRef} className="btn btn-ghost" disabled={deleting} onClick={closeDelete}>取消</button>
             <button className="btn-danger library-delete-confirm" disabled={deleting} onClick={remove}>
               {deleting ? '正在删除…' : '确认删除'}
             </button>
@@ -610,7 +521,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
       {editing && (
         <LibraryModal
           form
-          label="编辑资产信息"
+          label="编辑作品信息"
           className="library-editor"
           onSubmit={saveEdit}
           onClose={() => setEditing(null)}
@@ -618,10 +529,10 @@ export default function LibraryView({ onPreview, onDeleted }) {
           initialFocusRef={editingNameRef}
         >
           <div className="section-heading">
-            <h2>编辑资产信息</h2>
+            <h2>编辑作品信息</h2>
             <button
               type="button"
-              className="btn"
+              className="btn btn-ghost"
               disabled={saving}
               onClick={() => setEditing(null)}
             >
@@ -718,18 +629,21 @@ export default function LibraryView({ onPreview, onDeleted }) {
       )}
       {revisionAsset && (
         <LibraryModal
-          label="资产修订历史"
-          onClose={() => setRevisionAsset(null)}
+          label="作品修订历史"
+          onClose={closeRevisions}
         >
           <div className="section-heading">
             <h2>「{revisionAsset.name}」的调色修订</h2>
-            <button className="btn" onClick={() => setRevisionAsset(null)}>
+            <button className="btn btn-ghost" onClick={closeRevisions}>
               关闭
             </button>
           </div>
           <p className="workspace-note">
             查看历史修订不会覆盖资产或当前草稿；载入前会显示候选预览。信息编辑不产生调色修订。
           </p>
+          {revisionLoading && <p role="status" className="library-revision-status">正在加载调色修订…</p>}
+          {revisionError && <div className="library-error" role="alert"><p>{revisionError}</p><button className="btn" onClick={() => openRevisions(revisionAsset)}>重试</button></div>}
+          {!revisionLoading && !revisionError && revisions.length === 0 && <p className="library-revision-status">暂无调色修订。</p>}
           {revisions.map((revision) => (
             <div className="version-row" key={revision.revision_id}>
               <div>
@@ -740,7 +654,7 @@ export default function LibraryView({ onPreview, onDeleted }) {
                 </small>
               </div>
               <button
-                className="btn"
+                className="btn btn-soft"
                 onClick={() =>
                   preview({
                     ...revision,

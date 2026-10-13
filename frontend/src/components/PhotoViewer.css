@@ -93,6 +93,8 @@
 .photo-viewer-adjustments .draft-status { margin: 0; font-size: 12px; }
 .photo-viewer-adjustments .draft-error { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .photo-adjustment-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 0; border-radius: 8px; background: var(--panel2); }
+.photo-adjustment-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.photo-adjustment-navigation .photo-adjustment-tabs { flex: 1; }
 .photo-adjustment-tabs .ui-tabs-trigger { min-width: 0; border-radius: 6px; }
 .photo-adjustment-tabs .ui-tabs-trigger[data-state='active'] { background: var(--panel); box-shadow: 0 1px 2px var(--shadow); }
 .photo-viewer-adjustments .photo-adjustments .params { min-width: 0; margin: 0; padding: 0; border: 0; }

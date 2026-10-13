@@ -57,8 +57,9 @@ export default function App() {
 
   return <>
     {view === 'landing' && <LandingView onEnter={() => setView('generate')} />}
-    {view !== 'landing' && checking && <FeatureStatus title="登录状态" />}
-    {view !== 'landing' && !checking && !user && <AuthView onAuthed={setUser} />}
+    {view !== 'landing' && checking && <FeatureStatus title="登录状态" onClose={() => setView('landing')} />}
+    {view !== 'landing' && !checking && !user && <AuthView onAuthed={setUser} onBack={() => setView('landing')}
+      destination={view === 'library' ? '我的 LUT' : '创作'} loadingClose={() => setView('landing')} />}
     {user && (view !== 'landing' || studioUser === user) &&
       <div hidden={view === 'landing'}>
         <StudioView key={user} view={view} onViewChange={setView} user={user}

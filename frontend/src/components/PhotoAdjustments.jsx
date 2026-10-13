@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import ParameterPanel from './ParameterPanel.jsx'
 import CurveEditor from './CurveEditor.jsx'
-import ParameterHelp from './ParameterHelp.jsx'
+import ParameterHelp, { BeginnerGuideHelp } from './ParameterHelp.jsx'
 import RangeField, { NumberField } from './ui/RangeField.jsx'
 import ProtectionButton from './ui/ProtectionButton.jsx'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from './ui/Tabs.jsx'
@@ -36,10 +36,13 @@ const PhotoAdjustments = forwardRef(function PhotoAdjustments({ editor, disabled
       {resourceError && <p>请关闭查看器后，在外部 LUT 区域重新选择并载入资源。</p>}
     </div>}
     <TabsRoot value={tab} onValueChange={selectTab}>
+    <div className="photo-adjustment-navigation">
     <TabsList className="photo-adjustment-tabs" aria-label="放大调色工具">
-      <TabsTrigger value="parameters">参数调整</TabsTrigger>
+      <TabsTrigger value="parameters">手动调整</TabsTrigger>
       <TabsTrigger value="curves">自由曲线</TabsTrigger>
     </TabsList>
+    <div hidden={tab !== 'parameters'}><BeginnerGuideHelp /></div>
+    </div>
     <TabsContent value="parameters" forceMount asChild>
     <div>
     <ParameterPanel allParameters={allParameters} onPresentationChange={value => { finishPendingEdit(); onPresentationChange?.(value) }}

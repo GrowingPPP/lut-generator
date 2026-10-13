@@ -42,13 +42,15 @@ export default function ParameterHelp({ parameter }) {
   return <ParameterPopover parameter={parameter} />
 }
 
-export function BeginnerGuide({ compact = false }) {
-  return <details className="beginner-guide">
-    <summary><span><strong>新手创作指南</strong>{!compact && <small>从看懂照片到形成自己的风格</small>}</span><span className="beginner-guide-arrow" aria-hidden="true">▾</span></summary>
+export function BeginnerGuideHelp() {
+  return <HelpPopover hoverable title="新手创作指南" className="beginner-guide-popover"
+    trigger={<button type="button" className="beginner-guide-trigger" aria-label="查看新手创作指南">
+      <span className="parameter-help-symbol" aria-hidden="true">?</span><span>新手指南</span>
+    </button>}>
     <div className="beginner-guide-content">
       <p>每次只改一项，小幅调整，再看原图对比。没有唯一正确的效果，先决定你想让照片表达什么。</p>
       <ol>{BEGINNER_GUIDE.map(item => <li key={item.title}><strong>{item.title}</strong><p>{item.body}</p></li>)}</ol>
       <p className="parameter-help-note">点击参数旁的「？」可查看使用说明，不影响照片。想试大胆一点时，先保存命名版本；不喜欢就撤销，参数保护可保留你已经满意的数值。</p>
     </div>
-  </details>
+  </HelpPopover>
 }

@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ThemePicker from './components/ThemePicker.jsx'
 import './Landing.css'
 
-// 首屏展示的样张与用它演示的影调。参数刻意选成产品 UI 里也能手调出来的值,
-// 且全部落在 App.jsx PARAM_GROUPS 的 min/max 区间内 —— 落地页演示的效果
-// 与用户在生成页能复现的效果是同一个引擎、同一套取值范围。
+// 公开样张使用产品引擎渲染；示例参数也可在创作页中调整。
 const HERO_PHOTO = '/landing/hero.jpg'
 const PREVIEW_PHOTO = '/landing/preview.jpg'
 
@@ -50,18 +48,23 @@ const GRADE_WIDTH = 1280
 const STEPS = [
   {
     no: '01',
-    title: '放入自己的照片',
-    body: '上传样张并确认拍摄时的输入风格，让后续预览和调整有可靠的起点。',
+    title: '选照片',
+    body: '上传照片、确认拍摄输入，让预览有可靠的起点。',
   },
   {
     no: '02',
-    title: '描述并调整影调',
-    body: '用语言表达想法，让 AI 提议参数；也可以从参考图出发，或直接手动调色。',
+    title: '定风格',
+    body: '描述你的想法，优化照片，或从喜欢的参考色彩出发。',
   },
   {
     no: '03',
-    title: '查看细节，保存作品',
-    body: '放大对比，微调到满意，再保存可复用的 LUT，或导出调整后的照片。',
+    title: '调效果',
+    body: '放大查看，边看边微调；参数说明帮助你理解每次变化。',
+  },
+  {
+    no: '04',
+    title: '保存作品',
+    body: '保存可复用的 LUT，或把当前效果导出为一张照片。',
   },
 ]
 
@@ -72,11 +75,11 @@ const FAQ = [
   },
   {
     q: '我的松下相机支持 Real-Time LUT 吗？',
-    a: '是否支持机内应用、可用的 Photo Style 和导入方式由机型与固件决定。生成页的「输入与相机使用引导」提供导入参考；使用前请核对对应相机的官方说明书。',
+    a: '是否支持机内应用、可用的 Photo Style 和导入方式由机型与固件决定。创作页的「输入与相机使用引导」提供导入参考；使用前请核对对应相机的官方说明书。',
   },
   {
     q: '需要登录才能使用吗？',
-    a: '生成与管理需要登录。登录后可以创建调色项目、保存自己的 LUT、管理版本，并继续之前的调色。',
+    a: '创作与管理需要登录。登录后可以创建调色项目、保存自己的 LUT、管理版本，并继续之前的调色。',
   },
   {
     q: '不理解调色参数，也可以开始吗？',
@@ -98,6 +101,7 @@ function useGradedSample(src, look) {
         const img = new Image()
         img.src = src
         await img.decode()
+        if (!alive) return
 
         const scale = Math.min(1, GRADE_WIDTH / img.naturalWidth)
         const w = Math.max(1, Math.round(img.naturalWidth * scale))
@@ -203,7 +207,7 @@ function BeforeAfter({ src, gradedSrc, beforeLabel, afterLabel }) {
 }
 
 /**
- * 落地页。位于登录门之前:未登录访客先看到它,点 CTA 才进入生成流程。
+ * 未登录访客先看到落地页，创作入口进入认证后保留目标页面。
  * 所有文案只陈述产品真实能力,不含编造的用户数/评分/性能承诺。
  */
 export default function LandingView({ onEnter }) {
@@ -226,7 +230,7 @@ export default function LandingView({ onEnter }) {
           </div>
           <div className="landing-nav-actions">
             <ThemePicker />
-            <button className="btn btn-primary" onClick={onEnter}>开始生成</button>
+            <button className="btn btn-ghost" onClick={onEnter}>进入创作</button>
           </div>
         </div>
       </nav>
@@ -234,22 +238,22 @@ export default function LandingView({ onEnter }) {
       <main className="landing-main">
         <section className="landing-hero" aria-labelledby="landing-title">
           <div className="landing-hero-copy">
-            <p className="landing-eyebrow">让影调成为你的表达</p>
+            <p className="landing-eyebrow">你的照片，你的色彩</p>
             <h1 id="landing-title">
-              把你的灵感，<br />
-              调成一款 <span className="landing-accent">LUT</span>。
+              从一张照片，<br />
+              创造自己的<span className="landing-accent">影调</span>。
             </h1>
             <p className="landing-lede">
-              从一张照片开始，用语言描述想要的色彩，边看细节边微调。
+              用语言描述想要的色彩，跟着画面一步步调整。
               把喜欢的效果保存成可复用的 LUT，或直接导出调整后的照片。
             </p>
             <div className="landing-hero-actions">
               <button className="btn btn-primary landing-btn-lg" onClick={onEnter}>
-                开始制作我的 LUT
+                开始创作
               </button>
-              <a className="landing-textlink" href="#features">看看可以做什么</a>
+              <a className="landing-textlink" href="#how-it-works">了解创作流程</a>
             </div>
-            <p className="landing-hero-meta">AI 创作 · 手动调色 · Lumix 与后期 .cube</p>
+            <p className="landing-hero-meta">AI 帮你起步，参数与曲线把细节留在你手中。</p>
           </div>
           <figure className="landing-hero-visual">
             <BeforeAfter
@@ -258,7 +262,7 @@ export default function LandingView({ onEnter }) {
               beforeLabel="原图"
               afterLabel="青橙风格 · LUT 后"
             />
-            <figcaption>拖动分界线，查看同一张照片的调色变化。</figcaption>
+            <figcaption><span>青橙风格 · 真实 LUT 预览</span><span>拖动分界线查看变化</span></figcaption>
           </figure>
         </section>
 
@@ -266,9 +270,9 @@ export default function LandingView({ onEnter }) {
           <div className="landing-wrap">
             <div className="landing-head">
               <p className="landing-eyebrow">创作流程</p>
-              <h2 id="landing-process-title">从照片到影调，循着画面慢慢调整</h2>
+              <h2 id="landing-process-title">四步，把想法变成作品</h2>
             </div>
-            <div className="landing-grid-3 landing-grid-steps">
+            <div className="landing-grid-steps">
               {STEPS.map((s) => (
                 <article className="landing-step" key={s.no}>
                   <span className="landing-step-no">{s.no}</span>
@@ -283,8 +287,8 @@ export default function LandingView({ onEnter }) {
         <section id="features" className="landing-section" aria-labelledby="landing-features-title">
           <div className="landing-head">
             <p className="landing-eyebrow">创作工具</p>
-            <h2 id="landing-features-title">灵感有起点，调整有空间</h2>
-            <p className="landing-sub">让 AI 帮你起步，也把每一处细节留在自己手中。</p>
+            <h2 id="landing-features-title">先找到感觉，再慢慢精调</h2>
+            <p className="landing-sub">从第一句想法到最后一处细节，始终围绕你的照片。</p>
           </div>
           <div className="landing-features">
             <article className="landing-feature">
@@ -293,7 +297,7 @@ export default function LandingView({ onEnter }) {
                 <h3>说出想法，看见具体的调整</h3>
                 <p>
                   用「偏暖的复古胶片感」表达想法，再通过对话修改。
-                  也可以让 AI 先分析样张、提议调整参数，查看修改说明后继续微调或撤销。
+                  也可以优化照片或匹配参考色彩；查看具体的参数变化，继续微调或撤销。
                 </p>
               </div>
               <div className="landing-feature-mock">
@@ -414,7 +418,7 @@ export default function LandingView({ onEnter }) {
         <section id="generate" className="landing-cta" aria-labelledby="landing-cta-title">
           <div className="landing-cta-inner">
             <div><h2 id="landing-cta-title">从一张照片，开始你的下一款影调</h2><p className="landing-sub">把想法交给画面，把细节留给自己。</p></div>
-            <button className="btn btn-primary landing-btn-lg" onClick={onEnter}>开始生成我的第一款 LUT</button>
+            <button className="btn btn-secondary landing-btn-lg" onClick={onEnter}>进入创作</button>
           </div>
         </section>
       </main>
